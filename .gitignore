@@ -23,3 +23,6 @@ python/pyplotrs/*.pyd
 
 # Generated example figures (regenerate by running scripts in examples/).
 /examples/output/
+
+# Internal planning / design docs (kept locally, not part of the package).
+/design/
