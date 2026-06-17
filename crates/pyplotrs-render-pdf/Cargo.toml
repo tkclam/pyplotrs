@@ -1,0 +1,9 @@
+[package]
+name = "pyplotrs-render-pdf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pyplotrs-core = { path = "../pyplotrs-core" }
+krilla = "0.8"

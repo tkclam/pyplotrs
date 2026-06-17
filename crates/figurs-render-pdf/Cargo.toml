@@ -1,9 +1,0 @@
-[package]
-name = "figurs-render-pdf"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-
-[dependencies]
-figurs-core = { path = "../figurs-core" }
-krilla = "0.8"

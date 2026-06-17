@@ -1,0 +1,15 @@
+[package]
+name = "pyplotrs-math"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pyplotrs-core = { path = "../pyplotrs-core" }
+pyplotrs-text = { path = "../pyplotrs-text" }
+# ttf-parser carries a full OpenType MATH table parser (constants, per-glyph
+# italic corrections / kerning, and the glyph variants/assembly used for
+# stretchy radicals and delimiters). The `opentype-layout` feature (on by
+# default) gates the `math` module. It is already in the build tree via
+# rustybuzz, so this adds no new compiled dependency.
+ttf-parser = "0.25"

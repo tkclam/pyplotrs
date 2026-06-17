@@ -125,76 +125,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "figurs-core"
-version = "0.0.1"
-dependencies = [
- "kurbo",
-]
-
-[[package]]
-name = "figurs-layout"
-version = "0.0.1"
-
-[[package]]
-name = "figurs-math"
-version = "0.0.1"
-dependencies = [
- "figurs-core",
- "figurs-text",
- "ttf-parser",
-]
-
-[[package]]
-name = "figurs-py"
-version = "0.0.1"
-dependencies = [
- "figurs-core",
- "figurs-layout",
- "figurs-math",
- "figurs-render-pdf",
- "figurs-render-raster",
- "figurs-render-svg",
- "figurs-text",
- "pyo3",
-]
-
-[[package]]
-name = "figurs-render-pdf"
-version = "0.0.1"
-dependencies = [
- "figurs-core",
- "krilla",
-]
-
-[[package]]
-name = "figurs-render-raster"
-version = "0.0.1"
-dependencies = [
- "figurs-core",
- "gif",
- "png",
- "skrifa 0.43.2",
- "tiny-skia",
-]
-
-[[package]]
-name = "figurs-render-svg"
-version = "0.0.1"
-dependencies = [
- "base64",
- "figurs-core",
- "png",
-]
-
-[[package]]
-name = "figurs-text"
-version = "0.0.1"
-dependencies = [
- "figurs-core",
- "rustybuzz",
-]
-
-[[package]]
 name = "flate2"
 version = "1.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -229,6 +159,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81bf886368962a7d8456f136073ed33ed1b0770c690d2063731bb6a776e99f33"
 dependencies = [
  "bytemuck",
+]
+
+[[package]]
+name = "fontconfig-parser"
+version = "0.5.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbc773e24e02d4ddd8395fd30dc147524273a83e54e0f312d986ea30de5f5646"
+dependencies = [
+ "roxmltree",
+]
+
+[[package]]
+name = "fontdb"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "457e789b3d1202543297a350643cf459f836cade38934e7a4cf6a39e7cde2905"
+dependencies = [
+ "fontconfig-parser",
+ "log",
+ "memmap2",
+ "slotmap",
+ "tinyvec",
+ "ttf-parser",
 ]
 
 [[package]]
@@ -348,6 +301,15 @@ name = "memchr"
 version = "2.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
+
+[[package]]
+name = "memmap2"
+version = "0.9.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "714098028fe011992e1c3962653c96b2d578c4b4bce9036e15ff220319b1e0e3"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "miniz_oxide"
@@ -482,6 +444,77 @@ dependencies = [
 ]
 
 [[package]]
+name = "pyplotrs-core"
+version = "0.0.1"
+dependencies = [
+ "kurbo",
+]
+
+[[package]]
+name = "pyplotrs-layout"
+version = "0.0.1"
+
+[[package]]
+name = "pyplotrs-math"
+version = "0.0.1"
+dependencies = [
+ "pyplotrs-core",
+ "pyplotrs-text",
+ "ttf-parser",
+]
+
+[[package]]
+name = "pyplotrs-py"
+version = "0.0.1"
+dependencies = [
+ "fontdb",
+ "pyo3",
+ "pyplotrs-core",
+ "pyplotrs-layout",
+ "pyplotrs-math",
+ "pyplotrs-render-pdf",
+ "pyplotrs-render-raster",
+ "pyplotrs-render-svg",
+ "pyplotrs-text",
+]
+
+[[package]]
+name = "pyplotrs-render-pdf"
+version = "0.0.1"
+dependencies = [
+ "krilla",
+ "pyplotrs-core",
+]
+
+[[package]]
+name = "pyplotrs-render-raster"
+version = "0.0.1"
+dependencies = [
+ "gif",
+ "png",
+ "pyplotrs-core",
+ "skrifa 0.43.2",
+ "tiny-skia",
+]
+
+[[package]]
+name = "pyplotrs-render-svg"
+version = "0.0.1"
+dependencies = [
+ "base64",
+ "png",
+ "pyplotrs-core",
+]
+
+[[package]]
+name = "pyplotrs-text"
+version = "0.0.1"
+dependencies = [
+ "pyplotrs-core",
+ "rustybuzz",
+]
+
+[[package]]
 name = "quick-error"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -515,6 +548,12 @@ dependencies = [
  "bytemuck",
  "font-types 0.12.0",
 ]
+
+[[package]]
+name = "roxmltree"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "rustc-hash"
@@ -576,6 +615,15 @@ checksum = "4cbe997d0f2480442d727488fbe2150779114cbe480ecdbadef58b33e0318ffb"
 dependencies = [
  "bytemuck",
  "read-fonts 0.40.1",
+]
+
+[[package]]
+name = "slotmap"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdd58c3c93c3d278ca835519292445cb4b0d4dc59ccfdf7ceadaab3f8aeb4038"
+dependencies = [
+ "version_check",
 ]
 
 [[package]]
@@ -663,6 +711,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tinyvec"
+version = "1.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e61e67053d25a4e82c844e8424039d9745781b3fc4f32b8d55ed50f5f667ef3"
+dependencies = [
+ "tinyvec_macros",
+]
+
+[[package]]
+name = "tinyvec_macros"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
+
+[[package]]
 name = "ttf-parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -700,6 +763,12 @@ name = "unicode-script"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "383ad40bb927465ec0ce7720e033cb4ca06912855fc35db31b5755d0de75b1ee"
+
+[[package]]
+name = "version_check"
+version = "0.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "weezl"

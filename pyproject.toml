@@ -3,27 +3,53 @@ requires = ["maturin>=1.7,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "figurs"
+name = "pyplotrs"
 version = "0.0.1"
-description = "A blazingly fast, publication-quality plotting library"
+description = "A blazingly fast, publication-quality plotting library for Python, powered by Rust"
+readme = "README.md"
 requires-python = ">=3.9"
-# Bundled fonts (Inter, STIX Two Math) ship under the SIL OFL; the colormap
-# tables are CC0. These travel with every wheel as required by the OFL.
+license = "MIT"
+# Bundled fonts (Liberation Sans, STIX Two Math) ship under the SIL OFL; the
+# colormap tables are CC0. These travel with every wheel as required by the OFL.
 license-files = [
-    "assets/fonts/Inter-OFL.txt",
+    "LICENSE",
+    "assets/fonts/LiberationSans-OFL.txt",
     "assets/fonts/STIXTwoMath-OFL.txt",
     "assets/fonts/NOTICE.md",
-    "THIRD_PARTY_LICENSES.md",
+]
+authors = [{ name = "The pyplotrs authors" }]
+keywords = [
+    "plotting", "visualization", "graphics", "matplotlib", "charts",
+    "pdf", "svg", "publication", "figures", "rust",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Topic :: Multimedia :: Graphics",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
 ]
 
+[project.urls]
+Homepage = "https://github.com/tkclam/pyplotrs"
+Documentation = "https://tkclam.github.io/pyplotrs/"
+Repository = "https://github.com/tkclam/pyplotrs"
+Issues = "https://github.com/tkclam/pyplotrs/issues"
+
 [project.optional-dependencies]
-# Benchmark-only: `benchmarks/benchmark.py` times figurs head-to-head against matplotlib.
-# Not a runtime dependency of figurs itself. Install with `pip install -e .[bench]`.
+# Documentation build: `mkdocs build` renders the site under docs/.
+docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
+# Benchmark-only: `benchmarks/benchmark.py` times pyplotrs head-to-head against matplotlib.
+# Not a runtime dependency of pyplotrs itself. Install with `pip install -e .[bench]`.
 bench = ["matplotlib>=3.8", "numpy>=1.24"]
 
 [tool.maturin]
-module-name = "figurs._figurs_core"
-manifest-path = "crates/figurs-py/Cargo.toml"
+module-name = "pyplotrs._pyplotrs_core"
+manifest-path = "crates/pyplotrs-py/Cargo.toml"
 python-source = "python"
 # The bundled fonts are compiled into the extension via `include_bytes!`, so
 # they must be present in the source distribution for a from-source build.
@@ -32,5 +58,5 @@ python-source = "python"
 # is listed here so the source distribution carries it too.
 include = [
     { path = "assets/fonts/*.ttf", format = "sdist" },
-    { path = "python/figurs/_vendor/*.js", format = "sdist" },
+    { path = "python/pyplotrs/_vendor/*.js", format = "sdist" },
 ]

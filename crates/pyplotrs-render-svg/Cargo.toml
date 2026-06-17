@@ -1,0 +1,10 @@
+[package]
+name = "pyplotrs-render-svg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pyplotrs-core = { path = "../pyplotrs-core" }
+base64 = "0.22"
+png = "0.18"
