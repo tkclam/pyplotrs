@@ -1,0 +1,106 @@
+site_name: pyplotrs
+site_description: A blazingly fast, publication-quality plotting library for Python, powered by Rust.
+site_url: https://tkclam.github.io/pyplotrs/
+repo_url: https://github.com/tkclam/pyplotrs
+repo_name: tkclam/pyplotrs
+copyright: Copyright &copy; 2026 The pyplotrs authors
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+  icon:
+    repo: fontawesome/brands/github
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Quickstart: quickstart.md
+  - User guide:
+      - Figures & axes: guide/figure-and-axes.md
+      - Plot types: guide/plot-types.md
+      - Styling & themes: guide/styling-and-themes.md
+      - Colormaps & images: guide/colormaps-and-images.md
+      - Math & annotations: guide/math-and-annotations.md
+      - 3D plots: guide/3d.md
+      - Grammar of graphics: guide/grammar-of-graphics.md
+      - Animation: guide/animation.md
+      - Saving figures: guide/saving.md
+  - Gallery: gallery/index.md
+  - API reference:
+      - Figure & Axes: api/figure.md
+      - Colormaps: api/colormaps.md
+      - Themes: api/themes.md
+      - Grammar of graphics: api/gg.md
+      - Animation: api/animation.md
+  - About:
+      - License: about/license.md
+      - Changelog: about/changelog.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [python]
+          options:
+            docstring_style: google
+            show_root_heading: true
+            show_root_full_path: false
+            show_source: true
+            show_signature_annotations: true
+            separate_signature: true
+            members_order: source
+            heading_level: 2
+            merge_init_into_class: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - footnotes
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/tkclam/pyplotrs
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/pyplotrs/
