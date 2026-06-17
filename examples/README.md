@@ -1,20 +1,38 @@
-# figurs examples
+# Examples
 
-Runnable example scripts. Each is self-contained and writes its figures into
-[`output/`](output/) regardless of the directory you run it from, so the scripts
-and their generated artifacts stay separate.
+Each script here is self-contained and runnable, and doubles as the source for a
+[documentation gallery](../docs/gallery/index.md) entry. Running a script writes
+its figure as a PNG into the current directory:
 
-```sh
-.venv/bin/python examples/hello.py        # minimal first plot (pdf/svg/png/html)
-.venv/bin/python examples/phase1a.py      # multi-axes grid, ticks, shared axes
-.venv/bin/python examples/phase1b.py      # core 2D marks + auto-legends
-.venv/bin/python examples/phase1c.py      # imshow heatmaps + colorbars
-.venv/bin/python examples/phase1d.py      # basic 3D (surface, line, scatter)
-.venv/bin/python examples/phase1e.py      # mathtext + MathJax .html path
-.venv/bin/python examples/phase2.py       # themes, annotations, tagged PDF, gg layer
-.venv/bin/python examples/phase3.py       # animated GIF/APNG + interactive 3D .html
-.venv/bin/python examples/math_check.py   # math rendering across every format
+```bash
+python examples/line.py        # writes line.png in your cwd
 ```
 
-`output/` holds only generated artifacts — delete it any time and re-run a script
-to regenerate. Performance benchmarks live in [`../benchmarks/`](../benchmarks).
+To regenerate every gallery image into `docs/gallery/images/` (what the docs
+site displays), run them with that directory as the working directory:
+
+```bash
+cd docs/gallery/images
+for f in ../../../examples/*.py; do python "$f"; done
+```
+
+| Script | Shows |
+|---|---|
+| `line.py` | Line plot with multiple series and a legend |
+| `scatter.py` | Scatter plot with marker styling |
+| `bar.py` | Vertical bar chart |
+| `histogram.py` | Histogram with density normalization |
+| `fill_between.py` | Filled confidence band around a line |
+| `errorbar.py` | Error bars with caps |
+| `heatmap.py` | `imshow` image with a colorbar |
+| `colormaps.py` | Reference strip of the built-in colormaps |
+| `surface3d.py` | 3D colormapped surface |
+| `scatter3d.py` | 3D scatter cloud |
+| `line3d.py` | 3D parametric curve |
+| `themes.py` | The same plot in each built-in theme |
+| `subplots.py` | Shared-axis small multiples + figure legend |
+| `math_labels.py` | LaTeX `$...$` math in titles/labels/legend |
+| `annotations.py` | Text and callout-arrow annotations |
+| `gg_scatter.py` | `pyplotrs.gg` grammar-of-graphics, coloured by group |
+| `gg_facet.py` | `pyplotrs.gg` faceted small multiples |
+| `animation_wave.py` | Animated GIF (travelling wave) |
