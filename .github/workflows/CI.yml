@@ -62,8 +62,8 @@ jobs:
           set -e
           uv venv .venv
           source .venv/bin/activate
-          uv pip install figurs --no-index --no-deps --find-links dist --reinstall
-          uv pip install figurs pytest
+          uv pip install pyplotrs --no-index --no-deps --find-links dist --reinstall
+          uv pip install pyplotrs pytest
           pytest
       - name: pytest
         if: ${{ !startsWith(matrix.platform.target, 'x86') && matrix.platform.target != 'ppc64' }}
@@ -80,8 +80,8 @@ jobs:
             python3 -m venv .venv
             source .venv/bin/activate
             pip install pytest
-            pip install figurs --no-index --no-deps --find-links dist --force-reinstall
-            pip install figurs
+            pip install pyplotrs --no-index --no-deps --find-links dist --force-reinstall
+            pip install pyplotrs
             pytest
 
   musllinux:
@@ -122,8 +122,8 @@ jobs:
             apk add py3-pip py3-virtualenv
             python3 -m virtualenv .venv
             source .venv/bin/activate
-            pip install figurs --no-index --no-deps --find-links dist --force-reinstall
-            pip install figurs pytest
+            pip install pyplotrs --no-index --no-deps --find-links dist --force-reinstall
+            pip install pyplotrs pytest
             pytest
           '
       - name: pytest
@@ -139,8 +139,8 @@ jobs:
             set -e
             python3 -m virtualenv .venv
             source .venv/bin/activate
-            pip install figurs --no-index --no-deps --find-links dist --force-reinstall
-            pip install figurs pytest
+            pip install pyplotrs --no-index --no-deps --find-links dist --force-reinstall
+            pip install pyplotrs pytest
             pytest
 
   windows:
@@ -181,8 +181,8 @@ jobs:
           set -e
           uv venv .venv
           source .venv/Scripts/activate
-          uv pip install figurs --no-index --no-deps --find-links dist --reinstall
-          uv pip install figurs pytest
+          uv pip install pyplotrs --no-index --no-deps --find-links dist --reinstall
+          uv pip install pyplotrs pytest
           pytest
 
   macos:
@@ -216,8 +216,8 @@ jobs:
           set -e
           uv venv .venv
           source .venv/bin/activate
-          uv pip install figurs --no-index --no-deps --find-links dist --reinstall
-          uv pip install figurs pytest
+          uv pip install pyplotrs --no-index --no-deps --find-links dist --reinstall
+          uv pip install pyplotrs pytest
           pytest
 
   sdist:

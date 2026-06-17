@@ -1,6 +1,6 @@
 """Phase 1f performance receipts.
 
-1. End-to-end: time a full figurs line-plot export at increasing point counts,
+1. End-to-end: time a full pyplotrs line-plot export at increasing point counts,
    to PDF / PNG / SVG, reporting wall time, throughput, and file size.
 2. A/B microbenchmark isolating the win from moving geometry generation into
    Rust: a Python tuple-list + ``add_path`` vs the batched ``add_line_xform``.
@@ -9,10 +9,10 @@
      - Line export is shown two ways: "raw" (both libraries keep every vertex -
        the pure rendering-engine comparison) and "default" (both apply their
        path simplification, dropping sub-pixel/collinear vertices - the
-       real-world comparison). figurs now has its own device-space path
+       real-world comparison). pyplotrs now has its own device-space path
        simplification, so the default-vs-default row is the like-for-like one.
      - Scatter is the simplification-immune case and the one the instanced
-       marker pipeline is built for; it's where figurs' vector-export lead
+       marker pipeline is built for; it's where pyplotrs' vector-export lead
        shows up, so it's reported separately.
 
 Run ``python benchmarks/benchmark.py --check`` for the deterministic regression gate
@@ -27,10 +27,10 @@ import sys
 import time
 import zlib
 
-import figurs
-from figurs import figure as _F
+import pyplotrs
+from pyplotrs import figure as _F
 
-OUT = "/tmp/figurs_bench"
+OUT = "/tmp/pyplotrs_bench"
 os.makedirs(OUT, exist_ok=True)
 
 
@@ -42,12 +42,12 @@ def gen(n: int):
 
 
 def bench_end_to_end():
-    print("=== End-to-end figurs line export ===")
+    print("=== End-to-end pyplotrs line export ===")
     print(f"{'N':>9} {'fmt':>4} {'time(s)':>9} {'Mpts/s':>8} {'size':>10}")
     for n in (1_000, 10_000, 100_000, 1_000_000):
         xs, ys = gen(n)
         for fmt in ("pdf", "png", "svg"):
-            fig, ax = figurs.subplots(figsize=(432, 288))
+            fig, ax = pyplotrs.subplots(figsize=(432, 288))
             ax.line(xs, ys, color="C0")
             ax.set(title=f"N={n:,}", xlabel="x", ylabel="y")
             path = f"{OUT}/line_{n}.{fmt}"
@@ -88,7 +88,7 @@ def bench_scatter():
     for n in (10_000, 100_000, 1_000_000):
         xs, ys = gen(n)
         for fmt in ("pdf", "png"):
-            fig, ax = figurs.subplots(figsize=(432, 288))
+            fig, ax = pyplotrs.subplots(figsize=(432, 288))
             ax.scatter(xs, ys, color="C1", size=9.0)
             path = f"{OUT}/scatter_{n}.{fmt}"
             t0 = time.perf_counter()
@@ -108,8 +108,8 @@ def _scatter_xy(n: int):
             [random.uniform(0, 10) for _ in range(n)])
 
 
-def _time_figurs(make, fmt: str, path: str) -> tuple[float, int]:
-    fig, ax = figurs.subplots(figsize=(432, 288))
+def _time_pyplotrs(make, fmt: str, path: str) -> tuple[float, int]:
+    fig, ax = pyplotrs.subplots(figsize=(432, 288))
     make(ax)
     t0 = time.perf_counter()
     fig.save(path)
@@ -130,15 +130,15 @@ def _time_mpl(plt, plot, fmt: str, path: str, simplify: bool = True) -> tuple[fl
 
 def bench_vs_matplotlib():
     if importlib.util.find_spec("matplotlib") is None:
-        print("=== figurs vs matplotlib: SKIPPED (matplotlib not installed) ===\n")
+        print("=== pyplotrs vs matplotlib: SKIPPED (matplotlib not installed) ===\n")
         return
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     n = 1_000_000
-    print(f"=== figurs vs matplotlib head-to-head (N={n:,}, 6x4in) ===")
-    print(f"{'case':<34}{'figurs':>16}{'matplotlib':>16}{'figurs vs mpl':>15}")
+    print(f"=== pyplotrs vs matplotlib head-to-head (N={n:,}, 6x4in) ===")
+    print(f"{'case':<34}{'pyplotrs':>16}{'matplotlib':>16}{'pyplotrs vs mpl':>15}")
 
     def row(label, ft, fsz, mt, msz):
         ratio = (mt / ft) if ft > 0 else float("inf")
@@ -151,13 +151,13 @@ def bench_vs_matplotlib():
     # --- Line PDF, two ways ---
     lx, ly = gen(n)
     # (a) Raw: both keep every vertex -> pure rendering-engine comparison.
-    ft_raw, fsz_raw = _time_figurs(lambda ax: ax.line(lx, ly, color="C0", simplify=False),
+    ft_raw, fsz_raw = _time_pyplotrs(lambda ax: ax.line(lx, ly, color="C0", simplify=False),
                                    "pdf", f"{OUT}/h_line_raw.pdf")
     mt_off, msz_off = _time_mpl(plt, lambda ax: ax.plot(lx, ly), "pdf",
                                 f"{OUT}/h_mpl_line_off.pdf", simplify=False)
     row("line PDF (raw, equal vertices)", ft_raw, fsz_raw, mt_off, msz_off)
     # (b) Default: both libraries simplify near-collinear vertices -> real-world.
-    ft, fsz = _time_figurs(lambda ax: ax.line(lx, ly, color="C0"), "pdf", f"{OUT}/h_line.pdf")
+    ft, fsz = _time_pyplotrs(lambda ax: ax.line(lx, ly, color="C0"), "pdf", f"{OUT}/h_line.pdf")
     mt_on, msz_on = _time_mpl(plt, lambda ax: ax.plot(lx, ly), "pdf",
                               f"{OUT}/h_mpl_line_on.pdf", simplify=True)
     row("line PDF (default, simplified)", ft, fsz, mt_on, msz_on)
@@ -166,22 +166,22 @@ def bench_vs_matplotlib():
     sx, sy = _scatter_xy(n)
     import numpy as np
     nsx, nsy = np.asarray(sx), np.asarray(sy)
-    ft, fsz = _time_figurs(lambda ax: ax.scatter(sx, sy, color="C1", size=4.0),
+    ft, fsz = _time_pyplotrs(lambda ax: ax.scatter(sx, sy, color="C1", size=4.0),
                            "pdf", f"{OUT}/h_scatter.pdf")
     mt, msz = _time_mpl(plt, lambda ax: ax.scatter(nsx, nsy, s=4), "pdf",
                         f"{OUT}/h_mpl_scatter.pdf")
     row("scatter PDF (instanced)", ft, fsz, mt, msz)
 
-    ft, fsz = _time_figurs(lambda ax: ax.scatter(sx, sy, color="C1", size=4.0),
+    ft, fsz = _time_pyplotrs(lambda ax: ax.scatter(sx, sy, color="C1", size=4.0),
                            "png", f"{OUT}/h_scatter.png")
     mt, msz = _time_mpl(plt, lambda ax: ax.scatter(nsx, nsy, s=4), "png",
                         f"{OUT}/h_mpl_scatter.png")
     row("scatter PNG (raster)", ft, fsz, mt, msz)
     print("\nTakeaway: on *vector* export - editable PDF/SVG, the project's reason to\n"
-          "exist - figurs leads (scatter several times faster & smaller; line, now\n"
-          "that figurs simplifies paths, competitive with matplotlib's default). On\n"
+          "exist - pyplotrs leads (scatter several times faster & smaller; line, now\n"
+          "that pyplotrs simplifies paths, competitive with matplotlib's default). On\n"
           "raster, marker sprite-stamping brings scatter PNG to ~parity with\n"
-          "matplotlib's mature C/Agg (figurs' PNG is larger only because the dense\n"
+          "matplotlib's mature C/Agg (pyplotrs' PNG is larger only because the dense\n"
           "overlapping output compresses less well, not slower to produce).\n")
 
 
@@ -202,7 +202,7 @@ def regression_gate() -> bool:
     the instanced-marker pipeline (no wall-clock thresholds, so CI-stable)."""
     n = 1_000_000
     sx, sy = _scatter_xy(n)
-    fig, ax = figurs.subplots(figsize=(432, 288))
+    fig, ax = pyplotrs.subplots(figsize=(432, 288))
     ax.scatter(sx, sy, color="C1", size=4.0)
     pdf = bytes(fig._build_scene().to_pdf())
     svg = fig._build_scene().to_svg()
@@ -234,7 +234,7 @@ def regression_gate() -> bool:
     def line_vertices(simplify):
         # krilla writes path ops space-delimited (`x y l`/`x y m`); count the
         # line-to / move-to operators (\b matches the trailing space or newline).
-        fig, ax = figurs.subplots(figsize=(432, 288))
+        fig, ax = pyplotrs.subplots(figsize=(432, 288))
         ax.line(lx, ly, color="C0", simplify=simplify)
         pdf = bytes(fig._build_scene().to_pdf())
         best = 0

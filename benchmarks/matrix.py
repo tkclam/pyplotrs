@@ -1,4 +1,4 @@
-"""Phase 3 benchmark matrix: figurs vs matplotlib across the full
+"""Phase 3 benchmark matrix: pyplotrs vs matplotlib across the full
 
     (mark type) x (point count) x (panel count) x (output format)
 
@@ -30,9 +30,9 @@ import random
 import sys
 import time
 
-import figurs
+import pyplotrs
 
-OUT = "/tmp/figurs_bench_matrix"
+OUT = "/tmp/pyplotrs_bench_matrix"
 os.makedirs(OUT, exist_ok=True)
 
 # Grid axes. `--quick` trims to a fast subset for CI smoke-runs.
@@ -72,10 +72,10 @@ def _fmt_size(b: int) -> str:
     return f"{v:.1f}GB"
 
 
-# -- figurs ----------------------------------------------------------------
+# -- pyplotrs ----------------------------------------------------------------
 
-def _build_figurs(mark: str, n: int, nrows: int, ncols: int):
-    fig, _ = figurs.subplots(nrows, ncols, figsize=_figsize(nrows, ncols))
+def _build_pyplotrs(mark: str, n: int, nrows: int, ncols: int):
+    fig, _ = pyplotrs.subplots(nrows, ncols, figsize=_figsize(nrows, ncols))
     per = max(2, n // (nrows * ncols))
     for ax in fig.axes:
         if mark == "line":
@@ -87,9 +87,9 @@ def _build_figurs(mark: str, n: int, nrows: int, ncols: int):
     return fig
 
 
-def _time_figurs(mark, n, nrows, ncols, fmt) -> tuple[float, int]:
-    fig = _build_figurs(mark, n, nrows, ncols)
-    path = f"{OUT}/figurs_{mark}_{n}_{nrows}x{ncols}.{fmt}"
+def _time_pyplotrs(mark, n, nrows, ncols, fmt) -> tuple[float, int]:
+    fig = _build_pyplotrs(mark, n, nrows, ncols)
+    path = f"{OUT}/pyplotrs_{mark}_{n}_{nrows}x{ncols}.{fmt}"
     t0 = time.perf_counter()
     fig.save(path)
     return time.perf_counter() - t0, os.path.getsize(path)
@@ -141,14 +141,14 @@ def run(quick: bool):
     for mark, n in cases:
         for nrows, ncols in panels:
             for fmt in FORMATS:
-                ft, fsz = _time_figurs(mark, n, nrows, ncols, fmt)
+                ft, fsz = _time_pyplotrs(mark, n, nrows, ncols, fmt)
                 if plt is not None:
                     mt, msz = _time_mpl(plt, mark, n, nrows, ncols, fmt)
                 else:
                     mt, msz = None, None
                 rows.append((mark, n, nrows * ncols, fmt, ft, fsz, mt, msz))
                 print(f"  {mark:7} N={n:<8} {nrows}x{ncols} {fmt:3}  "
-                      f"figurs {ft:7.3f}s {_fmt_size(fsz):>8}"
+                      f"pyplotrs {ft:7.3f}s {_fmt_size(fsz):>8}"
                       + (f"   mpl {mt:7.3f}s {_fmt_size(msz):>8}"
                          f"  ({mt / ft:5.1f}x)" if mt is not None else ""))
     return rows, plt is not None
@@ -156,7 +156,7 @@ def run(quick: bool):
 
 def write_markdown(rows, have_mpl: bool, path: str):
     lines = [
-        "# figurs benchmark matrix",
+        "# pyplotrs benchmark matrix",
         "",
         "Export wall-time and file size across **mark x point-count x panels x "
         "format**. `N` is the figure's *total* point budget, split evenly over "
@@ -167,7 +167,7 @@ def write_markdown(rows, have_mpl: bool, path: str):
     ]
     if have_mpl:
         lines += [
-            "| mark | N | panels | format | figurs time | figurs size | "
+            "| mark | N | panels | format | pyplotrs time | pyplotrs size | "
             "matplotlib time | matplotlib size | speedup |",
             "|---|---:|---:|---|---:|---:|---:|---:|---:|",
         ]
@@ -178,9 +178,9 @@ def write_markdown(rows, have_mpl: bool, path: str):
                 f"{mt:.3f}s | {_fmt_size(msz)} | {speed} |")
     else:
         lines += [
-            "_matplotlib not installed - figurs-only figures._",
+            "_matplotlib not installed - pyplotrs-only figures._",
             "",
-            "| mark | N | panels | format | figurs time | figurs size |",
+            "| mark | N | panels | format | pyplotrs time | pyplotrs size |",
             "|---|---:|---:|---|---:|---:|",
         ]
         for mark, n, p, fmt, ft, fsz, _mt, _msz in rows:
@@ -189,32 +189,32 @@ def write_markdown(rows, have_mpl: bool, path: str):
     lines.append("")
     if have_mpl:
         lines += [
-            "**Reading it.** `speedup` is matplotlib-time / figurs-time "
-            "(>1 means figurs exports faster). figurs is faster on almost every "
+            "**Reading it.** `speedup` is matplotlib-time / pyplotrs-time "
+            "(>1 means pyplotrs exports faster). pyplotrs is faster on almost every "
             "cell, and the lead is largest on **vector** export (PDF/SVG) - the "
             "editable-text formats the project exists for - where line paths are "
             "simplified and scatter markers are instanced (one reused "
-            "XObject/`<use>`). The lead *grows with panel count*: figurs' "
+            "XObject/`<use>`). The lead *grows with panel count*: pyplotrs' "
             "single-pass layout amortizes per-panel chrome that matplotlib "
             "re-solves per axes.",
             "",
             "**The one place matplotlib wins on time** is a single very large "
             "line (`N`=1e6, 1 panel): there the work is one long polyline with "
             "no per-panel overhead, and matplotlib's C path-simplification "
-            "narrowly edges figurs' Rust one (~0.7x). Add panels and figurs "
+            "narrowly edges pyplotrs' Rust one (~0.7x). Add panels and pyplotrs "
             "retakes the lead.",
             "",
             "**On file size**, each format has its own story:",
             "",
-            "- **PDF** - figurs is smaller everywhere (subsetted fonts + "
+            "- **PDF** - pyplotrs is smaller everywhere (subsetted fonts + "
             "instanced markers + path simplification).",
-            "- **SVG, marker-heavy (scatter)** - figurs is *smaller* **and** "
+            "- **SVG, marker-heavy (scatter)** - pyplotrs is *smaller* **and** "
             "~15-22x faster: markers are one `<defs>` glyph + a `<use>` per "
             "point, versus matplotlib's per-point path, which outweighs even the "
             "embedded font.",
-            "- **SVG, sparse geometry (line)** - figurs is *larger*, and on "
+            "- **SVG, sparse geometry (line)** - pyplotrs is *larger*, and on "
             "purpose: it **embeds the bundled font** so the SVG is "
-            "self-contained and renders identically on any machine (a figurs "
+            "self-contained and renders identically on any machine (a pyplotrs "
             "goal - no system-font drift), with real editable `<text>`; "
             "matplotlib only *references* a system font by name. Once the "
             "geometry is tiny (a simplified line is a few vertices), that "
@@ -241,7 +241,7 @@ def main():
     ap.add_argument("-o", "--out", default=os.path.join(
         os.path.dirname(__file__), "RESULTS.md"))
     args = ap.parse_args()
-    print(f"=== figurs benchmark matrix ({'quick' if args.quick else 'full'}) ===")
+    print(f"=== pyplotrs benchmark matrix ({'quick' if args.quick else 'full'}) ===")
     rows, have_mpl = run(args.quick)
     write_markdown(rows, have_mpl, args.out)
     return 0

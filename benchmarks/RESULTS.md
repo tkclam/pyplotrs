@@ -1,8 +1,8 @@
-# figurs benchmark matrix
+# pyplotrs benchmark matrix
 
 Export wall-time and file size across **mark x point-count x panels x format**. `N` is the figure's *total* point budget, split evenly over the panels. Times measure `save()` of a pre-built figure (the render engine), best of a single run on this machine. Regenerate with `.venv/bin/python benchmarks/matrix.py`.
 
-| mark | N | panels | format | figurs time | figurs size | matplotlib time | matplotlib size | speedup |
+| mark | N | panels | format | pyplotrs time | pyplotrs size | matplotlib time | matplotlib size | speedup |
 |---|---:|---:|---|---:|---:|---:|---:|---:|
 | line | 10,000 | 1 | pdf | 0.002s | 6KB | 0.057s | 7KB | 27.1x |
 | line | 10,000 | 1 | png | 0.007s | 19KB | 0.020s | 15KB | 2.9x |
@@ -50,15 +50,15 @@ Export wall-time and file size across **mark x point-count x panels x format**. 
 | scatter | 100,000 | 9 | png | 0.203s | 1MB | 0.171s | 138KB | 0.8x |
 | scatter | 100,000 | 9 | svg | 0.037s | 5MB | 0.830s | 10MB | 22.5x |
 
-**Reading it.** `speedup` is matplotlib-time / figurs-time (>1 means figurs exports faster). figurs is faster on almost every cell, and the lead is largest on **vector** export (PDF/SVG) - the editable-text formats the project exists for - where line paths are simplified and scatter markers are instanced (one reused XObject/`<use>`). The lead *grows with panel count*: figurs' single-pass layout amortizes per-panel chrome that matplotlib re-solves per axes.
+**Reading it.** `speedup` is matplotlib-time / pyplotrs-time (>1 means pyplotrs exports faster). pyplotrs is faster on almost every cell, and the lead is largest on **vector** export (PDF/SVG) - the editable-text formats the project exists for - where line paths are simplified and scatter markers are instanced (one reused XObject/`<use>`). The lead *grows with panel count*: pyplotrs' single-pass layout amortizes per-panel chrome that matplotlib re-solves per axes.
 
-**The one place matplotlib wins on time** is a single very large line (`N`=1e6, 1 panel): there the work is one long polyline with no per-panel overhead, and matplotlib's C path-simplification narrowly edges figurs' Rust one (~0.7x). Add panels and figurs retakes the lead.
+**The one place matplotlib wins on time** is a single very large line (`N`=1e6, 1 panel): there the work is one long polyline with no per-panel overhead, and matplotlib's C path-simplification narrowly edges pyplotrs' Rust one (~0.7x). Add panels and pyplotrs retakes the lead.
 
 **On file size**, each format has its own story:
 
-- **PDF** - figurs is smaller everywhere (subsetted fonts + instanced markers + path simplification).
-- **SVG, marker-heavy (scatter)** - figurs is *smaller* **and** ~15-22x faster: markers are one `<defs>` glyph + a `<use>` per point, versus matplotlib's per-point path, which outweighs even the embedded font.
-- **SVG, sparse geometry (line)** - figurs is *larger*, and on purpose: it **embeds the bundled font** so the SVG is self-contained and renders identically on any machine (a figurs goal - no system-font drift), with real editable `<text>`; matplotlib only *references* a system font by name. Once the geometry is tiny (a simplified line is a few vertices), that ~340 KB font floor (more with math/STIX) dominates. Shrinking it needs a cmap-preserving font subsetter - a tracked future optimization, since the Typst `subsetter` drops the `cmap` that `<text>` relies on.
+- **PDF** - pyplotrs is smaller everywhere (subsetted fonts + instanced markers + path simplification).
+- **SVG, marker-heavy (scatter)** - pyplotrs is *smaller* **and** ~15-22x faster: markers are one `<defs>` glyph + a `<use>` per point, versus matplotlib's per-point path, which outweighs even the embedded font.
+- **SVG, sparse geometry (line)** - pyplotrs is *larger*, and on purpose: it **embeds the bundled font** so the SVG is self-contained and renders identically on any machine (a pyplotrs goal - no system-font drift), with real editable `<text>`; matplotlib only *references* a system font by name. Once the geometry is tiny (a simplified line is a few vertices), that ~340 KB font floor (more with math/STIX) dominates. Shrinking it needs a cmap-preserving font subsetter - a tracked future optimization, since the Typst `subsetter` drops the `cmap` that `<text>` relies on.
 - **PNG** - resolution-bound for both; matplotlib's mature Agg compresses dense overlapping output more tightly.
 
 See `benchmark.py` for the like-for-like single-panel head-to-head and the deterministic `--check` CI regression gate.
