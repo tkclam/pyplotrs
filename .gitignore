@@ -5,5 +5,21 @@
 .venv/
 __pycache__/
 *.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# Benchmark scratch output (written to /tmp by default)
+# Compiled extension module (built by `maturin develop`)
+python/pyplotrs/*.so
+python/pyplotrs/*.pyd
+
+# Packaging output
+/dist/
+/wheelhouse/
+
+# Built documentation site (mkdocs build)
+/site/
+
+# Generated example figures (regenerate by running scripts in examples/).
+/examples/output/
