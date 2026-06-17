@@ -1,0 +1,9 @@
+[package]
+name = "figurs-text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+figurs-core = { path = "../figurs-core" }
+rustybuzz = "0.20"

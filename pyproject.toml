@@ -1,0 +1,36 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "figurs"
+version = "0.0.1"
+description = "A blazingly fast, publication-quality plotting library"
+requires-python = ">=3.9"
+# Bundled fonts (Inter, STIX Two Math) ship under the SIL OFL; the colormap
+# tables are CC0. These travel with every wheel as required by the OFL.
+license-files = [
+    "assets/fonts/Inter-OFL.txt",
+    "assets/fonts/STIXTwoMath-OFL.txt",
+    "assets/fonts/NOTICE.md",
+    "THIRD_PARTY_LICENSES.md",
+]
+
+[project.optional-dependencies]
+# Benchmark-only: `benchmarks/benchmark.py` times figurs head-to-head against matplotlib.
+# Not a runtime dependency of figurs itself. Install with `pip install -e .[bench]`.
+bench = ["matplotlib>=3.8", "numpy>=1.24"]
+
+[tool.maturin]
+module-name = "figurs._figurs_core"
+manifest-path = "crates/figurs-py/Cargo.toml"
+python-source = "python"
+# The bundled fonts are compiled into the extension via `include_bytes!`, so
+# they must be present in the source distribution for a from-source build.
+# The vendored MathJax bundle ships as package data (inlined into math `.html`
+# output); it lives under the python-source tree so the wheel picks it up, and
+# is listed here so the source distribution carries it too.
+include = [
+    { path = "assets/fonts/*.ttf", format = "sdist" },
+    { path = "python/figurs/_vendor/*.js", format = "sdist" },
+]

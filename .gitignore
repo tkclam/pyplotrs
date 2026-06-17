@@ -1,0 +1,9 @@
+# Rust build artifacts
+/target
+
+# Python virtualenv & caches
+.venv/
+__pycache__/
+*.py[cod]
+
+# Benchmark scratch output (written to /tmp by default)
