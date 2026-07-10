@@ -33,6 +33,4 @@ for f in ../../../examples/*.py; do python "$f"; done
 | `subplots.py` | Shared-axis small multiples + figure legend |
 | `math_labels.py` | LaTeX `$...$` math in titles/labels/legend |
 | `annotations.py` | Text and callout-arrow annotations |
-| `gg_scatter.py` | `pyplotrs.gg` grammar-of-graphics, coloured by group |
-| `gg_facet.py` | `pyplotrs.gg` faceted small multiples |
 | `animation_wave.py` | Animated GIF (travelling wave) |

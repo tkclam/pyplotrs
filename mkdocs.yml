@@ -47,7 +47,6 @@ nav:
       - Colormaps & images: guide/colormaps-and-images.md
       - Math & annotations: guide/math-and-annotations.md
       - 3D plots: guide/3d.md
-      - Grammar of graphics: guide/grammar-of-graphics.md
       - Animation: guide/animation.md
       - Saving figures: guide/saving.md
   - Gallery: gallery/index.md
@@ -55,7 +54,6 @@ nav:
       - Figure & Axes: api/figure.md
       - Colormaps: api/colormaps.md
       - Themes: api/themes.md
-      - Grammar of graphics: api/gg.md
       - Animation: api/animation.md
   - About:
       - License: about/license.md

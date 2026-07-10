@@ -82,7 +82,6 @@ fig.save("hello.png")   # 200 dpi by default
 | **3D** | `scatter`, `plot`, `surface` — projected to editable 2D vectors, with an interactive HTML viewer |
 | **Themes** | `default`, `nature`, `grayscale`, `presentation`, plus `Theme.with_(...)` |
 | **Annotations** | `text`, `annotate` with callout arrows; LaTeX math anywhere |
-| **Grammar of graphics** | `pyplotrs.gg` — declarative `Plot(...).add(geom).facet(...)` |
 | **Animation** | `animate(render, frames)` → GIF / APNG |
 | **Formats** | PDF, SVG, PNG (with DPI), and self-contained HTML |
 

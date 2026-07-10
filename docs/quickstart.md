@@ -115,16 +115,5 @@ plt.subplots(figsize=(4, 3), units="in")
 
     [More on 3D plots →](guide/3d.md)
 
-=== "Grammar of graphics"
-
-    ```python
-    from pyplotrs import gg
-    (gg.Plot(data, x="t", y="y", color="group")
-        .add(gg.Point()).add(gg.Line())
-        .save("gg.pdf"))
-    ```
-
-    [More on the grammar of graphics →](guide/grammar-of-graphics.md)
-
 Ready for the details? Continue to the [user guide](guide/figure-and-axes.md), or
 jump into the [gallery](gallery/index.md).
