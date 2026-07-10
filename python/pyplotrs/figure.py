@@ -83,6 +83,7 @@ _TICK_LABEL_GAP = 2.5
 _AXIS_LABEL_GAP = 3.0
 _TITLE_GAP = 4.0
 _OUTER_MARGIN = 6.0
+_INLINE_DPI = 150.0  # raster resolution for Jupyter `_repr_png_` inline display
 _WSPACE = 26.0
 _HSPACE = 24.0
 
@@ -3657,6 +3658,13 @@ class Figure:
         title = self.suptitle or next((p for p in parts), "figure")
         alt = "; ".join(parts) if parts else "figure"
         return title, alt
+
+    def _repr_png_(self) -> bytes:
+        """Rich inline display in Jupyter/IPython: a bare ``fig`` in a notebook
+        cell renders as a PNG (like matplotlib's inline backend). Works for 2D,
+        polar and 3D figures alike (3D shows its projected static view; use
+        ``save("*.html")`` for the interactive 3D viewer)."""
+        return self._build_scene().to_png(_INLINE_DPI)
 
     def save(self, path: str, *, dpi: float = 200.0, tagged: bool = False,
              title: str | None = None, alt: str | None = None) -> None:

@@ -46,6 +46,9 @@ docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
 # Benchmark-only: `benchmarks/benchmark.py` times pyplotrs head-to-head against matplotlib.
 # Not a runtime dependency of pyplotrs itself. Install with `pip install -e .[bench]`.
 bench = ["matplotlib>=3.8", "numpy>=1.24"]
+# Interactive development: run the verify notebooks under notebooks/ with a Jupyter
+# kernel (e.g. `uv pip install -e .[dev]`, then select the kernel in VS Code/Jupyter).
+dev = ["ipykernel>=6"]
 
 [tool.maturin]
 module-name = "pyplotrs._pyplotrs_core"
