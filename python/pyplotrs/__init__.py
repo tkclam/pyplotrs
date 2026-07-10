@@ -6,7 +6,7 @@ from . import ticker
 from . import theme as themes
 from .animation import Animation, animate
 from .colormaps import Colormap, get_cmap
-from .figure import Axes, Axes3D, Figure, GridSpec, subplots, subplot_mosaic
+from .figure import Axes, Axes3D, Figure, GridSpec, PolarAxes, subplots, subplot_mosaic
 from .theme import Theme
 
 
@@ -58,7 +58,7 @@ def resolved_font_name() -> str:
 
 
 __all__ = [
-    "Axes", "Axes3D", "Figure", "GridSpec", "subplots", "subplot_mosaic", "figure",
+    "Axes", "Axes3D", "Figure", "GridSpec", "PolarAxes", "subplots", "subplot_mosaic", "figure",
     "colormaps", "Colormap", "get_cmap",
     "themes", "Theme", "norms", "scales", "ticker",
     "Animation", "animate",

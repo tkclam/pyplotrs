@@ -24,6 +24,7 @@ for f in ../../../examples/*.py; do python "$f"; done
 | `histogram.py` | Histogram with density normalization |
 | `fill_between.py` | Filled confidence band around a line |
 | `errorbar.py` | Error bars with caps |
+| `polar.py` | Polar projection: line + scatter with a legend |
 | `heatmap.py` | `imshow` image with a colorbar |
 | `colormaps.py` | Reference strip of the built-in colormaps |
 | `surface3d.py` | 3D colormapped surface |
