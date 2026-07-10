@@ -1097,8 +1097,11 @@ class Axes:
         self._marks.append({"kind": "pie", "wedges": wedges, "radius": float(radius)})
         self._frame_off = True
         self._aspect = "equal"
-        self._xlim = (-1.3 * radius, 1.3 * radius)
-        self._ylim = (-1.3 * radius, 1.3 * radius)
+        # Reserve room around the pie for the slice labels drawn just outside the
+        # rim (wider when any slice is labelled, so long labels aren't clipped).
+        margin = 1.55 if any(w["label"] for w in wedges) else 1.15
+        self._xlim = (-margin * radius, margin * radius)
+        self._ylim = (-margin * radius, margin * radius)
         return self
 
     def _level_colors(self, n: int, colors, cmap):
@@ -2319,6 +2322,20 @@ class Axes:
                 pts.append((sx(r * math.cos(a)), sy(r * math.sin(a))))
             scene.add_path(pts, fill_color=wd["color"], close=True,
                            stroke_color=_WHITE, stroke_width=1.0)
+        # Slice labels just outside each wedge, at its mid-angle. The pie sets
+        # its view limits to +/-1.3r, so labels at 1.12r sit clear of the rim.
+        lab_size = self._theme.tick_label_size
+        for wd in m["wedges"]:
+            lab = wd.get("label")
+            if not lab:
+                continue
+            am = (wd["a0"] + wd["a1"]) / 2.0
+            lx = sx(r * 1.12 * math.cos(am))
+            ly = sy(r * 1.12 * math.sin(am))
+            w = _tw(scene, lab, lab_size)
+            asc, desc = _th(scene, lab, lab_size)
+            tx = lx if math.cos(am) >= 0.0 else lx - w
+            _text(scene, tx, ly + (asc - desc) / 2.0, lab, lab_size, self._theme.text_color)
 
     def _draw_image(self, scene, m: dict, sx, sy) -> None:
         x0, x1, y0, y1 = m["extent"]
