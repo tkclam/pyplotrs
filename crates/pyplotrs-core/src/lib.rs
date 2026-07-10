@@ -235,6 +235,10 @@ pub struct MarkerNode {
     pub stroke: Option<Stroke>,
     /// Center positions in the current local coordinate space.
     pub positions: Vec<Point>,
+    /// Optional per-position fill colors (e.g. a colormapped scatter). When
+    /// `Some`, it is parallel to `positions` and overrides `fill` per point; the
+    /// shared `marker` outline and `stroke` (edge) still apply to every point.
+    pub colors: Option<Vec<Color>>,
 }
 
 /// A path used to clip a [`Group`]'s contents.

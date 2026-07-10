@@ -248,14 +248,33 @@ impl SvgWriter<'_> {
             attrs.push_str(r#" stroke="none""#);
         }
         writeln!(self.body, "<g{attrs}>").unwrap();
-        for pos in &m.positions {
-            writeln!(
-                self.body,
-                r##"<use xlink:href="#{id}" x="{}" y="{}"/>"##,
-                fmt_num(pos.x),
-                fmt_num(pos.y)
-            )
-            .unwrap();
+        match &m.colors {
+            // Colormapped scatter: each <use> overrides the group's fill with its
+            // own point color (the shared <path>/edge are still defined once).
+            Some(colors) => {
+                for (pos, c) in m.positions.iter().zip(colors) {
+                    writeln!(
+                        self.body,
+                        r##"<use xlink:href="#{id}" x="{}" y="{}" fill="{}"{}/>"##,
+                        fmt_num(pos.x),
+                        fmt_num(pos.y),
+                        color_hex(*c),
+                        opacity_attr_named("fill-opacity", c.a),
+                    )
+                    .unwrap();
+                }
+            }
+            None => {
+                for pos in &m.positions {
+                    writeln!(
+                        self.body,
+                        r##"<use xlink:href="#{id}" x="{}" y="{}"/>"##,
+                        fmt_num(pos.x),
+                        fmt_num(pos.y)
+                    )
+                    .unwrap();
+                }
+            }
         }
         self.body.push_str("</g>\n");
     }

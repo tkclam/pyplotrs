@@ -185,6 +185,19 @@ fn render_markers(pixmap: &mut Pixmap, m: &MarkerNode, transform: Affine, clip: 
     let stroke_paint = m.stroke.as_ref().map(|s| (solid_paint(s.color), to_ts_stroke(s)));
     let fill_rule = to_ts_fill_rule(m.fill_rule);
 
+    // Colormapped scatter: one fill per point, so the single-color stamp tile
+    // can't be shared. Fill the shared outline with each point's own paint.
+    if let Some(colors) = &m.colors {
+        for (pos, c) in m.positions.iter().zip(colors) {
+            let ts = to_ts_transform(transform * Affine::translate(Vec2::new(pos.x, pos.y)));
+            pixmap.fill_path(&path, &solid_paint(*c), fill_rule, ts, clip);
+            if let Some((paint, stroke)) = &stroke_paint {
+                pixmap.stroke_path(&path, paint, stroke, ts, clip);
+            }
+        }
+        return;
+    }
+
     // Fast path: rasterize the marker once per sub-pixel phase into a small
     // tile, then alpha-blit that tile at each position - the raster analog of
     // the PDF Form-XObject / SVG <use> instancing, and what makes a 1e6-point
@@ -645,6 +658,7 @@ mod tests {
                 fill_rule: FillRule::NonZero,
                 stroke: None,
                 positions: pos.clone(),
+                colors: None,
             })]),
             2.0,
         );

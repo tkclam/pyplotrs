@@ -31,6 +31,10 @@ class Scene:
         dash: list[float] | None = None,
         cap: Literal["butt", "round", "square"] = "round",
         join: Literal["miter", "round", "bevel"] = "round",
+        simplify: bool = True,
+        simplify_threshold: float = 0.1,
+        x_scale: str = "linear",
+        y_scale: str = "linear",
     ) -> None: ...
     def add_markers_xform(
         self,
@@ -45,6 +49,24 @@ class Scene:
         fill_color: _RGBA,
         edge_color: _RGBA | None = None,
         edge_width: float = 1.0,
+        x_scale: str = "linear",
+        y_scale: str = "linear",
+    ) -> None: ...
+    def add_markers_xform_colored(
+        self,
+        xs: list[float],
+        ys: list[float],
+        ax: float,
+        bx: float,
+        ay: float,
+        by: float,
+        marker: str,
+        diameter: float,
+        colors: list[_RGBA],
+        edge_color: _RGBA | None = None,
+        edge_width: float = 1.0,
+        x_scale: str = "linear",
+        y_scale: str = "linear",
     ) -> None: ...
     def add_colormapped_image(
         self,
@@ -59,6 +81,7 @@ class Scene:
         y: float,
         w: float,
         h: float,
+        norm: str = "linear",
     ) -> None: ...
     def add_text(
         self,
@@ -148,6 +171,24 @@ def scenes_to_apng(
     infinite: bool = True,
 ) -> bytes: ...
 def nice_ticks(vmin: float, vmax: float, max_ticks: int = 7) -> list[tuple[float, str]]: ...
+def contour_lines(
+    values: list[float], w: int, h: int, levels: list[float]
+) -> list[tuple[int, float, float, float, float]]: ...
+def contourf_image(
+    values: list[float], w: int, h: int, edges: list[float],
+    band_lut: bytes | list[int], upsample: int,
+) -> tuple[bytes, int, int]: ...
+def hist2d(
+    xs: list[float], ys: list[float], nx: int, ny: int,
+    xlo: float, xhi: float, ylo: float, yhi: float,
+) -> list[float]: ...
+def gaussian_kde(
+    samples: list[float], grid: list[float], bandwidth: float
+) -> list[float]: ...
+def hexbin(
+    xs: list[float], ys: list[float], gridsize: int,
+    xlo: float, xhi: float, ylo: float, yhi: float,
+) -> list[tuple[float, float, float]]: ...
 def solve_layout(
     width: float,
     height: float,
@@ -159,4 +200,5 @@ def solve_layout(
     wspace: float = 0.0,
     suptitle_h: float = 0.0,
     legend_w: float = 0.0,
+    spans: list[tuple[int, int, int, int]] | None = None,
 ) -> Layout: ...

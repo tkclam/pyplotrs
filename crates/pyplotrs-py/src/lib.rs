@@ -174,6 +174,50 @@ fn parse_fill_rule(s: &str) -> FillRule {
     }
 }
 
+/// Symlog parameters (matplotlib defaults: linthresh=1, linscale=1, base=10).
+/// `linscale_adj = linscale / (1 - 1/base)`; `log_base = ln(base)`.
+const SYMLOG_LINTHRESH: f64 = 1.0;
+const SYMLOG_LINSCALE_ADJ: f64 = 1.0 / (1.0 - 1.0 / 10.0);
+const LN10: f64 = std::f64::consts::LN_10;
+
+/// Apply an axis scale's non-linear transform to a single data value, **in
+/// Rust**, so the polyline/marker fast paths stay off the per-point Python path
+/// (see `scales.py`). The result feeds the affine device map; values outside a
+/// scale's domain (e.g. x<=0 on a log axis) return `NaN`, which the callers
+/// already treat as a gap/skip. Must stay numerically identical to the matching
+/// `Scale.transform` in `scales.py`.
+#[inline]
+fn apply_scale(code: &str, v: f64) -> f64 {
+    match code {
+        "log" => {
+            if v > 0.0 {
+                v.log10()
+            } else {
+                f64::NAN
+            }
+        }
+        "symlog" => {
+            let a = v.abs();
+            if a <= SYMLOG_LINTHRESH {
+                v * SYMLOG_LINSCALE_ADJ
+            } else {
+                v.signum()
+                    * SYMLOG_LINTHRESH
+                    * (SYMLOG_LINSCALE_ADJ + (a / SYMLOG_LINTHRESH).ln() / LN10)
+            }
+        }
+        "logit" => {
+            if v > 0.0 && v < 1.0 {
+                (v / (1.0 - v)).log10()
+            } else {
+                f64::NAN
+            }
+        }
+        // "linear" and anything unknown: identity.
+        _ => v,
+    }
+}
+
 /// Collapse runs of near-collinear vertices in a device-space polyline
 /// (matplotlib's `path.simplify`). Within a run, each point's perpendicular
 /// deviation is measured against the run's *initial* direction; the run is cut
@@ -390,7 +434,7 @@ impl Scene {
     #[pyo3(signature = (
         xs, ys, ax, bx, ay, by,
         stroke_color, stroke_width=1.0, dash=None, cap="round", join="round",
-        simplify=true, simplify_threshold=0.1,
+        simplify=true, simplify_threshold=0.1, x_scale="linear", y_scale="linear",
     ))]
     #[allow(clippy::too_many_arguments)]
     fn add_line_xform(
@@ -408,6 +452,8 @@ impl Scene {
         join: &str,
         simplify: bool,
         simplify_threshold: f64,
+        x_scale: &str,
+        y_scale: &str,
     ) {
         let n = xs.len().min(ys.len());
         // Split into maximal runs of finite points: a non-finite (NaN/inf) point
@@ -435,7 +481,10 @@ impl Scene {
             }
         };
         for i in 0..n {
-            let (dx, dy) = (ax * xs[i] + bx, ay * ys[i] + by);
+            // Scale transform (identity for linear) then affine device map, both
+            // in Rust; a non-finite result (e.g. x<=0 on a log axis) cuts the run.
+            let dx = ax * apply_scale(x_scale, xs[i]) + bx;
+            let dy = ay * apply_scale(y_scale, ys[i]) + by;
             if dx.is_finite() && dy.is_finite() {
                 run.push(Point::new(dx, dy));
             } else {
@@ -463,6 +512,7 @@ impl Scene {
     #[pyo3(signature = (
         xs, ys, ax, bx, ay, by,
         marker, diameter, fill_color, edge_color=None, edge_width=1.0,
+        x_scale="linear", y_scale="linear",
     ))]
     #[allow(clippy::too_many_arguments)]
     fn add_markers_xform(
@@ -478,6 +528,8 @@ impl Scene {
         fill_color: (u8, u8, u8, u8),
         edge_color: Option<(u8, u8, u8, u8)>,
         edge_width: f64,
+        x_scale: &str,
+        y_scale: &str,
     ) {
         let n = xs.len().min(ys.len());
         let r = diameter / 2.0;
@@ -488,9 +540,16 @@ impl Scene {
         let mut marker_path = BezPath::new();
         append_marker(&mut marker_path, marker, 0.0, 0.0, r);
 
-        // Skip non-finite positions (matplotlib draws no marker at NaN/inf).
+        // Skip non-finite positions (matplotlib draws no marker at NaN/inf);
+        // the scale transform (identity for linear) runs in Rust before the
+        // affine, so out-of-domain points (x<=0 on log) drop out here.
         let positions: Vec<Point> = (0..n)
-            .map(|i| Point::new(ax * xs[i] + bx, ay * ys[i] + by))
+            .map(|i| {
+                Point::new(
+                    ax * apply_scale(x_scale, xs[i]) + bx,
+                    ay * apply_scale(y_scale, ys[i]) + by,
+                )
+            })
             .filter(|p| p.x.is_finite() && p.y.is_finite())
             .collect();
 
@@ -508,6 +567,7 @@ impl Scene {
                     dash: None,
                 }),
                 positions,
+                colors: None,
             }
         } else {
             MarkerNode {
@@ -522,9 +582,70 @@ impl Scene {
                     dash: None,
                 }),
                 positions,
+                colors: None,
             }
         };
         self.push_node(Node::Markers(node));
+    }
+
+    /// Fast path for a **colormapped** scatter: like `add_markers_xform` but with
+    /// one fill color per point (`colors`, parallel to `xs`/`ys`). The scale
+    /// transform runs in Rust; non-finite positions are dropped along with their
+    /// color. A single uniform edge (`edge_color`/`edge_width`) applies to all.
+    #[pyo3(signature = (
+        xs, ys, ax, bx, ay, by,
+        marker, diameter, colors, edge_color=None, edge_width=1.0,
+        x_scale="linear", y_scale="linear",
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn add_markers_xform_colored(
+        &mut self,
+        xs: Vec<f64>,
+        ys: Vec<f64>,
+        ax: f64,
+        bx: f64,
+        ay: f64,
+        by: f64,
+        marker: &str,
+        diameter: f64,
+        colors: Vec<(u8, u8, u8, u8)>,
+        edge_color: Option<(u8, u8, u8, u8)>,
+        edge_width: f64,
+        x_scale: &str,
+        y_scale: &str,
+    ) {
+        let n = xs.len().min(ys.len()).min(colors.len());
+        let r = diameter / 2.0;
+        let mut marker_path = BezPath::new();
+        append_marker(&mut marker_path, marker, 0.0, 0.0, r);
+
+        // Keep positions and their colors aligned while dropping non-finite points.
+        let mut positions: Vec<Point> = Vec::with_capacity(n);
+        let mut pt_colors: Vec<Color> = Vec::with_capacity(n);
+        for i in 0..n {
+            let p = Point::new(
+                ax * apply_scale(x_scale, xs[i]) + bx,
+                ay * apply_scale(y_scale, ys[i]) + by,
+            );
+            if p.x.is_finite() && p.y.is_finite() {
+                positions.push(p);
+                pt_colors.push(color_from_rgba(colors[i]));
+            }
+        }
+        self.push_node(Node::Markers(MarkerNode {
+            marker: marker_path,
+            fill: pt_colors.first().copied(),
+            fill_rule: FillRule::NonZero,
+            stroke: edge_color.map(|c| CoreStroke {
+                color: color_from_rgba(c),
+                width: edge_width,
+                cap: LineCap::Round,
+                join: LineJoin::Round,
+                dash: None,
+            }),
+            positions,
+            colors: Some(pt_colors),
+        }));
     }
 
     /// Fast path: colormap a 2D field and add it as an image, doing the
@@ -534,6 +655,7 @@ impl Scene {
     /// places data row 0 at the top of the destination rect `(x, y, w, h)`.
     #[pyo3(signature = (
         values, width, height, vmin, vmax, lut, origin_upper, x, y, w, h,
+        norm="linear",
     ))]
     #[allow(clippy::too_many_arguments)]
     fn add_colormapped_image(
@@ -549,21 +671,26 @@ impl Scene {
         y: f64,
         w: f64,
         h: f64,
+        norm: &str,
     ) {
         let wi = width as usize;
         let hi = height as usize;
-        let span = if vmax > vmin { vmax - vmin } else { 1.0 };
+        // Normalize in transformed space so `norm="log"` matches LogNorm:
+        // t = (scale(v) - scale(vmin)) / (scale(vmax) - scale(vmin)).
+        let tmin = apply_scale(norm, vmin);
+        let tmax = apply_scale(norm, vmax);
+        let span = if tmax > tmin { tmax - tmin } else { 1.0 };
         let mut buf = vec![0u8; wi * hi * 4];
         for row in 0..hi {
             let drow = if origin_upper { row } else { hi - 1 - row };
             let src = drow * wi;
             let dst = row * wi * 4;
             for col in 0..wi {
-                let v = values[src + col];
+                let v = apply_scale(norm, values[src + col]);
                 if !v.is_finite() {
                     continue; // leave RGBA = 0 (transparent)
                 }
-                let t = ((v - vmin) / span).clamp(0.0, 1.0);
+                let t = ((v - tmin) / span).clamp(0.0, 1.0);
                 let li = ((t * 255.0).round() as usize) * 4;
                 let o = dst + col * 4;
                 buf[o] = lut[li];
@@ -824,6 +951,7 @@ fn nice_ticks(vmin: f64, vmax: f64, max_ticks: usize) -> Vec<(f64, String)> {
     width, height, nrows, ncols,
     cells,
     outer_margin=5.0, hspace=0.0, wspace=0.0, suptitle_h=0.0, legend_w=0.0,
+    spans=None,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn solve_layout(
@@ -837,6 +965,7 @@ fn solve_layout(
     wspace: f64,
     suptitle_h: f64,
     legend_w: f64,
+    spans: Option<Vec<(usize, usize, usize, usize)>>,
 ) -> Layout {
     let spec = FigureSpec {
         width,
@@ -848,6 +977,7 @@ fn solve_layout(
         wspace,
         suptitle_h,
         legend_w,
+        spans,
         cells: cells
             .into_iter()
             .map(|(title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w)| AxesBands {
@@ -968,6 +1098,286 @@ fn body_font_bytes(py: Python<'_>) -> Bound<'_, PyBytes> {
     PyBytes::new(py, &resolve_body().1.data)
 }
 
+// ---------------------------------------------------------------------------
+// Numeric kernels for statistical / field plot types (Phase E). These are pure
+// number-crunchers kept in Rust so the hot per-cell / per-sample loops never run
+// in Python: contouring, 2D histograms, KDE, and hex binning.
+// ---------------------------------------------------------------------------
+
+/// Linear interpolation of the crossing position where `va..vb` equals `level`.
+#[inline]
+fn _iso_t(va: f64, vb: f64, level: f64) -> f64 {
+    let d = vb - va;
+    if d == 0.0 {
+        0.5
+    } else {
+        (level - va) / d
+    }
+}
+
+/// Marching-squares contour lines. `values` is a row-major `w*h` grid (index =
+/// `row*w + col`). Returns `(level_idx, x0, y0, x1, y1)` line segments in
+/// fractional grid coordinates (`x` = column in `0..w-1`, `y` = row in `0..h-1`);
+/// the caller maps those to data space against its coordinate vectors.
+#[pyfunction]
+fn contour_lines(
+    values: Vec<f64>,
+    w: usize,
+    h: usize,
+    levels: Vec<f64>,
+) -> Vec<(u32, f64, f64, f64, f64)> {
+    let mut out = Vec::new();
+    if w < 2 || h < 2 {
+        return out;
+    }
+    for (li, &level) in levels.iter().enumerate() {
+        let li = li as u32;
+        for r in 0..h - 1 {
+            for c in 0..w - 1 {
+                let a = values[r * w + c]; // A: (c,   r)
+                let b = values[r * w + c + 1]; // B: (c+1, r)
+                let cc = values[(r + 1) * w + c + 1]; // C: (c+1, r+1)
+                let d = values[(r + 1) * w + c]; // D: (c,   r+1)
+                if !(a.is_finite() && b.is_finite() && cc.is_finite() && d.is_finite()) {
+                    continue;
+                }
+                let (fc, fr) = (c as f64, r as f64);
+                // Edge crossing points (top AB, right BC, bottom CD, left DA).
+                let p_ab = (fc + _iso_t(a, b, level), fr);
+                let p_bc = (fc + 1.0, fr + _iso_t(b, cc, level));
+                let p_cd = (fc + _iso_t(d, cc, level), fr + 1.0);
+                let p_da = (fc, fr + _iso_t(a, d, level));
+                let case = ((a >= level) as u8) << 3
+                    | ((b >= level) as u8) << 2
+                    | ((cc >= level) as u8) << 1
+                    | (d >= level) as u8;
+                let center = (a + b + cc + d) * 0.25;
+                let mut seg = |p: (f64, f64), q: (f64, f64)| {
+                    out.push((li, p.0, p.1, q.0, q.1));
+                };
+                match case {
+                    1 | 14 => seg(p_cd, p_da),
+                    2 | 13 => seg(p_bc, p_cd),
+                    3 | 12 => seg(p_bc, p_da),
+                    4 | 11 => seg(p_ab, p_bc),
+                    6 | 9 => seg(p_ab, p_cd),
+                    7 | 8 => seg(p_ab, p_da),
+                    5 => {
+                        // b,d inside; a,cc outside (saddle).
+                        if center >= level {
+                            seg(p_da, p_ab);
+                            seg(p_bc, p_cd);
+                        } else {
+                            seg(p_ab, p_bc);
+                            seg(p_cd, p_da);
+                        }
+                    }
+                    10 => {
+                        // a,cc inside; b,d outside (saddle).
+                        if center >= level {
+                            seg(p_ab, p_bc);
+                            seg(p_cd, p_da);
+                        } else {
+                            seg(p_da, p_ab);
+                            seg(p_bc, p_cd);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Filled contour bands as an RGBA image. The field is bilinearly upsampled by
+/// `upsample` and each pixel colored by the band its value falls in (`edges` has
+/// `nbands+1` monotone entries; `band_lut` is `nbands*4` RGBA bytes). Values
+/// outside `edges[0]..edges[last]` (and non-finite) are transparent. Returns
+/// `(rgba, out_w, out_h)` with buffer row 0 = grid row `h-1` (largest data y at
+/// the top), matching `add_image`'s top-down placement.
+#[pyfunction]
+fn contourf_image(
+    values: Vec<f64>,
+    w: usize,
+    h: usize,
+    edges: Vec<f64>,
+    band_lut: Vec<u8>,
+    upsample: usize,
+) -> (Vec<u8>, usize, usize) {
+    let up = upsample.max(1);
+    if w < 2 || h < 2 || edges.len() < 2 {
+        return (Vec::new(), 0, 0);
+    }
+    let ow = (w - 1) * up + 1;
+    let oh = (h - 1) * up + 1;
+    let nbands = edges.len() - 1;
+    let mut buf = vec![0u8; ow * oh * 4];
+    for oy in 0..oh {
+        // Flip so buffer row 0 corresponds to the largest-y grid row (h-1).
+        let gy = (oh - 1 - oy) as f64 / up as f64;
+        let r0 = gy.floor() as usize;
+        let r1 = (r0 + 1).min(h - 1);
+        let fy = gy - r0 as f64;
+        for ox in 0..ow {
+            let gx = ox as f64 / up as f64;
+            let c0 = gx.floor() as usize;
+            let c1 = (c0 + 1).min(w - 1);
+            let fx = gx - c0 as f64;
+            let v00 = values[r0 * w + c0];
+            let v10 = values[r0 * w + c1];
+            let v01 = values[r1 * w + c0];
+            let v11 = values[r1 * w + c1];
+            if !(v00.is_finite() && v10.is_finite() && v01.is_finite() && v11.is_finite()) {
+                continue;
+            }
+            let top = v00 + (v10 - v00) * fx;
+            let bot = v01 + (v11 - v01) * fx;
+            let val = top + (bot - top) * fy;
+            if val < edges[0] || val > edges[nbands] {
+                continue;
+            }
+            // Band index: largest b with edges[b] <= val.
+            let mut band = 0;
+            while band + 1 < nbands && val >= edges[band + 1] {
+                band += 1;
+            }
+            let li = band * 4;
+            let o = (oy * ow + ox) * 4;
+            buf[o] = band_lut[li];
+            buf[o + 1] = band_lut[li + 1];
+            buf[o + 2] = band_lut[li + 2];
+            buf[o + 3] = band_lut[li + 3];
+        }
+    }
+    (buf, ow, oh)
+}
+
+/// 2D histogram: count `(xs, ys)` into `ny * nx` equal bins over
+/// `[xlo,xhi] x [ylo,yhi]`. Returns row-major counts (`iy*nx + ix`), `iy=0` the
+/// lowest-y row. Points outside the range are dropped.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn hist2d(
+    xs: Vec<f64>,
+    ys: Vec<f64>,
+    nx: usize,
+    ny: usize,
+    xlo: f64,
+    xhi: f64,
+    ylo: f64,
+    yhi: f64,
+) -> Vec<f64> {
+    let mut counts = vec![0.0f64; nx * ny];
+    let xspan = if xhi > xlo { xhi - xlo } else { 1.0 };
+    let yspan = if yhi > ylo { yhi - ylo } else { 1.0 };
+    for (&x, &y) in xs.iter().zip(ys.iter()) {
+        if !(x.is_finite() && y.is_finite()) || x < xlo || x > xhi || y < ylo || y > yhi {
+            continue;
+        }
+        let mut ix = ((x - xlo) / xspan * nx as f64) as usize;
+        let mut iy = ((y - ylo) / yspan * ny as f64) as usize;
+        if ix >= nx {
+            ix = nx - 1;
+        }
+        if iy >= ny {
+            iy = ny - 1;
+        }
+        counts[iy * nx + ix] += 1.0;
+    }
+    counts
+}
+
+/// Evaluate a 1D Gaussian kernel density estimate of `samples` at each point of
+/// `grid`. `bandwidth <= 0` selects Scott's rule (`n^(-1/5) * std`). Used by
+/// `violinplot`.
+#[pyfunction]
+fn gaussian_kde(samples: Vec<f64>, grid: Vec<f64>, bandwidth: f64) -> Vec<f64> {
+    let n = samples.len();
+    if n == 0 {
+        return vec![0.0; grid.len()];
+    }
+    let mean = samples.iter().sum::<f64>() / n as f64;
+    let var = samples.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / n as f64;
+    let std = var.sqrt();
+    let bw = if bandwidth > 0.0 {
+        bandwidth
+    } else {
+        let b = (n as f64).powf(-0.2) * std;
+        if b > 0.0 {
+            b
+        } else {
+            1.0
+        }
+    };
+    let norm = 1.0 / (n as f64 * bw * (2.0 * std::f64::consts::PI).sqrt());
+    grid.iter()
+        .map(|&g| {
+            let s: f64 = samples
+                .iter()
+                .map(|&x| {
+                    let z = (g - x) / bw;
+                    (-0.5 * z * z).exp()
+                })
+                .sum();
+            s * norm
+        })
+        .collect()
+}
+
+/// Hexagonal binning (matplotlib's two-offset-grid algorithm). Returns occupied
+/// hexagons as `(center_x, center_y, count)` in data coordinates. `gridsize` is
+/// the number of hexagons across x; the y count is derived for regular hexagons.
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn hexbin(
+    xs: Vec<f64>,
+    ys: Vec<f64>,
+    gridsize: usize,
+    xlo: f64,
+    xhi: f64,
+    ylo: f64,
+    yhi: f64,
+) -> Vec<(f64, f64, f64)> {
+    let nx = gridsize.max(1);
+    let ny = ((nx as f64 / 3.0_f64.sqrt()).round() as usize).max(1);
+    let sx = if xhi > xlo { (xhi - xlo) / nx as f64 } else { 1.0 };
+    let sy = if yhi > ylo { (yhi - ylo) / ny as f64 } else { 1.0 };
+    // Two interleaved grids: full (n1) and half-offset (n2).
+    let mut n1 = std::collections::HashMap::<(i64, i64), f64>::new();
+    let mut n2 = std::collections::HashMap::<(i64, i64), f64>::new();
+    for (&px, &py) in xs.iter().zip(ys.iter()) {
+        if !(px.is_finite() && py.is_finite()) {
+            continue;
+        }
+        let x = (px - xlo) / sx;
+        let y = (py - ylo) / sy;
+        let ix1 = x.round();
+        let iy1 = y.round();
+        let ix2 = x.floor();
+        let iy2 = y.floor();
+        let d1 = (x - ix1).powi(2) + 3.0 * (y - iy1).powi(2);
+        let d2 = (x - ix2 - 0.5).powi(2) + 3.0 * (y - iy2 - 0.5).powi(2);
+        if d1 <= d2 {
+            *n1.entry((ix1 as i64, iy1 as i64)).or_insert(0.0) += 1.0;
+        } else {
+            *n2.entry((ix2 as i64, iy2 as i64)).or_insert(0.0) += 1.0;
+        }
+    }
+    let mut out = Vec::new();
+    for ((ix, iy), c) in n1 {
+        out.push((xlo + ix as f64 * sx, ylo + iy as f64 * sy, c));
+    }
+    for ((ix, iy), c) in n2 {
+        out.push((
+            xlo + (ix as f64 + 0.5) * sx,
+            ylo + (iy as f64 + 0.5) * sy,
+            c,
+        ));
+    }
+    out
+}
+
 #[pymodule]
 fn _pyplotrs_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Scene>()?;
@@ -982,5 +1392,10 @@ fn _pyplotrs_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(get_sans_serif, m)?)?;
     m.add_function(wrap_pyfunction!(resolved_font_name, m)?)?;
     m.add_function(wrap_pyfunction!(body_font_bytes, m)?)?;
+    m.add_function(wrap_pyfunction!(contour_lines, m)?)?;
+    m.add_function(wrap_pyfunction!(contourf_image, m)?)?;
+    m.add_function(wrap_pyfunction!(hist2d, m)?)?;
+    m.add_function(wrap_pyfunction!(gaussian_kde, m)?)?;
+    m.add_function(wrap_pyfunction!(hexbin, m)?)?;
     Ok(())
 }

@@ -21,6 +21,9 @@ from typing import Sequence
 from . import _pyplotrs_core as _core
 from . import colormaps as _colormaps
 from . import mathtext as _mathtext
+from . import norms as _norms
+from . import scales as _scales
+from . import ticker as _ticker
 from . import theme as _theme
 from . import threed as _threed
 from .theme import Theme
@@ -201,6 +204,37 @@ def _xform_coeffs(sx, sy) -> tuple[float, float, float, float]:
     return sx(1.0) - bx, bx, sy(1.0) - by, by
 
 
+class _Proj:
+    """Data->device projection for one axes.
+
+    Bundles the data->device closures ``sx``/``sy`` (the scale transform composed
+    with the affine device map, used by the per-element slow paths), ``coeffs`` —
+    the affine map ``(ax, bx, ay, by)`` over *transformed* space — and the scale
+    ``xcode``/``ycode`` strings. The Rust fast paths (``add_line_xform``/
+    ``add_markers_xform``) take raw data plus ``coeffs`` and the codes, and apply
+    the (possibly nonlinear) transform per point **in Rust** before the affine,
+    so no per-point Python runs on the hot path under any scale.
+    """
+
+    __slots__ = ("sx", "sy", "coeffs", "xcode", "ycode")
+
+    def __init__(self, sx, sy, coeffs, xcode: str, ycode: str) -> None:
+        self.sx = sx
+        self.sy = sy
+        self.coeffs = coeffs  # (ax, bx, ay, by) over TRANSFORMED space
+        self.xcode = xcode
+        self.ycode = ycode
+
+
+def _colorbar_ticks(cb: dict, max_ticks: int = 6) -> list[tuple[float, str]]:
+    """Locate colorbar ticks, honoring the mappable's ``norm`` (linear -> nice
+    numbers, ``LogNorm`` -> decades, etc.)."""
+    norm = cb.get("norm")
+    if norm is not None:
+        return norm.colorbar_ticks(max_ticks)
+    return _core.nice_ticks(cb["vmin"], cb["vmax"], max_ticks)
+
+
 def _colormap_lut(cmap) -> bytes:
     """A 256-entry RGBA lookup table sampled from ``cmap`` (1024 bytes)."""
     out = bytearray(256 * 4)
@@ -245,6 +279,405 @@ def _circle_pts(cx: float, cy: float, r: float, n: int = 24) -> list[tuple[float
         (cx + r * math.cos(2.0 * math.pi * i / n), cy + r * math.sin(2.0 * math.pi * i / n))
         for i in range(n)
     ]
+
+
+_HATCH_SPACING = 6.0  # device-point gap between hatch lines
+
+
+def _clip_segment(x0, y0, x1, y1, rx, ry, rw, rh):
+    """Liang-Barsky clip of segment ``(x0,y0)-(x1,y1)`` to rect ``(rx,ry,rw,rh)``.
+    Returns the clipped endpoints, or ``None`` if the segment misses the rect."""
+    dx, dy = x1 - x0, y1 - y0
+    p = [-dx, dx, -dy, dy]
+    q = [x0 - rx, rx + rw - x0, y0 - ry, ry + rh - y0]
+    t0, t1 = 0.0, 1.0
+    for pi, qi in zip(p, q):
+        if pi == 0:
+            if qi < 0:
+                return None  # parallel and outside
+        else:
+            r = qi / pi
+            if pi < 0:
+                if r > t1:
+                    return None
+                if r > t0:
+                    t0 = r
+            else:
+                if r < t0:
+                    return None
+                if r < t1:
+                    t1 = r
+    return (x0 + t0 * dx, y0 + t0 * dy, x0 + t1 * dx, y0 + t1 * dy)
+
+
+def _draw_hatch(scene, dev: list[tuple[float, float]], pattern: str, color,
+                lw: float = 0.6) -> None:
+    """Fill the device-space bounding box of ``dev`` with a line hatch. Exact for
+    axis-aligned rectangles; a bbox approximation for other shapes."""
+    xs = [x for x, _ in dev]
+    ys = [y for _, y in dev]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    if x1 <= x0 or y1 <= y0:
+        return
+    sp = _HATCH_SPACING
+    diag = sp * math.sqrt(2.0)
+    scene.begin_group(1.0, 0.0, 0.0, 1.0, 0.0, 0.0, clip=(x0, y0, x1 - x0, y1 - y0))
+
+    def line(a, b):
+        scene.add_path([a, b], stroke_color=color, stroke_width=lw)
+
+    if "|" in pattern or "+" in pattern:
+        x = x0
+        while x <= x1:
+            line((x, y0), (x, y1)); x += sp
+    if "-" in pattern or "+" in pattern:
+        y = y0
+        while y <= y1:
+            line((x0, y), (x1, y)); y += sp
+    if "/" in pattern or "x" in pattern:  # constant x+y
+        c = x0 + y0
+        while c <= x1 + y1:
+            line((c - y0, y0), (c - y1, y1)); c += diag
+    if "\\" in pattern or "x" in pattern:  # constant x-y
+        c = x0 - y1
+        while c <= x1 - y0:
+            line((c + y0, y0), (c + y1, y1)); c += diag
+    scene.end_group()
+
+
+_ELLIPSE_N = 72  # polygon segments approximating an ellipse/circle patch
+
+
+def _step_points(xs: list[float], ys: list[float], where: str
+                 ) -> tuple[list[float], list[float]]:
+    """Expand ``(xs, ys)`` into a staircase polyline for ``step``. ``where`` is
+    ``pre`` (step before the point), ``post`` (after), or ``mid`` (halfway)."""
+    px: list[float] = []
+    py: list[float] = []
+    for i in range(len(xs)):
+        if i == 0:
+            px.append(xs[0]); py.append(ys[0])
+            continue
+        if where == "pre":
+            px += [xs[i - 1], xs[i]]; py += [ys[i], ys[i]]
+        elif where == "post":
+            px += [xs[i], xs[i]]; py += [ys[i - 1], ys[i]]
+        else:  # mid
+            xm = (xs[i - 1] + xs[i]) / 2.0
+            px += [xm, xm, xs[i]]; py += [ys[i - 1], ys[i], ys[i]]
+    return px, py
+
+
+def _quantile(sorted_vals: list[float], q: float) -> float:
+    """Linear-interpolated quantile of an already-sorted list (matplotlib default)."""
+    n = len(sorted_vals)
+    if n == 1:
+        return sorted_vals[0]
+    pos = q * (n - 1)
+    lo = int(math.floor(pos))
+    hi = min(lo + 1, n - 1)
+    frac = pos - lo
+    return sorted_vals[lo] * (1.0 - frac) + sorted_vals[hi] * frac
+
+
+def _boxstats(values: list[float], whis: float = 1.5) -> dict:
+    """Box-plot summary: quartiles, median, whisker ends (last point within
+    ``whis``·IQR), and the outliers beyond them."""
+    s = sorted(v for v in values if math.isfinite(v))
+    if not s:
+        return {"q1": 0.0, "med": 0.0, "q3": 0.0, "lo": 0.0, "hi": 0.0, "fliers": []}
+    q1, med, q3 = _quantile(s, 0.25), _quantile(s, 0.5), _quantile(s, 0.75)
+    iqr = q3 - q1
+    lo_fence, hi_fence = q1 - whis * iqr, q3 + whis * iqr
+    inside = [v for v in s if lo_fence <= v <= hi_fence]
+    lo = inside[0] if inside else q1
+    hi = inside[-1] if inside else q3
+    fliers = [v for v in s if v < lo_fence or v > hi_fence]
+    return {"q1": q1, "med": med, "q3": q3, "lo": lo, "hi": hi, "fliers": fliers}
+
+
+def _auto_levels(flat: list[float], levels, default_n: int = 8) -> list[float]:
+    """Resolve a ``levels`` argument into a sorted list of contour thresholds.
+    An int (or ``None``) picks that many evenly-spaced levels spanning the data."""
+    finite = [v for v in flat if math.isfinite(v)]
+    lo, hi = (min(finite), max(finite)) if finite else (0.0, 1.0)
+    if levels is None:
+        n = default_n
+    elif isinstance(levels, int):
+        n = levels
+    else:
+        return sorted(float(v) for v in levels)
+    if hi <= lo:
+        hi = lo + 1.0
+    step = (hi - lo) / (n + 1)
+    return [lo + step * (i + 1) for i in range(n)]
+
+
+def _interp_coord(coords: list[float], t: float) -> float:
+    """Value of the 1D coordinate vector ``coords`` at fractional index ``t``."""
+    n = len(coords)
+    if n == 0:
+        return t
+    if n == 1:
+        return coords[0]
+    if t <= 0:
+        return coords[0]
+    if t >= n - 1:
+        return coords[-1]
+    i = int(math.floor(t))
+    frac = t - i
+    return coords[i] * (1.0 - frac) + coords[i + 1] * frac
+
+
+def _field_args(args) -> tuple[list[float], list[float], list[list[float]]]:
+    """Parse ``(Z)`` or ``(X, Y, Z)`` field-plot positional args into 1D x/y
+    coordinate vectors and the 2D ``Z`` grid."""
+    if len(args) == 1:
+        Z = [[float(v) for v in row] for row in args[0]]
+        h = len(Z); w = len(Z[0]) if Z else 0
+        return [float(i) for i in range(w)], [float(i) for i in range(h)], Z
+    X, Y, Z = args[0], args[1], args[2]
+    Z = [[float(v) for v in row] for row in Z]
+    # Accept 1D vectors or 2D meshgrids for X/Y (take the first row / column).
+    xc = [float(v) for v in (X[0] if _is_2d(X) else X)]
+    yc = [float(v) for v in ([r[0] for r in Y] if _is_2d(Y) else Y)]
+    return xc, yc, Z
+
+
+def _is_2d(a) -> bool:
+    try:
+        return hasattr(a[0], "__len__")
+    except (TypeError, IndexError):
+        return False
+
+
+def _delaunay(points: list[tuple[float, float]]) -> list[tuple[int, int, int]]:
+    """Bowyer-Watson Delaunay triangulation of 2D ``points``. Returns index
+    triples into ``points`` (used by ``plot_trisurf``). No NumPy/scipy."""
+    n = len(points)
+    if n < 3:
+        return []
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    minx, maxx, miny, maxy = min(xs), max(xs), min(ys), max(ys)
+    dx = (maxx - minx) or 1.0
+    dy = (maxy - miny) or 1.0
+    dmax = max(dx, dy)
+    midx, midy = (minx + maxx) / 2.0, (miny + maxy) / 2.0
+    # A super-triangle enclosing every point (indices n, n+1, n+2).
+    pts = list(points) + [(midx - 20 * dmax, midy - dmax),
+                          (midx, midy + 20 * dmax),
+                          (midx + 20 * dmax, midy - dmax)]
+
+    def circumcircle(i, j, k):
+        ax, ay = pts[i]; bx, by = pts[j]; cx, cy = pts[k]
+        d = 2.0 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+        if abs(d) < 1e-12:
+            return None
+        a2 = ax * ax + ay * ay
+        b2 = bx * bx + by * by
+        c2 = cx * cx + cy * cy
+        ux = (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / d
+        uy = (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / d
+        r2 = (ax - ux) ** 2 + (ay - uy) ** 2
+        return ux, uy, r2
+
+    tris = [(n, n + 1, n + 2)]
+    circ = {tris[0]: circumcircle(*tris[0])}
+    for ip in range(n):
+        px, py = pts[ip]
+        bad = []
+        for tri in tris:
+            cc = circ.get(tri)
+            if cc and (px - cc[0]) ** 2 + (py - cc[1]) ** 2 <= cc[2] + 1e-12:
+                bad.append(tri)
+        # Boundary of the polygonal hole = edges not shared by two bad triangles.
+        edge_count: dict = {}
+        for a, b, c in bad:
+            for e in ((a, b), (b, c), (c, a)):
+                key = (min(e), max(e))
+                edge_count[key] = edge_count.get(key, 0) + 1
+        boundary = [e for e, cnt in edge_count.items() if cnt == 1]
+        for tri in bad:
+            tris.remove(tri)
+            circ.pop(tri, None)
+        for a, b in boundary:
+            tri = (a, b, ip)
+            tris.append(tri)
+            circ[tri] = circumcircle(*tri)
+    # Drop triangles touching the super-triangle vertices.
+    return [(a, b, c) for a, b, c in tris if a < n and b < n and c < n]
+
+
+class _Rect:
+    """A plain rectangle mirroring the Rust ``Rect`` (for Python-synthesized
+    layouts: insets, twins, secondary axes)."""
+    __slots__ = ("x", "y", "w", "h")
+
+    def __init__(self, x: float, y: float, w: float, h: float) -> None:
+        self.x, self.y, self.w, self.h = x, y, w, h
+
+    @property
+    def x1(self) -> float:
+        return self.x + self.w
+
+    @property
+    def y1(self) -> float:
+        return self.y + self.h
+
+
+class _AxLayout:
+    """Duck-typed twin of the Rust ``AxesLayout`` so ``Axes._draw`` can render
+    into a Python-computed cell (insets/twins)."""
+    __slots__ = ("cell", "plot", "title", "xlabel", "ylabel", "x_tick", "y_tick", "cbar")
+
+    def __init__(self, **kw) -> None:
+        for k, v in kw.items():
+            setattr(self, k, v)
+
+
+def _layout_cell(cell: _Rect, bands: tuple) -> _AxLayout:
+    """Python port of the Rust ``layout_cell``: reserve the axis bands within
+    ``cell`` and return the plot area + band rects."""
+    title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w = bands
+    ylabel = _Rect(cell.x, cell.y, ylabel_w, cell.h)
+    y_tick_x = cell.x + ylabel_w
+    cbar = _Rect(cell.x1 - cbar_w, cell.y, cbar_w, cell.h)
+    title = _Rect(cell.x, cell.y, cell.w, title_h)
+    plot_x = y_tick_x + y_tick_w
+    plot_y = cell.y + title_h
+    plot_w = max(cell.x1 - cbar_w - plot_x, 0.0)
+    plot_h = max(cell.y1 - xlabel_h - x_tick_h - plot_y, 0.0)
+    plot = _Rect(plot_x, plot_y, plot_w, plot_h)
+    y_tick = _Rect(y_tick_x, plot_y, y_tick_w, plot_h)
+    x_tick = _Rect(plot_x, plot.y1, plot_w, x_tick_h)
+    xlabel = _Rect(plot_x, plot.y1 + x_tick_h, plot_w, xlabel_h)
+    return _AxLayout(cell=cell, plot=plot, title=title, xlabel=xlabel, ylabel=ylabel,
+                     x_tick=x_tick, y_tick=y_tick, cbar=cbar)
+
+
+def _is_uniform(coords: list[float], tol: float = 1e-6) -> bool:
+    """Whether ``coords`` is evenly spaced (so a mesh can route to ``imshow``)."""
+    if len(coords) < 3:
+        return True
+    step = coords[1] - coords[0]
+    if step == 0:
+        return False
+    return all(abs((coords[i + 1] - coords[i]) - step) <= abs(step) * tol
+               for i in range(len(coords) - 1))
+
+
+def _edges_from_centers(c: list[float]) -> list[float]:
+    """Cell edges bracketing the coordinate centers ``c`` (midpoints inside,
+    half-steps at the ends)."""
+    n = len(c)
+    if n == 0:
+        return [0.0, 1.0]
+    if n == 1:
+        return [c[0] - 0.5, c[0] + 0.5]
+    edges = [c[0] - (c[1] - c[0]) / 2.0]
+    for i in range(n - 1):
+        edges.append((c[i] + c[i + 1]) / 2.0)
+    edges.append(c[-1] + (c[-1] - c[-2]) / 2.0)
+    return edges
+
+
+def _bilerp(field: list[list[float]], xc: list[float], yc: list[float],
+            x: float, y: float) -> tuple[float, float] | None:
+    """Sample ``field`` (indexed ``[iy][ix]``, may be a 2-tuple of components)
+    at data point ``(x, y)`` by bilinear interpolation; ``None`` if out of range."""
+    nx, ny = len(xc), len(yc)
+    if x < xc[0] or x > xc[-1] or y < yc[0] or y > yc[-1]:
+        return None
+    # Locate the cell (uniform-ish assumption via search).
+    ix = min(max(int((x - xc[0]) / (xc[-1] - xc[0]) * (nx - 1)) if xc[-1] > xc[0] else 0, 0), nx - 2)
+    iy = min(max(int((y - yc[0]) / (yc[-1] - yc[0]) * (ny - 1)) if yc[-1] > yc[0] else 0, 0), ny - 2)
+    tx = (x - xc[ix]) / (xc[ix + 1] - xc[ix]) if xc[ix + 1] != xc[ix] else 0.0
+    ty = (y - yc[iy]) / (yc[iy + 1] - yc[iy]) if yc[iy + 1] != yc[iy] else 0.0
+    a = field[iy][ix]
+    b = field[iy][ix + 1]
+    c = field[iy + 1][ix]
+    d = field[iy + 1][ix + 1]
+    top = a + (b - a) * tx
+    bot = c + (d - c) * tx
+    return top + (bot - top) * ty
+
+
+def _streamlines(xc, yc, u, v, density: float) -> list[list[tuple[float, float]]]:
+    """Trace streamlines of the field ``(u, v)`` (RK4, forward + backward) from a
+    seed lattice sized by ``density``."""
+    nseed = max(int(6 * density), 2)
+    xspan = xc[-1] - xc[0]
+    yspan = yc[-1] - yc[0]
+    step = 0.5 * min(xspan / (len(xc) - 1) if len(xc) > 1 else xspan,
+                     yspan / (len(yc) - 1) if len(yc) > 1 else yspan)
+    max_steps = 2 * (len(xc) + len(yc))
+
+    def sample(x, y):
+        su = _bilerp(u, xc, yc, x, y)
+        sv = _bilerp(v, xc, yc, x, y)
+        if su is None or sv is None:
+            return None
+        return su, sv
+
+    def integrate(x0, y0, sign):
+        pts = [(x0, y0)]
+        x, y = x0, y0
+        for _ in range(max_steps):
+            k1 = sample(x, y)
+            if k1 is None:
+                break
+            n1 = math.hypot(*k1) or 1.0
+            k1 = (sign * k1[0] / n1, sign * k1[1] / n1)
+            k2 = sample(x + 0.5 * step * k1[0], y + 0.5 * step * k1[1])
+            if k2 is None:
+                break
+            n2 = math.hypot(*k2) or 1.0
+            k2 = (sign * k2[0] / n2, sign * k2[1] / n2)
+            x += step * k2[0]
+            y += step * k2[1]
+            if x < xc[0] or x > xc[-1] or y < yc[0] or y > yc[-1]:
+                break
+            pts.append((x, y))
+        return pts
+
+    lines = []
+    for i in range(nseed):
+        for j in range(nseed):
+            sx0 = xc[0] + xspan * (i + 0.5) / nseed
+            sy0 = yc[0] + yspan * (j + 0.5) / nseed
+            fwd = integrate(sx0, sy0, 1.0)
+            bwd = integrate(sx0, sy0, -1.0)
+            pts = list(reversed(bwd)) + fwd[1:]
+            if len(pts) >= 2:
+                lines.append(pts)
+    return lines
+
+
+def _patch_bbox(p: dict) -> tuple[list[float], list[float]]:
+    """The data-space corners of a patch, for autoscaling."""
+    k = p["kind"]
+    if k == "rectangle":
+        x0, y0 = p["xy"]
+        w, h = p["w"], p["h"]
+        a = math.radians(p["angle"])
+        ca, sa = math.cos(a), math.sin(a)
+        corners = [(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)]
+        xs = [x0 + cx * ca - cy * sa for cx, cy in corners]
+        ys = [y0 + cx * sa + cy * ca for cx, cy in corners]
+        return xs, ys
+    if k == "ellipse":
+        cx, cy = p["xy"]
+        rx, ry = p["rx"], p["ry"]
+        a = math.radians(p["angle"])
+        hw = math.hypot(rx * math.cos(a), ry * math.sin(a))
+        hh = math.hypot(rx * math.sin(a), ry * math.cos(a))
+        return [cx - hw, cx + hw], [cy - hh, cy + hh]
+    if k == "polygon":
+        return [x for x, _ in p["pts"]], [y for _, y in p["pts"]]
+    if k == "arrow":
+        return [p["x"], p["x"] + p["dx"]], [p["y"], p["y"] + p["dy"]]
+    return [], []
 
 
 def _draw_marker(scene, cx: float, cy: float, d: float, shape: str,
@@ -326,14 +759,15 @@ def _draw_arrow(scene, x0: float, y0: float, x1: float, y1: float, color,
 
 
 class _Mappable:
-    """Handle returned by :meth:`Axes.imshow`, consumed by
-    :meth:`Figure.colorbar` to build a matching color scale."""
+    """Handle returned by :meth:`Axes.imshow`/:meth:`Axes.scatter` (``c=``),
+    consumed by :meth:`Figure.colorbar` to build a matching color scale."""
 
-    def __init__(self, ax: "Axes", cmap, vmin: float, vmax: float) -> None:
+    def __init__(self, ax: "Axes", cmap, vmin: float, vmax: float, norm=None) -> None:
         self.ax = ax
         self.cmap = cmap
         self.vmin = vmin
         self.vmax = vmax
+        self.norm = norm  # None => linear; else a pyplotrs.norms.Normalize
 
 
 class Axes:
@@ -352,6 +786,32 @@ class Axes:
         # View limits, populated during layout; None => auto from data.
         self._xlim: tuple[float, float] | None = None
         self._ylim: tuple[float, float] | None = None
+        # Axis scales (linear by default; LogScale etc. set via ``set(xscale=)``).
+        self._xscale: _scales.Scale = _scales.LinearScale()
+        self._yscale: _scales.Scale = _scales.LinearScale()
+        # Reference primitives (axhline/axvline/axspan/axline) and free-form
+        # patches (rectangle/circle/...) live outside the data-mark stack: refs
+        # never drive autoscaling, patches contribute a bbox. All default empty
+        # so figures that use none stay byte-identical to before Phase D.
+        self._refs: list[dict] = []
+        self._patches: list[dict] = []
+        # Axis/tick/grid overrides (all None/False => theme + scale defaults).
+        self._grid_override: bool | None = None
+        self._aspect: str | None = None
+        self._frame_off: bool = False
+        self._xticks_manual: list[float] | None = None
+        self._yticks_manual: list[float] | None = None
+        self._xticklabels_manual: list[str] | None = None
+        self._yticklabels_manual: list[str] | None = None
+        self._xformatter = None
+        self._yformatter = None
+        # Overlays sharing this axes' cell (Phase F): a twin y/x axis, inset
+        # child axes (fractional sub-rects), and functional secondary axes.
+        self._twinx: "Axes | None" = None
+        self._twiny: "Axes | None" = None
+        self._insets: list[tuple["Axes", tuple]] = []
+        self._secondary: list[dict] = []
+        self._is_twin: bool = False  # a twin skips its own facecolor/grid
 
     # -- styling helpers ----------------------------------------------------
 
@@ -362,6 +822,40 @@ class Axes:
             self._cidx += 1
             return c
         return self._theme.resolve(color)
+
+    def _coords(self, values, axis: str) -> list[float]:
+        """Coerce plot coordinates to floats. Datetime-like values switch that
+        axis to a :class:`~pyplotrs.scales.DateScale` (mapped via ``date2num``);
+        strings (or other non-numerics) switch it to a
+        :class:`~pyplotrs.scales.CategoricalScale`, mapping each distinct label to
+        an integer position (first-seen order)."""
+        values = list(values)
+        if values and _scales.is_datetime_like(values[0]):
+            scale = self._xscale if axis == "x" else self._yscale
+            if not isinstance(scale, _scales.DateScale):
+                scale = _scales.DateScale()
+                if axis == "x":
+                    self._xscale = scale
+                else:
+                    self._yscale = scale
+            return [_scales.date2num(v) for v in values]
+        if any(isinstance(v, str) for v in values):
+            scale = self._xscale if axis == "x" else self._yscale
+            if not isinstance(scale, _scales.CategoricalScale):
+                scale = _scales.CategoricalScale([])
+                if axis == "x":
+                    self._xscale = scale
+                else:
+                    self._yscale = scale
+            out = []
+            for v in values:
+                s = str(v)
+                if s not in scale.index:
+                    scale.index[s] = len(scale.categories)
+                    scale.categories.append(s)
+                out.append(float(scale.index[s]))
+            return out
+        return [float(v) for v in values]
 
     # -- public API: marks --------------------------------------------------
 
@@ -382,8 +876,8 @@ class Axes:
         """
         self._marks.append({
             "kind": "line",
-            "xs": [float(x) for x in xs],
-            "ys": [float(y) for y in ys],
+            "xs": self._coords(xs, "x"),
+            "ys": self._coords(ys, "y"),
             "label": label,
             "color": self._next_color(color),
             "width": self._theme.line_width if width is None else float(width),
@@ -395,26 +889,46 @@ class Axes:
         return self
 
     def scatter(self, xs, ys, *, label: str | None = None, color=None, size: float = 36.0,
-                marker: str = "o", edgecolor=None, edgewidth: float = 1.0) -> "Axes":
+                marker: str = "o", edgecolor=None, edgewidth: float = 1.0,
+                c=None, cmap="viridis", norm=None, vmin: float | None = None,
+                vmax: float | None = None):
         """Scatter markers at ``(xs, ys)``. ``size`` is marker area in pt²
-        (so the drawn diameter is ``sqrt(size)``), matching matplotlib's ``s``."""
-        self._marks.append({
+        (so the drawn diameter is ``sqrt(size)``), matching matplotlib's ``s``.
+
+        Pass ``c`` (a per-point array) to color markers by value through ``cmap``
+        and ``norm`` (``vmin``/``vmax`` set the range; ``norm="log"`` or a
+        :mod:`pyplotrs.norms` instance for non-linear). Returns a colorbar handle
+        in that case, else ``self``."""
+        xs = self._coords(xs, "x")
+        ys = self._coords(ys, "y")
+        mark = {
             "kind": "scatter",
-            "xs": [float(x) for x in xs],
-            "ys": [float(y) for y in ys],
+            "xs": xs,
+            "ys": ys,
             "label": label,
-            "color": self._next_color(color),
+            "color": self._next_color(color) if c is None else _BLACK,
             "size": float(size),
             "marker": marker,
             "edgecolor": None if edgecolor is None else self._theme.resolve(edgecolor),
             "edgewidth": float(edgewidth),
-        })
-        return self
+            "colors": None,
+        }
+        self._marks.append(mark)
+        if c is None:
+            return self
+        # Colormapped scatter: precompute one RGBA per point and hand back a
+        # mappable so ``fig.colorbar(sc)`` matches the color scale.
+        cvals = [float(v) for v in c]
+        nrm = _norms.get(norm, vmin, vmax).autoscale(cvals)
+        cm = _colormaps.get_cmap(cmap)
+        mark["colors"] = [cm(nrm(v)) for v in cvals]
+        return _Mappable(self, cm, nrm.vmin, nrm.vmax, norm=nrm)
 
     def bar(self, x, height, *, width: float = 0.8, bottom=0.0, color=None,
             label: str | None = None, edgecolor=None) -> "Axes":
-        """Draw vertical bars of the given ``height`` at positions ``x``."""
-        xs = [float(v) for v in x]
+        """Draw vertical bars of the given ``height`` at positions ``x``. ``x``
+        may be strings (categories), which set a categorical x-axis."""
+        xs = self._coords(x, "x")
         heights = [float(v) for v in height]
         self._marks.append({
             "kind": "bar",
@@ -500,23 +1014,411 @@ class Axes:
         })
         return self
 
+    def _map_colors(self, values, cmap, norm, vmin, vmax):
+        """Precompute one RGBA per value plus a mappable (shared by the
+        per-element colored types: hexbin/pcolormesh)."""
+        vals = [float(v) for v in values]
+        cm = _colormaps.get_cmap(cmap)
+        nrm = _norms.get(norm, vmin, vmax).autoscale(vals)
+        return cm, nrm, [cm(nrm(v)) for v in vals]
+
+    # -- discrete family ----------------------------------------------------
+
+    def barh(self, y, width, *, height: float = 0.8, left=0.0, color=None,
+             label: str | None = None, edgecolor=None) -> "Axes":
+        """Horizontal bars of the given ``width`` at vertical positions ``y``.
+        ``y`` may be strings (categories), which set a categorical y-axis."""
+        ys = self._coords(y, "y")
+        self._marks.append({
+            "kind": "barh", "ys": ys, "widths": [float(v) for v in width],
+            "lefts": _as_seq(left, len(ys)), "height": float(height),
+            "color": self._next_color(color), "label": label,
+            "edgecolor": None if edgecolor is None else self._theme.resolve(edgecolor),
+        })
+        return self
+
+    def step(self, xs, ys, *, where: str = "pre", color=None, width: float | None = None,
+             linestyle: str = "solid", label: str | None = None) -> "Axes":
+        """Step plot through ``(xs, ys)``; ``where`` is ``pre``/``post``/``mid``."""
+        px, py = _step_points([float(x) for x in xs], [float(y) for y in ys], where)
+        self._marks.append({
+            "kind": "line", "xs": px, "ys": py, "label": label,
+            "color": self._next_color(color),
+            "width": self._theme.line_width if width is None else float(width),
+            "linestyle": linestyle, "marker": None, "markersize": 5.0, "simplify": False,
+        })
+        return self
+
+    def stairs(self, values, edges=None, *, color=None, width: float | None = None,
+               fill: bool = False, baseline: float = 0.0, label: str | None = None) -> "Axes":
+        """Step outline of ``values`` over bin ``edges`` (``len(values)+1`` edges;
+        defaults to ``0..n``). ``fill=True`` fills down to ``baseline``."""
+        values = [float(v) for v in values]
+        edges = ([float(e) for e in edges] if edges is not None
+                 else [float(i) for i in range(len(values) + 1)])
+        xs: list[float] = []
+        top: list[float] = []
+        for i, v in enumerate(values):
+            xs += [edges[i], edges[i + 1]]
+            top += [v, v]
+        if fill:
+            self._marks.append({
+                "kind": "fill", "xs": xs, "y1": top, "y2": _as_seq(baseline, len(xs)),
+                "color": self._next_color(color), "alpha": 0.3, "label": label,
+            })
+        else:
+            px = [edges[0]] + xs + [edges[-1]]
+            py = [baseline] + top + [baseline]
+            self._marks.append({
+                "kind": "line", "xs": px, "ys": py, "label": label,
+                "color": self._next_color(color),
+                "width": self._theme.line_width if width is None else float(width),
+                "linestyle": "solid", "marker": None, "markersize": 5.0, "simplify": False,
+            })
+        return self
+
+    def stackplot(self, xs, *ys, colors=None, labels=None, baseline: float = 0.0,
+                  alpha: float = 1.0) -> "Axes":
+        """Stacked area plot: each series in ``ys`` is filled atop the previous."""
+        xs = [float(x) for x in xs]
+        cum = _as_seq(baseline, len(xs))
+        for i, series in enumerate(ys):
+            layer = [float(v) for v in series]
+            upper = [c + v for c, v in zip(cum, layer)]
+            col = colors[i] if colors else None
+            self._marks.append({
+                "kind": "fill", "xs": xs, "y1": upper, "y2": cum[:],
+                "color": self._next_color(col), "alpha": alpha,
+                "label": labels[i] if labels else None,
+            })
+            cum = upper
+        return self
+
+    def stem(self, xs, ys, *, bottom: float = 0.0, color=None, marker: str = "o",
+             markersize: float = 5.0, label: str | None = None) -> "Axes":
+        """Stem plot: a vertical line from ``bottom`` to each ``(x, y)`` topped by
+        a marker, with a baseline."""
+        self._marks.append({
+            "kind": "stem", "xs": [float(x) for x in xs], "ys": [float(y) for y in ys],
+            "bottom": float(bottom), "color": self._next_color(color),
+            "marker": marker, "markersize": float(markersize), "label": label,
+        })
+        return self
+
+    def broken_barh(self, xranges, yrange, *, color=None, edgecolor=None,
+                    alpha: float = 1.0, label: str | None = None) -> "Axes":
+        """Horizontal bars from ``(xstart, width)`` pairs, all spanning the
+        vertical ``yrange = (ymin, height)`` (e.g. Gantt / interval plots)."""
+        self._marks.append({
+            "kind": "broken_barh",
+            "bars": [(float(x0), float(w)) for x0, w in xranges],
+            "y0": float(yrange[0]), "h": float(yrange[1]),
+            "color": self._next_color(color), "alpha": float(alpha),
+            "edgecolor": None if edgecolor is None else self._theme.resolve(edgecolor),
+            "label": label,
+        })
+        return self
+
+    def eventplot(self, positions, *, orientation: str = "horizontal",
+                  lineoffsets: float = 1.0, linelengths: float = 0.8,
+                  color=None, linewidth: float = 1.0) -> "Axes":
+        """Raster of event marks. ``positions`` is a 1D array or a list of rows;
+        each row is offset by ``lineoffsets`` and drawn ``linelengths`` long
+        (perpendicular to ``orientation``)."""
+        rows = positions if positions and _is_2d(positions) else [positions]
+        rows = [[float(v) for v in r] for r in rows]
+        self._marks.append({
+            "kind": "eventplot", "rows": rows, "orientation": orientation,
+            "offset": float(lineoffsets), "length": float(linelengths),
+            "color": self._next_color(color), "width": float(linewidth),
+        })
+        return self
+
+    # -- statistical --------------------------------------------------------
+
+    def boxplot(self, data, *, positions=None, widths: float = 0.5, color=None,
+                showfliers: bool = True) -> "Axes":
+        """Box-and-whisker plot. ``data`` is a list of numeric arrays (one box
+        each); ``positions`` default to ``1..n``."""
+        groups = data if _is_2d(data) else [data]
+        stats = [_boxstats([float(v) for v in g]) for g in groups]
+        positions = ([float(p) for p in positions] if positions is not None
+                     else [float(i + 1) for i in range(len(groups))])
+        self._marks.append({
+            "kind": "boxplot", "stats": stats, "positions": positions,
+            "width": float(widths), "color": self._next_color(color),
+            "showfliers": showfliers,
+        })
+        return self
+
+    def violinplot(self, data, *, positions=None, widths: float = 0.5, color=None,
+                   points: int = 128) -> "Axes":
+        """Violin plot: a mirrored Gaussian-KDE density for each array in
+        ``data`` (KDE computed in Rust, no SciPy dependency)."""
+        groups = data if _is_2d(data) else [data]
+        positions = ([float(p) for p in positions] if positions is not None
+                     else [float(i + 1) for i in range(len(groups))])
+        violins = []
+        for g in groups:
+            vals = [float(v) for v in g if math.isfinite(v)]
+            if not vals:
+                violins.append(([], []))
+                continue
+            lo, hi = min(vals), max(vals)
+            pad = (hi - lo) * 0.15 or 1.0
+            grid = [lo - pad + (hi - lo + 2 * pad) * i / (points - 1) for i in range(points)]
+            dens = _core.gaussian_kde(vals, grid, 0.0)
+            violins.append((grid, dens))
+        self._marks.append({
+            "kind": "violin", "violins": violins, "positions": positions,
+            "width": float(widths), "color": self._next_color(color),
+        })
+        return self
+
+    def hist2d(self, xs, ys, *, bins=10, range=None, cmap="viridis", norm=None,
+               vmin: float | None = None, vmax: float | None = None) -> "_Mappable":
+        """2D histogram of ``(xs, ys)`` rendered as a colormapped image. ``bins``
+        is an int or ``(nx, ny)``; the count grid is built in Rust."""
+        xs = [float(x) for x in xs]
+        ys = [float(y) for y in ys]
+        nx, ny = (bins, bins) if isinstance(bins, int) else (int(bins[0]), int(bins[1]))
+        if range is not None:
+            (xlo, xhi), (ylo, yhi) = range
+        else:
+            xlo, xhi = (min(xs), max(xs)) if xs else (0.0, 1.0)
+            ylo, yhi = (min(ys), max(ys)) if ys else (0.0, 1.0)
+        counts = _core.hist2d(xs, ys, nx, ny, xlo, xhi, ylo, yhi)
+        rows = [counts[iy * nx:(iy + 1) * nx] for iy in _irange(ny)]
+        return self.imshow(rows, cmap=cmap, norm=norm, vmin=vmin, vmax=vmax,
+                           extent=(xlo, xhi, ylo, yhi), origin="lower")
+
+    def hexbin(self, xs, ys, *, gridsize: int = 30, cmap="viridis", norm=None,
+               vmin: float | None = None, vmax: float | None = None) -> "_Mappable":
+        """Hexagonal binning of ``(xs, ys)`` colored by count (binning in Rust)."""
+        xs = [float(x) for x in xs]
+        ys = [float(y) for y in ys]
+        xlo, xhi = (min(xs), max(xs)) if xs else (0.0, 1.0)
+        ylo, yhi = (min(ys), max(ys)) if ys else (0.0, 1.0)
+        hexes = _core.hexbin(xs, ys, gridsize, xlo, xhi, ylo, yhi)
+        counts = [c for _, _, c in hexes]
+        cm, nrm, colors = self._map_colors(counts, cmap, norm, vmin, vmax)
+        sx = (xhi - xlo) / max(gridsize, 1)
+        sy = sx  # data-space cell; hexagon offsets below tile the two grids
+        # Pointy-top hexagon offsets (width ~ sx, height ~ 1.33 sy).
+        offs = [(0.0, sy * 0.66), (sx / 2.0, sy * 0.33), (sx / 2.0, -sy * 0.33),
+                (0.0, -sy * 0.66), (-sx / 2.0, -sy * 0.33), (-sx / 2.0, sy * 0.33)]
+        self._marks.append({
+            "kind": "hexbin", "centers": [(cx, cy) for cx, cy, _ in hexes],
+            "colors": colors, "offsets": offs,
+        })
+        return _Mappable(self, cm, nrm.vmin, nrm.vmax,
+                         norm=(nrm if type(nrm) is not _norms.Normalize else None))
+
+    # -- field / grid -------------------------------------------------------
+
+    def pcolormesh(self, *args, cmap="viridis", norm=None, vmin: float | None = None,
+                   vmax: float | None = None) -> "_Mappable":
+        """Pseudocolor plot of a 2D grid: ``pcolormesh(C)`` or
+        ``pcolormesh(X, Y, C)``. Regular grids route to the fast Rust image path;
+        irregular grids draw one colored quad per cell."""
+        xc, yc, Z = _field_args(args)
+        h = len(Z)
+        w = len(Z[0]) if Z else 0
+        if _is_uniform(xc) and _is_uniform(yc):
+            # Cell-centered image: extent spans half a cell beyond edge centers.
+            dx = (xc[-1] - xc[0]) / (w - 1) if w > 1 else 1.0
+            dy = (yc[-1] - yc[0]) / (h - 1) if h > 1 else 1.0
+            extent = (xc[0] - dx / 2, xc[-1] + dx / 2, yc[0] - dy / 2, yc[-1] + dy / 2)
+            return self.imshow(Z, cmap=cmap, norm=norm, vmin=vmin, vmax=vmax,
+                               extent=extent, origin="lower")
+        cm, nrm, _ = self._map_colors([v for row in Z for v in row], cmap, norm, vmin, vmax)
+        # Cell edges from coordinate midpoints (irregular quad mesh).
+        xe = _edges_from_centers(xc)
+        ye = _edges_from_centers(yc)
+        quads = []
+        for iy in _irange(h):
+            for ix in _irange(w):
+                quads.append((xe[ix], xe[ix + 1], ye[iy], ye[iy + 1],
+                              cm(nrm(float(Z[iy][ix])))))
+        self._marks.append({"kind": "quadmesh", "quads": quads,
+                            "extent": (xe[0], xe[-1], ye[0], ye[-1])})
+        return _Mappable(self, cm, nrm.vmin, nrm.vmax)
+
+    def contour(self, *args, levels=None, colors=None, cmap=None,
+                linewidths: float = 1.0) -> "Axes":
+        """Contour *lines* of a 2D field: ``contour(Z)`` or ``contour(X, Y, Z)``.
+        Marching squares runs in Rust; lines are colored per level from
+        ``colors`` (a single color / list) or ``cmap`` (default palette C0)."""
+        xc, yc, Z = _field_args(args)
+        h = len(Z)
+        w = len(Z[0]) if Z else 0
+        flat = [float(v) for row in Z for v in row]
+        lvls = _auto_levels(flat, levels)
+        segs = _core.contour_lines(flat, w, h, lvls)
+        lcolors = self._level_colors(len(lvls), colors, cmap)
+        self._marks.append({
+            "kind": "contour", "segs": segs, "xcoords": xc, "ycoords": yc,
+            "colors": lcolors, "width": float(linewidths),
+            "extent": (min(xc), max(xc), min(yc), max(yc)),
+        })
+        return self
+
+    def contourf(self, *args, levels=None, cmap="viridis", norm=None,
+                 vmin: float | None = None, vmax: float | None = None,
+                 upsample: int = 6) -> "_Mappable":
+        """Filled contour bands of a 2D field. The field is bilinearly upsampled
+        and band-colored in Rust (a raster fill, like ``imshow``)."""
+        xc, yc, Z = _field_args(args)
+        h = len(Z)
+        w = len(Z[0]) if Z else 0
+        flat = [float(v) for row in Z for v in row]
+        # Filled bands must span the full data range (unlike contour *lines*,
+        # whose levels are interior), so the extrema aren't left transparent.
+        if levels is not None and not isinstance(levels, int):
+            edges = sorted(set(float(v) for v in levels))
+        else:
+            finite = [v for v in flat if math.isfinite(v)]
+            lo, hi = (min(finite), max(finite)) if finite else (0.0, 1.0)
+            if hi <= lo:
+                hi = lo + 1.0
+            n = levels if isinstance(levels, int) else 9
+            edges = [lo + (hi - lo) * i / n for i in _irange(n + 1)]
+        nbands = len(edges) - 1
+        cm = _colormaps.get_cmap(cmap)
+        nrm = _norms.get(norm, edges[0], edges[-1])
+        nrm.vmin, nrm.vmax = edges[0], edges[-1]
+        band_lut = bytes(b for k in _irange(nbands)
+                         for b in cm(nrm(0.5 * (edges[k] + edges[k + 1]))))
+        img, uw, uh = _core.contourf_image(flat, w, h, edges, band_lut, upsample)
+        self._marks.append({
+            "kind": "contourf", "img": bytes(img), "uw": uw, "uh": uh,
+            "extent": (min(xc), max(xc), min(yc), max(yc)),
+        })
+        return _Mappable(self, cm, edges[0], edges[-1], norm=nrm)
+
+    def quiver(self, X, Y, U, V, *, color=None, scale: float | None = None,
+               width: float = 1.5) -> "Axes":
+        """Arrow field: an arrow ``(U, V)`` rooted at each ``(X, Y)``. ``scale``
+        (data units per arrow unit) defaults to fitting the largest arrow to the
+        mean grid spacing."""
+        xs = [float(v) for v in X]
+        ys = [float(v) for v in Y]
+        us = [float(v) for v in U]
+        vs = [float(v) for v in V]
+        if scale is None:
+            mag = max((math.hypot(u, v) for u, v in zip(us, vs)), default=1.0) or 1.0
+            span = (max(xs) - min(xs)) if len(xs) > 1 else 1.0
+            scale = (span / max(math.sqrt(len(xs)), 1.0)) / mag
+        self._marks.append({
+            "kind": "quiver", "xs": xs, "ys": ys, "us": us, "vs": vs,
+            "scale": float(scale), "color": self._next_color(color), "width": float(width),
+        })
+        return self
+
+    def streamplot(self, X, Y, U, V, *, density: float = 1.0, color=None,
+                   linewidth: float = 1.0) -> "Axes":
+        """Streamlines of a vector field sampled on the regular grid ``X``/``Y``
+        (1D coordinate vectors) with components ``U``/``V`` (2D, ``ny×nx``).
+        Integrated with RK4 from a seed lattice."""
+        xc = [float(v) for v in (X[0] if _is_2d(X) else X)]
+        yc = [float(v) for v in ([r[0] for r in Y] if _is_2d(Y) else Y)]
+        u = [[float(v) for v in row] for row in U]
+        v = [[float(v) for v in row] for row in V]
+        lines = _streamlines(xc, yc, u, v, density)
+        col = self._next_color(color)
+        for pts in lines:
+            self._marks.append({
+                "kind": "line", "xs": [p[0] for p in pts], "ys": [p[1] for p in pts],
+                "label": None, "color": col, "width": float(linewidth),
+                "linestyle": "solid", "marker": None, "markersize": 5.0, "simplify": True,
+            })
+        return self
+
+    def pie(self, sizes, *, labels=None, colors=None, startangle: float = 90.0,
+            radius: float = 1.0) -> "Axes":
+        """Pie chart of ``sizes`` (auto-normalized). Turns the frame off and fixes
+        an equal aspect so wedges stay circular."""
+        vals = [float(v) for v in sizes]
+        total = sum(vals) or 1.0
+        wedges = []
+        ang = math.radians(startangle)
+        for i, v in enumerate(vals):
+            sweep = 2.0 * math.pi * v / total
+            col = colors[i] if colors else None
+            wedges.append({"a0": ang, "a1": ang + sweep,
+                           "color": self._next_color(col),
+                           "label": labels[i] if labels else None})
+            ang += sweep
+        self._marks.append({"kind": "pie", "wedges": wedges, "radius": float(radius)})
+        self._frame_off = True
+        self._aspect = "equal"
+        self._xlim = (-1.3 * radius, 1.3 * radius)
+        self._ylim = (-1.3 * radius, 1.3 * radius)
+        return self
+
+    def matshow(self, M, *, cmap="viridis", norm=None, vmin: float | None = None,
+                vmax: float | None = None) -> "_Mappable":
+        """Display a matrix ``M`` with row 0 at the top (``imshow`` with
+        ``origin="upper"``)."""
+        return self.imshow(M, cmap=cmap, norm=norm, vmin=vmin, vmax=vmax, origin="upper")
+
+    def spy(self, M, *, color=None, markersize: float = 4.0) -> "Axes":
+        """Plot the sparsity pattern of ``M``: a marker at every nonzero entry
+        (row 0 at the top)."""
+        pts_x: list[float] = []
+        pts_y: list[float] = []
+        for i, row in enumerate(M):
+            for j, val in enumerate(row):
+                if float(val) != 0.0:
+                    pts_x.append(float(j))
+                    pts_y.append(float(i))
+        h = len(M)
+        self._marks.append({
+            "kind": "scatter", "xs": pts_x, "ys": [h - 1 - y for y in pts_y],
+            "label": None, "color": self._next_color(color), "size": markersize ** 2,
+            "marker": "s", "edgecolor": None, "edgewidth": 1.0, "colors": None,
+        })
+        return self
+
+    def _level_colors(self, n: int, colors, cmap):
+        """One RGBA per contour level from ``colors`` (a single color or a list)
+        or ``cmap`` (default: a single palette color)."""
+        if colors is not None:
+            if isinstance(colors, str) or (
+                hasattr(colors, "__len__") and len(colors) in (3, 4)
+                and all(isinstance(c, (int, float)) for c in colors)
+            ):
+                return [self._theme.resolve(colors)] * n
+            return [self._theme.resolve(colors[i % len(colors)]) for i in _irange(n)]
+        if cmap is None:
+            return [self._theme.palette[0]] * n
+        cm = _colormaps.get_cmap(cmap)
+        return [cm((i + 0.5) / n) for i in _irange(n)]
+
     def imshow(self, data, *, cmap="viridis", vmin: float | None = None,
-               vmax: float | None = None, extent=None, origin: str = "upper") -> "_Mappable":
+               vmax: float | None = None, norm=None, extent=None,
+               origin: str = "upper") -> "_Mappable":
         """Display 2D ``data`` as a colormapped image.
 
         ``data`` is a sequence of equal-length rows. ``cmap`` is a colormap
-        name (see :mod:`pyplotrs.colormaps`) or a ``Colormap``. ``extent`` is
-        ``(x0, x1, y0, y1)`` in data coordinates (default ``(0, ncols, 0,
-        nrows)``); ``origin`` is ``"upper"`` (row 0 at top) or ``"lower"``.
-        Returns a handle for :meth:`Figure.colorbar`.
+        name (see :mod:`pyplotrs.colormaps`) or a ``Colormap``. ``norm`` maps
+        values onto the color axis (``None`` linear, ``"log"`` for a
+        :class:`~pyplotrs.norms.LogNorm`, or any :class:`~pyplotrs.norms.Normalize`);
+        the per-pixel lookup runs in Rust. ``extent`` is ``(x0, x1, y0, y1)`` in
+        data coordinates (default ``(0, ncols, 0, nrows)``); ``origin`` is
+        ``"upper"`` (row 0 at top) or ``"lower"``. Returns a handle for
+        :meth:`Figure.colorbar`.
         """
         rows = [[float(v) for v in row] for row in data]
         h = len(rows)
         w = len(rows[0]) if rows else 0
-        flat = [v for row in rows for v in row if math.isfinite(v)]
-        lo = float(vmin) if vmin is not None else (min(flat) if flat else 0.0)
-        hi = float(vmax) if vmax is not None else (max(flat) if flat else 1.0)
         cm = _colormaps.get_cmap(cmap)
+        # Resolve the norm to fill vmin/vmax from the data (log norms use only
+        # positive samples) and to pick the Rust per-pixel transform code.
+        nrm = _norms.get(norm, vmin, vmax)
+        nrm.autoscale([v for row in rows for v in row])
+        lo, hi = nrm.vmin, nrm.vmax
+        norm_code = "log" if isinstance(nrm, _norms.LogNorm) else "linear"
         if extent is None:
             extent = (0.0, float(w), 0.0, float(h))
         else:
@@ -529,10 +1431,213 @@ class Axes:
             "cmap": cm,
             "vmin": lo,
             "vmax": hi,
+            "norm_code": norm_code,
             "extent": extent,
             "origin": origin,
         })
-        return _Mappable(self, cm, lo, hi)
+        return _Mappable(self, cm, lo, hi, norm=(nrm if norm_code != "linear" else None))
+
+    # -- public API: reference lines & patches ------------------------------
+
+    def axhline(self, y: float = 0.0, *, xmin: float = 0.0, xmax: float = 1.0,
+                color=None, linewidth: float | None = None,
+                linestyle: str = "solid") -> "Axes":
+        """Draw a horizontal reference line at data ``y`` spanning the axes
+        fraction ``xmin..xmax`` (0 = left edge, 1 = right). Reference lines are
+        guides: they are drawn over the data but never affect autoscaling."""
+        self._refs.append({
+            "kind": "axhline", "y": float(y), "min": float(xmin), "max": float(xmax),
+            "color": self._theme.resolve(color) if color is not None else self._theme.text_color,
+            "width": self._theme.line_width if linewidth is None else float(linewidth),
+            "linestyle": linestyle,
+        })
+        return self
+
+    def axvline(self, x: float = 0.0, *, ymin: float = 0.0, ymax: float = 1.0,
+                color=None, linewidth: float | None = None,
+                linestyle: str = "solid") -> "Axes":
+        """Draw a vertical reference line at data ``x`` spanning the axes
+        fraction ``ymin..ymax``. See :meth:`axhline`."""
+        self._refs.append({
+            "kind": "axvline", "x": float(x), "min": float(ymin), "max": float(ymax),
+            "color": self._theme.resolve(color) if color is not None else self._theme.text_color,
+            "width": self._theme.line_width if linewidth is None else float(linewidth),
+            "linestyle": linestyle,
+        })
+        return self
+
+    def axhspan(self, ymin: float, ymax: float, *, xmin: float = 0.0, xmax: float = 1.0,
+                color=None, alpha: float = 0.3) -> "Axes":
+        """Shade the horizontal band between data ``ymin`` and ``ymax`` (spanning
+        the axes fraction ``xmin..xmax`` in x). Drawn behind the data."""
+        self._refs.append({
+            "kind": "axhspan", "lo": float(ymin), "hi": float(ymax),
+            "min": float(xmin), "max": float(xmax),
+            "color": self._next_color(color), "alpha": float(alpha),
+        })
+        return self
+
+    def axvspan(self, xmin: float, xmax: float, *, ymin: float = 0.0, ymax: float = 1.0,
+                color=None, alpha: float = 0.3) -> "Axes":
+        """Shade the vertical band between data ``xmin`` and ``xmax`` (spanning
+        the axes fraction ``ymin..ymax`` in y). Drawn behind the data."""
+        self._refs.append({
+            "kind": "axvspan", "lo": float(xmin), "hi": float(xmax),
+            "min": float(ymin), "max": float(ymax),
+            "color": self._next_color(color), "alpha": float(alpha),
+        })
+        return self
+
+    def axline(self, xy1, *, xy2=None, slope: float | None = None, color=None,
+               linewidth: float | None = None, linestyle: str = "solid") -> "Axes":
+        """Draw an infinite line through ``xy1``, defined by a second point
+        ``xy2`` or a ``slope``. Clipped to the plot rect; not autoscaled."""
+        if (xy2 is None) == (slope is None):
+            raise ValueError("axline requires exactly one of xy2= or slope=")
+        self._refs.append({
+            "kind": "axline", "p1": (float(xy1[0]), float(xy1[1])),
+            "p2": None if xy2 is None else (float(xy2[0]), float(xy2[1])),
+            "slope": None if slope is None else float(slope),
+            "color": self._theme.resolve(color) if color is not None else self._theme.text_color,
+            "width": self._theme.line_width if linewidth is None else float(linewidth),
+            "linestyle": linestyle,
+        })
+        return self
+
+    def rectangle(self, xy, width: float, height: float, *, angle: float = 0.0,
+                  facecolor=None, edgecolor=None, linewidth: float = 1.0,
+                  linestyle: str = "solid", alpha: float = 1.0,
+                  fill: bool = True, hatch: str | None = None) -> "Axes":
+        """Add an axis-aligned (or ``angle``-rotated, degrees CCW) rectangle with
+        lower-left corner ``xy`` and the given data-space ``width``/``height``."""
+        self._patches.append(self._patch_style({
+            "kind": "rectangle", "xy": (float(xy[0]), float(xy[1])),
+            "w": float(width), "h": float(height), "angle": float(angle),
+        }, facecolor, edgecolor, linewidth, linestyle, alpha, fill, hatch))
+        return self
+
+    def circle(self, xy, radius: float, *, facecolor=None, edgecolor=None,
+               linewidth: float = 1.0, linestyle: str = "solid", alpha: float = 1.0,
+               fill: bool = True, hatch: str | None = None) -> "Axes":
+        """Add a circle of data-space ``radius`` centered at ``xy``. Note it maps
+        to an ellipse when the x/y scales differ (use ``set(aspect='equal')``)."""
+        self._patches.append(self._patch_style({
+            "kind": "ellipse", "xy": (float(xy[0]), float(xy[1])),
+            "rx": float(radius), "ry": float(radius), "angle": 0.0,
+        }, facecolor, edgecolor, linewidth, linestyle, alpha, fill, hatch))
+        return self
+
+    def ellipse(self, xy, width: float, height: float, *, angle: float = 0.0,
+                facecolor=None, edgecolor=None, linewidth: float = 1.0,
+                linestyle: str = "solid", alpha: float = 1.0, fill: bool = True,
+                hatch: str | None = None) -> "Axes":
+        """Add an ellipse of full data-space ``width``/``height`` (diameters)
+        centered at ``xy``, rotated ``angle`` degrees CCW."""
+        self._patches.append(self._patch_style({
+            "kind": "ellipse", "xy": (float(xy[0]), float(xy[1])),
+            "rx": float(width) / 2.0, "ry": float(height) / 2.0, "angle": float(angle),
+        }, facecolor, edgecolor, linewidth, linestyle, alpha, fill, hatch))
+        return self
+
+    def polygon(self, points, *, closed: bool = True, facecolor=None,
+                edgecolor=None, linewidth: float = 1.0, linestyle: str = "solid",
+                alpha: float = 1.0, fill: bool = True, hatch: str | None = None) -> "Axes":
+        """Add a polygon through the data-space vertices ``points``."""
+        self._patches.append(self._patch_style({
+            "kind": "polygon", "pts": [(float(x), float(y)) for x, y in points],
+            "closed": bool(closed),
+        }, facecolor, edgecolor, linewidth, linestyle, alpha, fill, hatch))
+        return self
+
+    def arrow(self, x: float, y: float, dx: float, dy: float, *, color=None,
+              linewidth: float = 1.5) -> "Axes":
+        """Draw an arrow from data ``(x, y)`` to ``(x + dx, y + dy)``."""
+        self._patches.append({
+            "kind": "arrow", "x": float(x), "y": float(y),
+            "dx": float(dx), "dy": float(dy),
+            "edgecolor": self._next_color(color), "linewidth": float(linewidth),
+        })
+        return self
+
+    def _patch_style(self, patch: dict, facecolor, edgecolor, linewidth,
+                     linestyle, alpha, fill, hatch) -> dict:
+        """Attach resolved fill/edge/hatch styling to a patch dict."""
+        if facecolor is None and fill:
+            face = self._next_color(None)
+        elif facecolor is None or not fill:
+            face = None
+        else:
+            face = self._theme.resolve(facecolor)
+        patch["facecolor"] = _with_alpha(face, alpha) if face is not None else None
+        patch["edgecolor"] = self._theme.resolve(edgecolor) if edgecolor is not None else None
+        patch["linewidth"] = float(linewidth)
+        patch["linestyle"] = linestyle
+        patch["hatch"] = hatch
+        return patch
+
+    def axis(self, arg: str) -> "Axes":
+        """Coarse axis control: ``"off"``/``"on"`` toggle the frame (spines,
+        ticks, grid); ``"equal"`` requests an equal data-unit aspect."""
+        if arg == "off":
+            self._frame_off = True
+        elif arg == "on":
+            self._frame_off = False
+        elif arg == "equal":
+            self._aspect = "equal"
+        elif arg == "auto":
+            self._aspect = None
+        else:
+            raise ValueError(f"unknown axis({arg!r}); expected 'off'/'on'/'equal'/'auto'")
+        return self
+
+    # -- public API: twin / secondary / inset axes --------------------------
+
+    def twinx(self) -> "Axes":
+        """A second axes sharing this one's x-axis but with an independent y-axis
+        drawn on the right (e.g. two series in different units). Plot on the
+        returned axes; it overlays the same cell."""
+        tw = Axes(self._theme)
+        tw._is_twin = True
+        tw._cidx = self._cidx  # continue the palette so colors don't collide
+        self._twinx = tw
+        return tw
+
+    def twiny(self) -> "Axes":
+        """A second axes sharing this one's y-axis with an independent x-axis
+        drawn along the top."""
+        tw = Axes(self._theme)
+        tw._is_twin = True
+        tw._cidx = self._cidx
+        self._twiny = tw
+        return tw
+
+    def inset_axes(self, bounds) -> "Axes":
+        """A child axes occupying ``bounds = (x0, y0, width, height)`` given as
+        fractions of this axes' plot area (``(0, 0)`` = lower-left). Returns the
+        inset axes to plot on."""
+        x0, y0, w, h = (float(v) for v in bounds)
+        child = Axes(self._theme)
+        self._insets.append((child, (x0, y0, w, h)))
+        return child
+
+    def secondary_xaxis(self, location: str, *, functions=None,
+                        label: str | None = None) -> "Axes":
+        """A functional secondary x-axis at ``location`` (``"top"``/``"bottom"``).
+        ``functions=(forward, inverse)`` maps primary→secondary data (e.g.
+        Celsius↔Fahrenheit); omit for a plain duplicate axis. Returns ``self``."""
+        self._secondary.append({"axis": "x", "loc": location, "functions": functions,
+                                "label": label})
+        return self
+
+    def secondary_yaxis(self, location: str, *, functions=None,
+                        label: str | None = None) -> "Axes":
+        """A functional secondary y-axis at ``location`` (``"left"``/``"right"``)."""
+        self._secondary.append({"axis": "y", "loc": location, "functions": functions,
+                                "label": label})
+        return self
+
+    def _has_extras(self) -> bool:
+        return bool(self._twinx or self._twiny or self._insets or self._secondary)
 
     # -- public API: chrome -------------------------------------------------
 
@@ -574,8 +1679,20 @@ class Axes:
         })
         return self
 
-    def set(self, *, title=None, xlabel=None, ylabel=None, xlim=None, ylim=None) -> "Axes":
-        """Set any combination of title, axis labels, and view limits."""
+    def set(self, *, title=None, xlabel=None, ylabel=None, xlim=None, ylim=None,
+            xscale=None, yscale=None, xticks=None, yticks=None,
+            xticklabels=None, yticklabels=None, xformatter=None, yformatter=None,
+            grid=None, aspect=None) -> "Axes":
+        """Set any combination of title, axis labels, view limits, axis scales,
+        and tick/grid/aspect controls.
+
+        ``xscale``/``yscale`` accept ``"linear"`` (default), ``"log"``,
+        ``"symlog"``, ``"logit"`` or a :class:`pyplotrs.scales.Scale`.
+        ``xticks``/``yticks`` pin tick positions; ``xticklabels``/``yticklabels``
+        give matching label strings. ``xformatter``/``yformatter`` accept a
+        :class:`pyplotrs.ticker.Formatter`, a ``"{x:.2f}"`` template, or a
+        callable. ``grid`` overrides the theme grid; ``aspect="equal"`` equalizes
+        the data-unit scale on both axes."""
         if title is not None:
             self._title = title
         if xlabel is not None:
@@ -586,7 +1703,47 @@ class Axes:
             self._xlim = (float(xlim[0]), float(xlim[1]))
         if ylim is not None:
             self._ylim = (float(ylim[0]), float(ylim[1]))
+        if xscale is not None:
+            self._xscale = _scales.get(xscale)
+        if yscale is not None:
+            self._yscale = _scales.get(yscale)
+        if xticks is not None:
+            self._xticks_manual = [float(v) for v in xticks]
+        if yticks is not None:
+            self._yticks_manual = [float(v) for v in yticks]
+        if xticklabels is not None:
+            self._xticklabels_manual = [str(s) for s in xticklabels]
+        if yticklabels is not None:
+            self._yticklabels_manual = [str(s) for s in yticklabels]
+        if xformatter is not None:
+            self._xformatter = _ticker.get(xformatter)
+        if yformatter is not None:
+            self._yformatter = _ticker.get(yformatter)
+        if grid is not None:
+            self._grid_override = bool(grid)
+        if aspect is not None:
+            self._aspect = None if aspect == "auto" else str(aspect)
         return self
+
+    def _resolve_ticks(self, scale, lo: float, hi: float, max_n: int,
+                       manual, manual_labels, formatter) -> list[tuple[float, str]]:
+        """Locate ``(value, label)`` tick pairs honoring manual positions,
+        manual labels, and a formatter override. Falls back to the scale's own
+        locator+labels when nothing is overridden (byte-identical to before)."""
+        if manual is not None:
+            values = manual
+        elif manual_labels is not None or formatter is not None:
+            values = [v for v, _ in scale.ticks(lo, hi, max_n)]
+        else:
+            return scale.ticks(lo, hi, max_n)  # unchanged default path
+        if manual_labels is not None:
+            labels = [manual_labels[i] if i < len(manual_labels) else ""
+                      for i in range(len(values))]
+        elif formatter is not None:
+            labels = [formatter(v, i) for i, v in enumerate(values)]
+        else:
+            labels = [_scales._fmt_plain(v) if v == int(v) else f"{v:g}" for v in values]
+        return list(zip(values, labels))
 
     # -- layout helpers -----------------------------------------------------
 
@@ -630,6 +1787,72 @@ class Axes:
                 x0, x1, y0, y1 = m["extent"]
                 xs_all += [x0, x1]
                 ys_all += [y0, y1]
+            elif k == "barh":
+                has_bar = True
+                hh = m["height"] / 2.0
+                for y in m["ys"]:
+                    ys_all += [y - hh, y + hh]
+                for lft, wdt in zip(m["lefts"], m["widths"]):
+                    xs_all += [lft, lft + wdt]
+            elif k == "stem":
+                xs_all += m["xs"]
+                ys_all += m["ys"]
+                ys_all.append(m["bottom"])
+            elif k == "broken_barh":
+                for x0, wdt in m["bars"]:
+                    xs_all += [x0, x0 + wdt]
+                ys_all += [m["y0"], m["y0"] + m["h"]]
+            elif k == "eventplot":
+                horiz = m["orientation"] == "horizontal"
+                for i, row in enumerate(m["rows"]):
+                    off = m["offset"] * i
+                    half = m["length"] / 2.0
+                    if horiz:
+                        xs_all += row
+                        ys_all += [off - half, off + half]
+                    else:
+                        ys_all += row
+                        xs_all += [off - half, off + half]
+            elif k == "boxplot":
+                hw = m["width"] / 2.0
+                for pos, st in zip(m["positions"], m["stats"]):
+                    xs_all += [pos - hw, pos + hw]
+                    ys_all += [st["lo"], st["hi"]]
+                    ys_all += st["fliers"]
+            elif k == "violin":
+                hw = m["width"] / 2.0
+                for pos, (grid, _dens) in zip(m["positions"], m["violins"]):
+                    xs_all += [pos - hw, pos + hw]
+                    ys_all += grid
+            elif k == "hexbin":
+                for cx, cy in m["centers"]:
+                    xs_all.append(cx)
+                    ys_all.append(cy)
+            elif k in ("quadmesh", "contourf"):
+                has_image = True
+                x0, x1, y0, y1 = m["extent"]
+                xs_all += [x0, x1]
+                ys_all += [y0, y1]
+            elif k == "contour":
+                x0, x1, y0, y1 = m["extent"]
+                xs_all += [x0, x1]
+                ys_all += [y0, y1]
+            elif k == "quiver":
+                xs_all += m["xs"]
+                ys_all += m["ys"]
+                for x, y, u, v in zip(m["xs"], m["ys"], m["us"], m["vs"]):
+                    xs_all.append(x + u * m["scale"])
+                    ys_all.append(y + v * m["scale"])
+            elif k == "pie":
+                r = m["radius"]
+                xs_all += [-r, r]
+                ys_all += [-r, r]
+
+        # Patches contribute their bounding box (reference lines/spans do not).
+        for p in self._patches:
+            bx, by = _patch_bbox(p)
+            xs_all += bx
+            ys_all += by
 
         if not xs_all:
             xs_all, ys_all = [0.0, 1.0], [0.0, 1.0]
@@ -657,6 +1880,13 @@ class Axes:
                 yr = _data_range(ys_all)
         else:
             yr = _data_range(ys_all)
+
+        # Non-linear scales own their autoscaling (positive-domain clipping and
+        # transformed-space padding), unless the user pinned explicit limits.
+        if not self._xscale.is_identity and not self._xlim:
+            xr = self._xscale.data_limits(xs_all)
+        if not self._yscale.is_identity and not self._ylim:
+            yr = self._yscale.data_limits(ys_all)
         return xr, yr
 
     def _bands(self, scene: "_core.Scene", xr, yr) -> tuple[
@@ -679,8 +1909,12 @@ class Axes:
         t_asc, t_desc, _ = scene.font_vmetrics(_TICK_LABEL_SIZE)
         tick_label_h = t_asc + t_desc
 
-        xticks = _core.nice_ticks(xr[0], xr[1], 7)
-        yticks = _core.nice_ticks(yr[0], yr[1], 6)
+        xticks = self._resolve_ticks(self._xscale, xr[0], xr[1], 7,
+                                     self._xticks_manual, self._xticklabels_manual,
+                                     self._xformatter)
+        yticks = self._resolve_ticks(self._yscale, yr[0], yr[1], 6,
+                                     self._yticks_manual, self._yticklabels_manual,
+                                     self._yformatter)
 
         x_tick_h = _TICK_LENGTH + _TICK_LABEL_GAP + tick_label_h
         y_label_w = max((_tw(scene, lbl, _TICK_LABEL_SIZE) for _, lbl in yticks), default=0.0)
@@ -702,7 +1936,7 @@ class Axes:
         cbar_w = 0.0
         if self._colorbar:
             cb = self._colorbar
-            cbticks = _core.nice_ticks(cb["vmin"], cb["vmax"], 6)
+            cbticks = _colorbar_ticks(cb)
             max_lbl = max(
                 (_tw(scene, lbl, _TICK_LABEL_SIZE) for _, lbl in cbticks),
                 default=0.0,
@@ -711,6 +1945,20 @@ class Axes:
             if cb["label"]:
                 a, d, _ = scene.font_vmetrics(_AXIS_LABEL_SIZE)
                 cbar_w += a + d + _AXIS_LABEL_GAP
+
+        # A twinx reserves right-side space for its y ticks/labels (shares the
+        # cbar band slot); a twiny reserves top space in the title band.
+        if self._twinx is not None and not self._colorbar:
+            txr, tyr = self._twinx._ranges()
+            tyt = self._twinx._yscale.ticks(tyr[0], tyr[1], 6)
+            tlw = max((_tw(scene, lbl, _TICK_LABEL_SIZE) for _, lbl in tyt), default=0.0)
+            cbar_w = _TICK_LENGTH + _TICK_LABEL_GAP + tlw
+            if self._twinx._ylabel:
+                a, d, _ = scene.font_vmetrics(_AXIS_LABEL_SIZE)
+                cbar_w += a + d + _AXIS_LABEL_GAP
+        if self._twiny is not None:
+            t_asc2, t_desc2, _ = scene.font_vmetrics(_TICK_LABEL_SIZE)
+            title_h += _TICK_LENGTH + _TICK_LABEL_GAP + t_asc2 + t_desc2
 
         bands = (title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w)
         return bands, xticks, yticks
@@ -721,14 +1969,42 @@ class Axes:
         plot = layout.plot
         px, py, pw, ph = plot.x, plot.y, plot.w, plot.h
         (xmin, xmax), (ymin, ymax) = xr, yr
-        xspan = (xmax - xmin) or 1.0
-        yspan = (ymax - ymin) or 1.0
+
+        # Compose each axis' scale transform with the linear device map. For a
+        # linear scale ``fx``/``fy`` are the identity, so ``sx``/``sy`` (and the
+        # affine ``coeffs`` below) are bit-for-bit what the old linear-only code
+        # produced; a nonlinear scale (log, ...) positions data in transformed
+        # space while the device map stays affine.
+        fx = self._xscale.transform
+        fy = self._yscale.transform
+        txmin, txmax = fx(xmin), fx(xmax)
+        tymin, tymax = fy(ymin), fy(ymax)
+        txspan = (txmax - txmin) or 1.0
+        tyspan = (tymax - tymin) or 1.0
+
+        # Equal aspect: shrink the used plot rect so one data (transformed) unit
+        # spans the same device length on both axes, centering the smaller box.
+        if self._aspect == "equal":
+            u = min(pw / txspan, ph / tyspan)
+            new_pw, new_ph = u * txspan, u * tyspan
+            px += (pw - new_pw) / 2.0
+            py += (ph - new_ph) / 2.0
+            pw, ph = new_pw, new_ph
 
         def sx(x: float) -> float:
-            return px + (x - xmin) / xspan * pw
+            return px + (fx(x) - txmin) / txspan * pw
 
         def sy(y: float) -> float:
-            return py + ph - (y - ymin) / yspan * ph
+            return py + ph - (fy(y) - tymin) / tyspan * ph
+
+        # Affine map over *transformed* space (dx = ax*t + bx, dy = ay*t + by) for
+        # the Rust polyline/marker fast paths.
+        ax_c = pw / txspan
+        bx_c = px - txmin * ax_c
+        ay_c = -ph / tyspan
+        by_c = py + ph - tymin * ay_c
+        proj = _Proj(sx, sy, (ax_c, bx_c, ay_c, by_c),
+                     self._xscale.code, self._yscale.code)
 
         # Theme: locals shadow the module defaults (sizes/colours) for this axes.
         t = self._theme
@@ -739,6 +2015,11 @@ class Axes:
         _BLACK = t.text_color
         sw = t.spine_width
 
+        # Minor ticks: empty for linear scales (so linear output is unchanged),
+        # e.g. the 2..9 x 10^k subdivisions on a log axis.
+        x_minor = self._xscale.minor_ticks(xmin, xmax)
+        y_minor = self._yscale.minor_ticks(ymin, ymax)
+
         # Axes background fill (behind everything in the plot area).
         if t.axes_facecolor is not None:
             scene.add_path(
@@ -746,8 +2027,11 @@ class Axes:
                 fill_color=t.axes_facecolor, close=True,
             )
 
-        # Gridlines at tick positions, behind the data.
-        if t.grid:
+        # Gridlines at tick positions, behind the data. ``grid`` may be overridden
+        # per-axes via ``set(grid=)``; ``axis("off")`` suppresses it entirely.
+        show_grid = (t.grid if self._grid_override is None else self._grid_override) \
+            and not self._frame_off
+        if show_grid:
             for value, _label in xticks:
                 x = sx(value)
                 scene.add_path([(x, py), (x, py + ph)],
@@ -756,31 +2040,63 @@ class Axes:
                 y = sy(value)
                 scene.add_path([(px, y), (px + pw, y)],
                                stroke_color=t.grid_color, stroke_width=t.grid_width)
+            # Fainter, thinner minor gridlines (log subdivisions etc.).
+            for value in x_minor:
+                x = sx(value)
+                scene.add_path([(x, py), (x, py + ph)],
+                               stroke_color=t.grid_color, stroke_width=t.grid_width * 0.5)
+            for value in y_minor:
+                y = sy(value)
+                scene.add_path([(px, y), (px + pw, y)],
+                               stroke_color=t.grid_color, stroke_width=t.grid_width * 0.5)
 
-        # Spines (despining is per-theme: only the listed edges are drawn).
-        if "left" in t.spines:
-            scene.add_path([(px, py), (px, py + ph)], stroke_color=_SPINE,
-                           stroke_width=sw, cap="butt")
-        if "bottom" in t.spines:
-            scene.add_path([(px, py + ph), (px + pw, py + ph)], stroke_color=_SPINE,
-                           stroke_width=sw, cap="butt")
-        if "right" in t.spines:
-            scene.add_path([(px + pw, py), (px + pw, py + ph)], stroke_color=_SPINE,
-                           stroke_width=sw, cap="butt")
-        if "top" in t.spines:
-            scene.add_path([(px, py), (px + pw, py)], stroke_color=_SPINE,
-                           stroke_width=sw, cap="butt")
+        # Shaded reference bands (axhspan/axvspan), behind the data.
+        if self._refs:
+            scene.begin_group(1.0, 0.0, 0.0, 1.0, 0.0, 0.0, clip=(px, py, pw, ph))
+            self._draw_spans(scene, sx, sy, px, py, pw, ph)
+            scene.end_group()
+
+        # Spines (despining is per-theme: only the listed edges are drawn;
+        # ``axis("off")`` suppresses them all).
+        if not self._frame_off:
+            if "left" in t.spines:
+                scene.add_path([(px, py), (px, py + ph)], stroke_color=_SPINE,
+                               stroke_width=sw, cap="butt")
+            if "bottom" in t.spines:
+                scene.add_path([(px, py + ph), (px + pw, py + ph)], stroke_color=_SPINE,
+                               stroke_width=sw, cap="butt")
+            if "right" in t.spines:
+                scene.add_path([(px + pw, py), (px + pw, py + ph)], stroke_color=_SPINE,
+                               stroke_width=sw, cap="butt")
+            if "top" in t.spines:
+                scene.add_path([(px, py), (px + pw, py)], stroke_color=_SPINE,
+                               stroke_width=sw, cap="butt")
 
         # All data marks, clipped to the plot rect.
         scene.begin_group(1.0, 0.0, 0.0, 1.0, 0.0, 0.0, clip=(px, py, pw, ph))
         for m in self._marks:
-            self._draw_mark(scene, m, sx, sy)
+            self._draw_mark(scene, m, proj)
         scene.end_group()
+
+        # Patches and reference lines, clipped, on top of the data.
+        if self._patches or self._refs:
+            scene.begin_group(1.0, 0.0, 0.0, 1.0, 0.0, 0.0, clip=(px, py, pw, ph))
+            for p in self._patches:
+                self._draw_patch(scene, p, sx, sy)
+            self._draw_reflines(scene, sx, sy, px, py, pw, ph)
+            scene.end_group()
 
         t_asc, t_desc, _ = scene.font_vmetrics(_TICK_LABEL_SIZE)
 
+        # ``axis("off")`` suppresses every tick and tick label (the reserved
+        # layout band is simply left empty); otherwise iterate the located ticks.
+        _xt = [] if self._frame_off else xticks
+        _yt = [] if self._frame_off else yticks
+        _xm = [] if self._frame_off else x_minor
+        _ym = [] if self._frame_off else y_minor
+
         # X ticks + labels.
-        for value, label in xticks:
+        for value, label in _xt:
             x = sx(value)
             scene.add_path(
                 [(x, py + ph), (x, py + ph + _TICK_LENGTH)],
@@ -791,8 +2107,15 @@ class Axes:
             baseline = py + ph + _TICK_LENGTH + _TICK_LABEL_GAP + t_asc
             _text(scene, x - tw / 2.0, baseline, label, _TICK_LABEL_SIZE, _BLACK)
 
+        # Shorter, unlabeled minor tick marks (log subdivisions etc.).
+        _MINOR_LEN = _TICK_LENGTH * 0.6
+        for value in _xm:
+            x = sx(value)
+            scene.add_path([(x, py + ph), (x, py + ph + _MINOR_LEN)],
+                           stroke_color=_SPINE, stroke_width=sw)
+
         # Y ticks + labels (right-aligned, vertically centered on the tick).
-        for value, label in yticks:
+        for value, label in _yt:
             y = sy(value)
             scene.add_path(
                 [(px - _TICK_LENGTH, y), (px, y)],
@@ -803,6 +2126,10 @@ class Axes:
             baseline = y + (t_asc - t_desc) / 2.0
             _text(scene, px - _TICK_LENGTH - _TICK_LABEL_GAP - tw, baseline, label,
                            _TICK_LABEL_SIZE, _BLACK)
+        for value in _ym:
+            y = sy(value)
+            scene.add_path([(px - _MINOR_LEN, y), (px, y)],
+                           stroke_color=_SPINE, stroke_width=sw)
 
         # Title, centered over the plot area.
         if self._title:
@@ -858,23 +2185,264 @@ class Axes:
                 _place_text(scene, sx(an["x"]), sy(an["y"]), an["s"], size, color,
                             an["ha"], an["va"])
 
-    def _draw_mark(self, scene, m: dict, sx, sy) -> None:
+    # -- twin / secondary / inset drawing -----------------------------------
+
+    def _proj_for(self, plot, xr, yr, xscale, yscale) -> "_Proj":
+        """Build a projection (device map + affine coeffs) for a given plot rect,
+        data ranges, and axis scales - the reusable core of ``_draw``."""
+        px, py, pw, ph = plot.x, plot.y, plot.w, plot.h
+        fx, fy = xscale.transform, yscale.transform
+        txmin, tymin = fx(xr[0]), fy(yr[0])
+        txspan = (fx(xr[1]) - txmin) or 1.0
+        tyspan = (fy(yr[1]) - tymin) or 1.0
+
+        def sx(x):
+            return px + (fx(x) - txmin) / txspan * pw
+
+        def sy(y):
+            return py + ph - (fy(y) - tymin) / tyspan * ph
+
+        ax_c = pw / txspan
+        bx_c = px - txmin * ax_c
+        ay_c = -ph / tyspan
+        by_c = py + ph - tymin * ay_c
+        return _Proj(sx, sy, (ax_c, bx_c, ay_c, by_c), xscale.code, yscale.code)
+
+    def _draw_extras(self, scene, axl, xr, yr) -> None:
+        plot = axl.plot
+        t = self._theme
+        _SPINE, sw, _BLACK = t.spine_color, t.spine_width, t.text_color
+        _TL = t.tick_label_size
+        t_asc, t_desc, _ = scene.font_vmetrics(_TL)
+
+        if self._twinx is not None:
+            tw = self._twinx
+            _txr, tyr = tw._ranges()
+            proj = self._proj_for(plot, xr, tyr, self._xscale, tw._yscale)
+            scene.begin_group(1.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+                              clip=(plot.x, plot.y, plot.w, plot.h))
+            for m in tw._marks:
+                tw._draw_mark(scene, m, proj)
+            scene.end_group()
+            scene.add_path([(plot.x1, plot.y), (plot.x1, plot.y1)],
+                           stroke_color=_SPINE, stroke_width=sw, cap="butt")
+            for val, label in tw._yscale.ticks(tyr[0], tyr[1], 6):
+                y = proj.sy(val)
+                scene.add_path([(plot.x1, y), (plot.x1 + _TICK_LENGTH, y)],
+                               stroke_color=_SPINE, stroke_width=sw)
+                _text(scene, plot.x1 + _TICK_LENGTH + _TICK_LABEL_GAP,
+                      y + (t_asc - t_desc) / 2.0, label, _TL, _BLACK)
+            if tw._ylabel:
+                self._draw_side_label(scene, axl.cbar, plot, tw._ylabel, right=True)
+
+        if self._twiny is not None:
+            tw = self._twiny
+            txr, _tyr = tw._ranges()
+            proj = self._proj_for(plot, txr, yr, tw._xscale, self._yscale)
+            scene.begin_group(1.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+                              clip=(plot.x, plot.y, plot.w, plot.h))
+            for m in tw._marks:
+                tw._draw_mark(scene, m, proj)
+            scene.end_group()
+            scene.add_path([(plot.x, plot.y), (plot.x1, plot.y)],
+                           stroke_color=_SPINE, stroke_width=sw, cap="butt")
+            for val, label in tw._xscale.ticks(txr[0], txr[1], 7):
+                x = proj.sx(val)
+                scene.add_path([(x, plot.y), (x, plot.y - _TICK_LENGTH)],
+                               stroke_color=_SPINE, stroke_width=sw)
+                lw = _tw(scene, label, _TL)
+                _text(scene, x - lw / 2.0, plot.y - _TICK_LENGTH - _TICK_LABEL_GAP - t_desc,
+                      label, _TL, _BLACK)
+
+        for spec in self._secondary:
+            self._draw_secondary(scene, plot, xr, yr, spec)
+
+        for child, (fx0, fy0, fw, fh) in self._insets:
+            cell = _Rect(plot.x + fx0 * plot.w, plot.y + (1.0 - fy0 - fh) * plot.h,
+                         fw * plot.w, fh * plot.h)
+            cxr, cyr = child._ranges()
+            bands, cxt, cyt = child._bands(scene, cxr, cyr)
+            child._draw(scene, _layout_cell(cell, bands), cxr, cyr, cxt, cyt)
+
+    def _draw_side_label(self, scene, band, plot, text, right: bool) -> None:
+        t = self._theme
+        size = t.axis_label_size
+        a, d, _ = scene.font_vmetrics(size)
+        tw = _tw(scene, text, size)
+        pivot_x = band.x + band.w - (a + d) / 2.0 if right else band.x + (a + d) / 2.0
+        pivot_y = plot.y + plot.h / 2.0
+        # Rotate +90deg (reads bottom-to-top on the right side).
+        scene.begin_group(0.0, 1.0, -1.0, 0.0, pivot_x, pivot_y)
+        _text(scene, -tw / 2.0, 0.0, text, size, t.text_color)
+        scene.end_group()
+
+    def _draw_secondary(self, scene, plot, xr, yr, spec) -> None:
+        t = self._theme
+        _SPINE, sw, _BLACK = t.spine_color, t.spine_width, t.text_color
+        _TL = t.tick_label_size
+        t_asc, t_desc, _ = scene.font_vmetrics(_TL)
+        fns = spec["functions"]
+        fwd = fns[0] if fns else (lambda v: v)
+        inv = fns[1] if fns else (lambda v: v)
+        hproj = self._proj_for(plot, xr, yr, self._xscale, self._yscale)
+        if spec["axis"] == "x":
+            s0, s1 = fwd(xr[0]), fwd(xr[1])
+            ticks = _core.nice_ticks(min(s0, s1), max(s0, s1), 7)
+            top = spec["loc"] == "top"
+            edge_y = plot.y if top else plot.y1
+            direction = -1.0 if top else 1.0
+            scene.add_path([(plot.x, edge_y), (plot.x1, edge_y)],
+                           stroke_color=_SPINE, stroke_width=sw, cap="butt")
+            for sval, label in ticks:
+                x = hproj.sx(inv(sval))
+                if x < plot.x - 0.5 or x > plot.x1 + 0.5:
+                    continue
+                scene.add_path([(x, edge_y), (x, edge_y + direction * _TICK_LENGTH)],
+                               stroke_color=_SPINE, stroke_width=sw)
+                lw = _tw(scene, label, _TL)
+                by = (edge_y - _TICK_LENGTH - _TICK_LABEL_GAP - t_desc if top
+                      else edge_y + _TICK_LENGTH + _TICK_LABEL_GAP + t_asc)
+                _text(scene, x - lw / 2.0, by, label, _TL, _BLACK)
+        else:  # secondary y
+            s0, s1 = fwd(yr[0]), fwd(yr[1])
+            ticks = _core.nice_ticks(min(s0, s1), max(s0, s1), 6)
+            right = spec["loc"] == "right"
+            edge_x = plot.x1 if right else plot.x
+            direction = 1.0 if right else -1.0
+            scene.add_path([(edge_x, plot.y), (edge_x, plot.y1)],
+                           stroke_color=_SPINE, stroke_width=sw, cap="butt")
+            for sval, label in ticks:
+                y = hproj.sy(inv(sval))
+                if y < plot.y - 0.5 or y > plot.y1 + 0.5:
+                    continue
+                scene.add_path([(edge_x, y), (edge_x + direction * _TICK_LENGTH, y)],
+                               stroke_color=_SPINE, stroke_width=sw)
+                lw = _tw(scene, label, _TL)
+                bx = (edge_x + _TICK_LENGTH + _TICK_LABEL_GAP if right
+                      else edge_x - _TICK_LENGTH - _TICK_LABEL_GAP - lw)
+                _text(scene, bx, y + (t_asc - t_desc) / 2.0, label, _TL, _BLACK)
+
+    # -- reference lines & patches drawing ----------------------------------
+
+    def _draw_spans(self, scene, sx, sy, px, py, pw, ph) -> None:
+        """Draw shaded axhspan/axvspan bands (behind the data)."""
+        for r in self._refs:
+            k = r["kind"]
+            if k == "axhspan":
+                y0, y1 = sy(r["lo"]), sy(r["hi"])
+                x0, x1 = px + r["min"] * pw, px + r["max"] * pw
+            elif k == "axvspan":
+                x0, x1 = sx(r["lo"]), sx(r["hi"])
+                # fraction 0 = bottom (py+ph), 1 = top (py), in y-down device space.
+                y0, y1 = py + ph - r["min"] * ph, py + ph - r["max"] * ph
+            else:
+                continue
+            scene.add_path([(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
+                           fill_color=_with_alpha(r["color"], r["alpha"]), close=True)
+
+    def _draw_reflines(self, scene, sx, sy, px, py, pw, ph) -> None:
+        """Draw axhline/axvline/axline reference guides (on top of the data)."""
+        for r in self._refs:
+            k = r["kind"]
+            if k == "axhline":
+                y = sy(r["y"])
+                x0, x1 = px + r["min"] * pw, px + r["max"] * pw
+                scene.add_path([(x0, y), (x1, y)], stroke_color=r["color"],
+                               stroke_width=r["width"], dash=_dash_for(r["linestyle"]))
+            elif k == "axvline":
+                x = sx(r["x"])
+                y0, y1 = py + ph - r["min"] * ph, py + ph - r["max"] * ph
+                scene.add_path([(x, y0), (x, y1)], stroke_color=r["color"],
+                               stroke_width=r["width"], dash=_dash_for(r["linestyle"]))
+            elif k == "axline":
+                self._draw_axline(scene, r, sx, sy, px, py, pw, ph)
+
+    def _draw_axline(self, scene, r, sx, sy, px, py, pw, ph) -> None:
+        p1x, p1y = r["p1"]
+        if r["slope"] is not None:
+            p2x, p2y = p1x + 1.0, p1y + r["slope"]
+        else:
+            p2x, p2y = r["p2"]
+        d1x, d1y = sx(p1x), sy(p1y)
+        d2x, d2y = sx(p2x), sy(p2y)
+        ddx, ddy = d2x - d1x, d2y - d1y
+        if ddx == 0.0 and ddy == 0.0:
+            return
+        # Extend far past the plot rect in both directions, then clip to it.
+        big = 1e5
+        seg = _clip_segment(d1x - ddx * big, d1y - ddy * big,
+                            d1x + ddx * big, d1y + ddy * big, px, py, pw, ph)
+        if seg is not None:
+            scene.add_path([(seg[0], seg[1]), (seg[2], seg[3])], stroke_color=r["color"],
+                           stroke_width=r["width"], dash=_dash_for(r["linestyle"]))
+
+    def _draw_patch(self, scene, p, sx, sy) -> None:
+        k = p["kind"]
+        if k == "arrow":
+            _draw_arrow(scene, sx(p["x"]), sy(p["y"]),
+                        sx(p["x"] + p["dx"]), sy(p["y"] + p["dy"]),
+                        p["edgecolor"], p["linewidth"])
+            return
+        if k == "rectangle":
+            x0, y0 = p["xy"]
+            w, h = p["w"], p["h"]
+            a = math.radians(p["angle"])
+            ca, sa = math.cos(a), math.sin(a)
+            data_pts = [(x0 + cx * ca - cy * sa, y0 + cx * sa + cy * ca)
+                        for cx, cy in ((0.0, 0.0), (w, 0.0), (w, h), (0.0, h))]
+            closed = True
+        elif k == "ellipse":
+            cx, cy = p["xy"]
+            rx, ry = p["rx"], p["ry"]
+            a = math.radians(p["angle"])
+            ca, sa = math.cos(a), math.sin(a)
+            data_pts = []
+            for i in range(_ELLIPSE_N):
+                th = 2.0 * math.pi * i / _ELLIPSE_N
+                ex, ey = rx * math.cos(th), ry * math.sin(th)
+                data_pts.append((cx + ex * ca - ey * sa, cy + ex * sa + ey * ca))
+            closed = True
+        else:  # polygon
+            data_pts = p["pts"]
+            closed = p["closed"]
+        dev = [(sx(x), sy(y)) for x, y in data_pts]
+        if len(dev) < 2:
+            return
+        scene.add_path(dev, fill_color=p["facecolor"], close=closed,
+                       stroke_color=p["edgecolor"],
+                       stroke_width=p["linewidth"] if p["edgecolor"] else 1.0,
+                       dash=_dash_for(p["linestyle"]))
+        if p["hatch"]:
+            hc = p["edgecolor"] or self._theme.text_color
+            _draw_hatch(scene, dev, p["hatch"], hc, max(p["linewidth"] * 0.5, 0.5))
+
+    def _draw_mark(self, scene, m: dict, proj: "_Proj") -> None:
+        sx, sy = proj.sx, proj.sy
         kind = m["kind"]
         if kind == "line":
             # Fast path: map + build the polyline in Rust (no per-point Python).
-            ax, bx, ay, by = _xform_coeffs(sx, sy)
+            # The scale transform (identity for linear) is applied per point in
+            # Rust before the affine ``coeffs``, so any scale stays on the fast path.
+            ax, bx, ay, by = proj.coeffs
+            xc, yc = proj.xcode, proj.ycode
             if _draws_line(m["linestyle"]) and len(m["xs"]) >= 2:
                 scene.add_line_xform(m["xs"], m["ys"], ax, bx, ay, by, m["color"],
                                      m["width"], _dash_for(m["linestyle"]), "round", "round",
-                                     m.get("simplify", True), 0.1)
+                                     m.get("simplify", True), 0.1, xc, yc)
             if m["marker"]:
                 scene.add_markers_xform(m["xs"], m["ys"], ax, bx, ay, by, m["marker"],
-                                        m["markersize"], m["color"], None, 1.0)
+                                        m["markersize"], m["color"], None, 1.0, xc, yc)
         elif kind == "scatter":
-            ax, bx, ay, by = _xform_coeffs(sx, sy)
-            scene.add_markers_xform(m["xs"], m["ys"], ax, bx, ay, by, m["marker"],
-                                    math.sqrt(m["size"]), m["color"], m["edgecolor"],
-                                    m["edgewidth"])
+            ax, bx, ay, by = proj.coeffs
+            if m.get("colors") is not None:
+                scene.add_markers_xform_colored(
+                    m["xs"], m["ys"], ax, bx, ay, by, m["marker"],
+                    math.sqrt(m["size"]), m["colors"], m["edgecolor"],
+                    m["edgewidth"], proj.xcode, proj.ycode)
+            else:
+                scene.add_markers_xform(m["xs"], m["ys"], ax, bx, ay, by, m["marker"],
+                                        math.sqrt(m["size"]), m["color"], m["edgecolor"],
+                                        m["edgewidth"], proj.xcode, proj.ycode)
         elif kind == "bar":
             hw = m["width"] / 2.0
             for x, h, b in zip(m["xs"], m["heights"], m["bottoms"]):
@@ -902,6 +2470,134 @@ class Axes:
             self._draw_errorbar(scene, m, sx, sy)
         elif kind == "image":
             self._draw_image(scene, m, sx, sy)
+        elif kind == "barh":
+            hh = m["height"] / 2.0
+            for y, wdt, lft in zip(m["ys"], m["widths"], m["lefts"]):
+                x0, x1 = sx(lft), sx(lft + wdt)
+                y0, y1 = sy(y - hh), sy(y + hh)
+                scene.add_path([(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
+                               fill_color=m["color"], close=True,
+                               stroke_color=m["edgecolor"], stroke_width=1.0)
+        elif kind == "stem":
+            y0 = sy(m["bottom"])
+            baseline_pts = []
+            for x, y in zip(m["xs"], m["ys"]):
+                X = sx(x)
+                scene.add_path([(X, y0), (X, sy(y))], stroke_color=m["color"], stroke_width=1.0)
+                baseline_pts.append((X, y0))
+            if baseline_pts:
+                scene.add_path([baseline_pts[0], baseline_pts[-1]],
+                               stroke_color=m["color"], stroke_width=1.0)
+            if m["marker"]:
+                for x, y in zip(m["xs"], m["ys"]):
+                    _draw_marker(scene, sx(x), sy(y), m["markersize"], m["marker"], m["color"])
+        elif kind == "broken_barh":
+            y0, y1 = sy(m["y0"]), sy(m["y0"] + m["h"])
+            for x0d, wdt in m["bars"]:
+                x0, x1 = sx(x0d), sx(x0d + wdt)
+                scene.add_path([(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
+                               fill_color=_with_alpha(m["color"], m["alpha"]), close=True,
+                               stroke_color=m["edgecolor"],
+                               stroke_width=1.0 if m["edgecolor"] else 1.0)
+        elif kind == "eventplot":
+            horiz = m["orientation"] == "horizontal"
+            half = m["length"] / 2.0
+            for i, row in enumerate(m["rows"]):
+                off = m["offset"] * i
+                for pos in row:
+                    if horiz:
+                        scene.add_path([(sx(pos), sy(off - half)), (sx(pos), sy(off + half))],
+                                       stroke_color=m["color"], stroke_width=m["width"])
+                    else:
+                        scene.add_path([(sx(off - half), sy(pos)), (sx(off + half), sy(pos))],
+                                       stroke_color=m["color"], stroke_width=m["width"])
+        elif kind == "boxplot":
+            self._draw_boxplot(scene, m, sx, sy)
+        elif kind == "violin":
+            self._draw_violin(scene, m, sx, sy)
+        elif kind == "hexbin":
+            for (cx, cy), col in zip(m["centers"], m["colors"]):
+                poly = [(sx(cx + ox), sy(cy + oy)) for ox, oy in m["offsets"]]
+                scene.add_path(poly, fill_color=col, close=True)
+        elif kind == "quadmesh":
+            for x0, x1, y0, y1, col in m["quads"]:
+                scene.add_path([(sx(x0), sy(y0)), (sx(x1), sy(y0)),
+                                (sx(x1), sy(y1)), (sx(x0), sy(y1))],
+                               fill_color=col, close=True)
+        elif kind == "contour":
+            xc, yc, w = m["xcoords"], m["ycoords"], m["width"]
+            for li, x0, y0, x1, y1 in m["segs"]:
+                col = m["colors"][li] if li < len(m["colors"]) else m["colors"][-1]
+                scene.add_path(
+                    [(sx(_interp_coord(xc, x0)), sy(_interp_coord(yc, y0))),
+                     (sx(_interp_coord(xc, x1)), sy(_interp_coord(yc, y1)))],
+                    stroke_color=col, stroke_width=w)
+        elif kind == "contourf":
+            self._draw_field_image(scene, m, sx, sy)
+        elif kind == "quiver":
+            for x, y, u, v in zip(m["xs"], m["ys"], m["us"], m["vs"]):
+                _draw_arrow(scene, sx(x), sy(y),
+                            sx(x + u * m["scale"]), sy(y + v * m["scale"]),
+                            m["color"], m["width"], head_len=6.0, head_w=2.5)
+        elif kind == "pie":
+            self._draw_pie(scene, m, sx, sy)
+
+    def _draw_boxplot(self, scene, m, sx, sy) -> None:
+        hw = m["width"] / 2.0
+        col = m["color"]
+        for pos, st in zip(m["positions"], m["stats"]):
+            x0, x1 = sx(pos - hw), sx(pos + hw)
+            xc = sx(pos)
+            q1, q3 = sy(st["q1"]), sy(st["q3"])
+            # Box (IQR) with median line.
+            scene.add_path([(x0, q1), (x1, q1), (x1, q3), (x0, q3)], close=True,
+                           fill_color=_with_alpha(col, 0.25), stroke_color=col, stroke_width=1.2)
+            ymed = sy(st["med"])
+            scene.add_path([(x0, ymed), (x1, ymed)], stroke_color=col, stroke_width=1.6)
+            # Whiskers + caps.
+            for yq, yend in ((q1, sy(st["lo"])), (q3, sy(st["hi"]))):
+                scene.add_path([(xc, yq), (xc, yend)], stroke_color=col, stroke_width=1.0)
+                scene.add_path([(x0 + (x1 - x0) * 0.25, yend), (x1 - (x1 - x0) * 0.25, yend)],
+                               stroke_color=col, stroke_width=1.0)
+            if m["showfliers"]:
+                for fv in st["fliers"]:
+                    _draw_marker(scene, xc, sy(fv), 4.0, "o", None, edgecolor=col, edgewidth=1.0)
+
+    def _draw_violin(self, scene, m, sx, sy) -> None:
+        col = m["color"]
+        hw = m["width"] / 2.0
+        for pos, (grid, dens) in zip(m["positions"], m["violins"]):
+            if not grid:
+                continue
+            peak = max(dens) or 1.0
+            left = [(sx(pos - hw * d / peak), sy(g)) for g, d in zip(grid, dens)]
+            right = [(sx(pos + hw * d / peak), sy(g)) for g, d in reversed(list(zip(grid, dens)))]
+            poly = left + right
+            if len(poly) >= 3:
+                scene.add_path(poly, fill_color=_with_alpha(col, 0.4), close=True,
+                               stroke_color=col, stroke_width=1.0)
+
+    def _draw_field_image(self, scene, m, sx, sy) -> None:
+        if m["uw"] == 0 or m["uh"] == 0:
+            return
+        x0, x1, y0, y1 = m["extent"]
+        left, right = sx(x0), sx(x1)
+        rx, rw = min(left, right), abs(right - left)
+        top, bot = sy(max(y0, y1)), sy(min(y0, y1))
+        scene.add_image(m["img"], m["uw"], m["uh"], rx, top, rw, bot - top)
+
+    def _draw_pie(self, scene, m, sx, sy) -> None:
+        r = m["radius"]
+        cx0, cy0 = sx(0.0), sy(0.0)
+        for wd in m["wedges"]:
+            a0, a1 = wd["a0"], wd["a1"]
+            n = max(2, int((a1 - a0) / (math.pi / 36)) + 1)
+            pts = [(cx0, cy0)]
+            for i in range(n + 1):
+                a = a0 + (a1 - a0) * i / n
+                pts.append((sx(r * math.cos(a)), sy(r * math.sin(a))))
+            scene.add_path(pts, fill_color=wd["color"], close=True,
+                           stroke_color=_WHITE, stroke_width=1.0)
 
     def _draw_image(self, scene, m: dict, sx, sy) -> None:
         x0, x1, y0, y1 = m["extent"]
@@ -920,7 +2616,8 @@ class Axes:
         lut = _colormap_lut(m["cmap"])
         flat = [v for row in rows for v in row]
         scene.add_colormapped_image(flat, w, h, m["vmin"], m["vmax"], lut,
-                                    m["origin"] == "upper", rx, ry, rw, rh)
+                                    m["origin"] == "upper", rx, ry, rw, rh,
+                                    m.get("norm_code", "linear"))
 
     def _draw_errorbar(self, scene, m: dict, sx, sy) -> None:
         color, w, cap = m["color"], m["width"], m["capsize"]
@@ -989,11 +2686,13 @@ class Axes:
             close=True, stroke_color=_SPINE, stroke_width=0.8,
         )
 
-        # Ticks + labels to the right of the strip.
+        # Ticks + labels to the right of the strip. A norm (e.g. LogNorm) drives
+        # both the tick values and their fractional positions on the strip.
         t_asc, t_desc, _ = scene.font_vmetrics(_TICK_LABEL_SIZE)
         span = (vmax - vmin) or 1.0
-        for value, label in _core.nice_ticks(vmin, vmax, 6):
-            frac = (value - vmin) / span
+        norm = cb.get("norm")
+        for value, label in _colorbar_ticks(cb):
+            frac = norm(value) if norm is not None else (value - vmin) / span
             ty = strip_y + strip_h - frac * strip_h
             scene.add_path(
                 [(strip_x + strip_w, ty), (strip_x + strip_w + _CBAR_TICK_LEN, ty)],
@@ -1231,6 +2930,104 @@ class Axes3D:
         })
         return self
 
+    def bar3d(self, x, y, z, dx, dy, dz, *, color=None, label: str | None = None) -> "Axes3D":
+        """Draw 3D bars (boxes): base corners ``(x, y, z)`` with sizes
+        ``(dx, dy, dz)`` (each a scalar or per-bar array)."""
+        xs = [float(v) for v in x]
+        n = len(xs)
+        self._marks3.append({
+            "kind": "bar3d", "xs": xs, "ys": [float(v) for v in y],
+            "zs": [float(v) for v in z], "dx": _as_seq(dx, n), "dy": _as_seq(dy, n),
+            "dz": _as_seq(dz, n), "color": self._next_color(color), "label": label,
+        })
+        return self
+
+    def plot_wireframe(self, X, Y, Z, *, color=None, width: float = 0.8) -> "Axes3D":
+        """Draw the grid ``(X, Y, Z)`` as a wireframe (row + column lines)."""
+        gx, gy, gz, nr, nc = _grid_xyz(X, Y, Z)
+        self._marks3.append({
+            "kind": "wireframe", "gx": gx, "gy": gy, "gz": gz, "nr": nr, "nc": nc,
+            "xflat": [v for row in gx for v in row],
+            "yflat": [v for row in gy for v in row],
+            "zflat": [v for row in gz for v in row],
+            "color": self._next_color(color), "width": float(width),
+        })
+        return self
+
+    def contour3d(self, X, Y, Z, *, levels=None, cmap="viridis",
+                  width: float = 1.5) -> "Axes3D":
+        """Draw contour lines of the grid ``(X, Y, Z)`` at their z-heights
+        (marching squares in Rust); each level colored from ``cmap``."""
+        gx, gy, gz, nr, nc = _grid_xyz(X, Y, Z)
+        flat = [v for row in gz for v in row]
+        lvls = _auto_levels(flat, levels)
+        segs = _core.contour_lines(flat, nc, nr, lvls)
+        cm = _colormaps.get_cmap(cmap)
+        lo, hi = (min(lvls), max(lvls)) if lvls else (0.0, 1.0)
+        span = (hi - lo) or 1.0
+        colors = [cm((lv - lo) / span) for lv in lvls]
+        self._marks3.append({
+            "kind": "contour3d", "segs": segs, "gx": gx, "gy": gy, "levels": lvls,
+            "colors": colors, "width": float(width),
+            "xflat": [v for row in gx for v in row],
+            "yflat": [v for row in gy for v in row], "zflat": flat,
+        })
+        return self
+
+    def plot_trisurf(self, x, y, z, *, triangles=None, cmap="viridis",
+                     label: str | None = None) -> "Axes3D":
+        """Surface over scattered points ``(x, y, z)``: Delaunay-triangulate the
+        ``(x, y)`` plane (unless ``triangles`` index-triples are given) and shade
+        each facet by mean z."""
+        xs = [float(v) for v in x]
+        ys = [float(v) for v in y]
+        zs = [float(v) for v in z]
+        tris = triangles if triangles is not None else _delaunay(list(zip(xs, ys)))
+        self._marks3.append({
+            "kind": "trisurf", "xs": xs, "ys": ys, "zs": zs,
+            "tris": [tuple(t) for t in tris], "cmap": _colormaps.get_cmap(cmap),
+            "zmin": min(zs) if zs else 0.0, "zmax": max(zs) if zs else 1.0,
+            "xflat": xs, "yflat": ys, "zflat": zs, "label": label,
+        })
+        return self
+
+    def quiver3d(self, x, y, z, u, v, w, *, length: float = 1.0, color=None,
+                 width: float = 1.5) -> "Axes3D":
+        """Draw 3D arrows ``(u, v, w)`` rooted at ``(x, y, z)``, scaled by
+        ``length``."""
+        self._marks3.append({
+            "kind": "quiver3d", "xs": [float(v) for v in x], "ys": [float(v) for v in y],
+            "zs": [float(v) for v in z], "us": [float(v) for v in u],
+            "vs": [float(v) for v in v], "ws": [float(v) for v in w],
+            "length": float(length), "color": self._next_color(color), "width": float(width),
+        })
+        # Autoscale should include arrow tips.
+        self._marks3[-1]["xflat"] = [px + length * uu for px, uu in
+                                     zip(self._marks3[-1]["xs"], self._marks3[-1]["us"])] + self._marks3[-1]["xs"]
+        self._marks3[-1]["yflat"] = [py + length * vv for py, vv in
+                                     zip(self._marks3[-1]["ys"], self._marks3[-1]["vs"])] + self._marks3[-1]["ys"]
+        self._marks3[-1]["zflat"] = [pz + length * ww for pz, ww in
+                                     zip(self._marks3[-1]["zs"], self._marks3[-1]["ws"])] + self._marks3[-1]["zs"]
+        return self
+
+    def voxels(self, filled, *, color=None, edgecolor=None) -> "Axes3D":
+        """Draw a 3D boolean occupancy grid ``filled[i][j][k]`` as unit cubes."""
+        color = self._next_color(color)
+        cells = []
+        for i, plane in enumerate(filled):
+            for j, row in enumerate(plane):
+                for k, on in enumerate(row):
+                    if on:
+                        cells.append((i, j, k))
+        self._marks3.append({
+            "kind": "voxels", "cells": cells, "color": color,
+            "edgecolor": None if edgecolor is None else self._theme.resolve(edgecolor),
+            "xflat": [0.0] + [c[0] + 1 for c in cells],
+            "yflat": [0.0] + [c[1] + 1 for c in cells],
+            "zflat": [0.0] + [c[2] + 1 for c in cells],
+        })
+        return self
+
     # matplotlib-style aliases.
     scatter3d = scatter
     plot3d = plot
@@ -1281,11 +3078,21 @@ class Axes3D:
         ys: list[float] = []
         zs: list[float] = []
         for m in self._marks3:
-            if m["kind"] in ("scatter", "line"):
+            k = m["kind"]
+            if k in ("scatter", "line"):
                 xs += m["xs"]
                 ys += m["ys"]
                 zs += m["zs"]
-            elif m["kind"] == "surface":
+            elif k == "bar3d":
+                xs += m["xs"] + [a + b for a, b in zip(m["xs"], m["dx"])]
+                ys += m["ys"] + [a + b for a, b in zip(m["ys"], m["dy"])]
+                zs += m["zs"] + [a + b for a, b in zip(m["zs"], m["dz"])]
+            elif k == "voxels":
+                for i, j, kk in m["cells"]:
+                    xs += [i, i + 1]
+                    ys += [j, j + 1]
+                    zs += [kk, kk + 1]
+            elif "xflat" in m:
                 xs += m["xflat"]
                 ys += m["yflat"]
                 zs += m["zflat"]
@@ -1390,26 +3197,110 @@ class Axes3D:
         for nz, _ in zt:
             gridline((-0.5, y_back, nz), (0.5, y_back, nz))
 
-        # 2. Data marks (surfaces, then lines, then points on top).
+        # 2. Data marks: project every primitive to (depth, draw_fn) and paint
+        #    them in one global back-to-front order so surfaces, lines, bars and
+        #    points that interpenetrate occlude each other correctly (a single
+        #    depth sort across all marks, not per-mark).
+        prims: list[tuple[float, "callable"]] = []
+
+        def add_poly(pts3, fill, stroke=None, sw=1.0):
+            if len(pts3) < 3:
+                return
+            depth = sum(p[2] for p in pts3) / len(pts3)
+            dev = [(p[0], p[1]) for p in pts3]
+            prims.append((depth, lambda: scene.add_path(
+                dev, fill_color=fill, close=True, stroke_color=stroke,
+                stroke_width=sw if stroke else 1.0)))
+
+        def add_seg(a3, b3, color, w, dash=None):
+            prims.append(((a3[2] + b3[2]) / 2.0, lambda: scene.add_path(
+                [(a3[0], a3[1]), (b3[0], b3[1])], stroke_color=color,
+                stroke_width=w, cap="round", join="round", dash=dash)))
+
+        def add_point(p3, d, marker, fc, ec):
+            prims.append((p3[2], lambda: _draw_marker(
+                scene, p3[0], p3[1], d, marker, facecolor=fc, edgecolor=ec)))
+
+        def box_faces(x0, y0, z0, x1, y1, z1, fill, edge):
+            c = [(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0),
+                 (x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)]
+            cp = [proj(*v) for v in c]
+            for a, b, cc, dd in ((0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4),
+                                 (2, 3, 7, 6), (1, 2, 6, 5), (0, 3, 7, 4)):
+                add_poly([cp[a], cp[b], cp[cc], cp[dd]], fill, edge, 0.6)
+
         for m in self._marks3:
-            if m["kind"] == "surface":
-                self._draw_surface(scene, m, proj)
-        for m in self._marks3:
-            if m["kind"] == "line":
-                poly = [proj(x, y, z)[:2] for x, y, z in zip(m["xs"], m["ys"], m["zs"])]
-                if len(poly) >= 2:
-                    scene.add_path(poly, stroke_color=m["color"], stroke_width=m["width"],
-                                   cap="round", join="round", dash=_dash_for(m["linestyle"]))
-        for m in self._marks3:
-            if m["kind"] == "scatter":
+            k = m["kind"]
+            if k == "surface":
+                gx, gy, gz = m["gx"], m["gy"], m["gz"]
+                zmin, zmax, cm = m["zmin"], m["zmax"], m["cmap"]
+                zspd = (zmax - zmin) or 1.0
+                for r in range(m["nr"] - 1):
+                    for cc in range(m["nc"] - 1):
+                        corners = [proj(gx[r][cc], gy[r][cc], gz[r][cc]),
+                                   proj(gx[r][cc + 1], gy[r][cc + 1], gz[r][cc + 1]),
+                                   proj(gx[r + 1][cc + 1], gy[r + 1][cc + 1], gz[r + 1][cc + 1]),
+                                   proj(gx[r + 1][cc], gy[r + 1][cc], gz[r + 1][cc])]
+                        zc = (gz[r][cc] + gz[r][cc + 1] + gz[r + 1][cc + 1] + gz[r + 1][cc]) / 4.0
+                        add_poly(corners, cm((zc - zmin) / zspd), None, 1.0)
+            elif k == "trisurf":
+                cm, zmin, zmax = m["cmap"], m["zmin"], m["zmax"]
+                zspd = (zmax - zmin) or 1.0
+                for a, b, cc in m["tris"]:
+                    pa = proj(m["xs"][a], m["ys"][a], m["zs"][a])
+                    pb = proj(m["xs"][b], m["ys"][b], m["zs"][b])
+                    pc = proj(m["xs"][cc], m["ys"][cc], m["zs"][cc])
+                    zc = (m["zs"][a] + m["zs"][b] + m["zs"][cc]) / 3.0
+                    add_poly([pa, pb, pc], cm((zc - zmin) / zspd),
+                             _WHITE, 0.4)
+            elif k == "line":
+                pr = [proj(x, y, z) for x, y, z in zip(m["xs"], m["ys"], m["zs"])]
+                for i in range(len(pr) - 1):
+                    add_seg(pr[i], pr[i + 1], m["color"], m["width"],
+                            _dash_for(m["linestyle"]))
+            elif k == "wireframe":
+                gx, gy, gz = m["gx"], m["gy"], m["gz"]
+                grid = [[proj(gx[r][c], gy[r][c], gz[r][c]) for c in range(m["nc"])]
+                        for r in range(m["nr"])]
+                for r in range(m["nr"]):
+                    for c in range(m["nc"] - 1):
+                        add_seg(grid[r][c], grid[r][c + 1], m["color"], m["width"])
+                for c in range(m["nc"]):
+                    for r in range(m["nr"] - 1):
+                        add_seg(grid[r][c], grid[r + 1][c], m["color"], m["width"])
+            elif k == "contour3d":
+                gx, gy = m["gx"], m["gy"]
+                for li, x0, y0, x1, y1 in m["segs"]:
+                    lv = m["levels"][li]
+                    a = proj(_bilinear_grid(gx, y0, x0), _bilinear_grid(gy, y0, x0), lv)
+                    b = proj(_bilinear_grid(gx, y1, x1), _bilinear_grid(gy, y1, x1), lv)
+                    add_seg(a, b, m["colors"][li] if li < len(m["colors"]) else m["colors"][-1],
+                            m["width"])
+            elif k == "bar3d":
+                for i in range(len(m["xs"])):
+                    box_faces(m["xs"][i], m["ys"][i], m["zs"][i],
+                              m["xs"][i] + m["dx"][i], m["ys"][i] + m["dy"][i],
+                              m["zs"][i] + m["dz"][i], m["color"], _darker(m["color"]))
+            elif k == "voxels":
+                for i, j, kk in m["cells"]:
+                    box_faces(float(i), float(j), float(kk), i + 1.0, j + 1.0, kk + 1.0,
+                              m["color"], m["edgecolor"] or _darker(m["color"]))
+            elif k == "quiver3d":
+                L = m["length"]
+                for i in range(len(m["xs"])):
+                    base = proj(m["xs"][i], m["ys"][i], m["zs"][i])
+                    tip = proj(m["xs"][i] + L * m["us"][i], m["ys"][i] + L * m["vs"][i],
+                               m["zs"][i] + L * m["ws"][i])
+                    add_seg(base, tip, m["color"], m["width"])
+                    add_point(tip, 3.0, "o", m["color"], None)
+            elif k == "scatter":
                 d = math.sqrt(m["size"])
-                order = sorted(
-                    (proj(x, y, z) for x, y, z in zip(m["xs"], m["ys"], m["zs"])),
-                    key=lambda t: t[2],
-                )
-                for dx, dy, _ in order:
-                    _draw_marker(scene, dx, dy, d, m["marker"], facecolor=m["color"],
-                                 edgecolor=m["edgecolor"])
+                for x, y, z in zip(m["xs"], m["ys"], m["zs"]):
+                    add_point(proj(x, y, z), d, m["marker"], m["color"], m["edgecolor"])
+
+        prims.sort(key=lambda p: p[0])  # back (small depth) to front
+        for _depth, draw in prims:
+            draw()
 
         # 3. Tick labels + axis labels (on top, offset radially outward).
         def place(anchor, text, size, outward):
@@ -1612,11 +3503,35 @@ class Figure:
         self._legend: dict | None = None
         make = Axes3D if projection == "3d" else Axes
         self.axes = [make(self.theme) for _ in range(nrows * ncols)]
+        # Spanning placement (GridSpec / subplot_mosaic): one
+        # (row, col, rowspan, colspan) per axes, or None for a uniform grid.
+        self._spans: list[tuple[int, int, int, int]] | None = None
 
     def set(self, *, suptitle: str | None = None) -> "Figure":
         if suptitle is not None:
             self.suptitle = suptitle
         return self
+
+    def add_gridspec(self, nrows: int, ncols: int) -> "GridSpec":
+        """Switch this figure to spanning-subplot mode over an ``nrows`` x
+        ``ncols`` grid and return a :class:`GridSpec`. Populate it with
+        :meth:`add_subplot`; existing auto-created axes are cleared."""
+        self.nrows = nrows
+        self.ncols = ncols
+        self.axes = []
+        self._spans = []
+        return GridSpec(nrows, ncols)
+
+    def add_subplot(self, spec, *, projection: str | None = None) -> "Axes":
+        """Add an axes at a :class:`GridSpec` slice (e.g. ``gs[0, :]`` or
+        ``gs[1:, 0]``). Returns the new axes."""
+        if self._spans is None:
+            self._spans = []
+        r0, c0, rs, cs = spec
+        ax = (Axes3D if projection == "3d" else Axes)(self.theme)
+        self.axes.append(ax)
+        self._spans.append((r0, c0, rs, cs))
+        return ax
 
     def _has_3d(self) -> bool:
         """True if any axes is a 3D axes (a figure's axes are homogeneous)."""
@@ -1643,13 +3558,16 @@ class Figure:
         return entries
 
     def colorbar(self, mappable: "_Mappable", *, label: str | None = None) -> "Figure":
-        """Attach a colorbar for ``mappable`` (from :meth:`Axes.imshow`) in a
-        reserved band to the right of its axes."""
+        """Attach a colorbar for ``mappable`` (from :meth:`Axes.imshow` or a
+        colormapped :meth:`Axes.scatter`) in a reserved band to the right of its
+        axes. The tick scale follows the mappable's ``norm`` (e.g. log ticks for
+        a :class:`~pyplotrs.norms.LogNorm`)."""
         mappable.ax._colorbar = {
             "cmap": mappable.cmap,
             "vmin": mappable.vmin,
             "vmax": mappable.vmax,
             "label": label,
+            "norm": mappable.norm,
         }
         return self
 
@@ -1705,10 +3623,14 @@ class Figure:
             wspace=_WSPACE if self.ncols > 1 else 0.0,
             suptitle_h=suptitle_h,
             legend_w=legend_w,
+            spans=self._spans,
         )
 
         for ax, axl, (xr, yr), xt, yt in zip(self.axes, layout.axes, ranges, xticks, yticks):
             ax._draw(scene, axl, xr, yr, xt, yt)
+            # Twin/secondary axes and insets overlay the host's cell.
+            if getattr(ax, "_has_extras", lambda: False)():
+                ax._draw_extras(scene, axl, xr, yr)
 
         if self.suptitle:
             a, _d = _th(scene, self.suptitle, _SUPTITLE_SIZE)
@@ -1831,3 +3753,77 @@ def subplots(nrows: int = 1, ncols: int = 1, *, figsize: tuple[float, float] = (
         return fig, list(fig.axes)
     grid = [[fig.axes[r * ncols + c] for c in range(ncols)] for r in range(nrows)]
     return fig, grid
+
+
+def subplot_mosaic(mosaic, *, figsize: tuple[float, float] = (480, 360),
+                   theme=None, units: str = "pt"):
+    """Build a figure of spanning axes from an ASCII ``mosaic`` layout.
+
+    ``mosaic`` is a multi-line string (or a list of equal-length rows) whose
+    repeated labels mark the cells each axes spans, e.g.::
+
+        \"\"\"
+        AB
+        AC
+        \"\"\"
+
+    gives ``A`` spanning both rows of column 0, with ``B``/``C`` stacked at the
+    right. ``"."`` marks an empty cell. Returns ``(fig, {label: axes})``. Each
+    label's cells must form a solid rectangle.
+    """
+    if isinstance(mosaic, str):
+        rows = [list(line) for line in mosaic.splitlines() if line.strip()]
+    else:
+        rows = [list(r) for r in mosaic]
+    nrows = len(rows)
+    ncols = max((len(r) for r in rows), default=0)
+    # Bounding box (min/max row & col) of each label's occupied cells.
+    boxes: dict[str, list[int]] = {}
+    order: list[str] = []
+    for r, row in enumerate(rows):
+        for c, label in enumerate(row):
+            if label == ".":
+                continue
+            if label not in boxes:
+                boxes[label] = [r, c, r, c]
+                order.append(label)
+            else:
+                b = boxes[label]
+                b[0], b[1] = min(b[0], r), min(b[1], c)
+                b[2], b[3] = max(b[2], r), max(b[3], c)
+
+    fig = Figure(figsize=figsize, nrows=nrows, ncols=ncols, theme=theme, units=units)
+    fig.axes = [Axes(fig.theme) for _ in order]
+    spans = []
+    for label in order:
+        r0, c0, r1, c1 = boxes[label]
+        spans.append((r0, c0, r1 - r0 + 1, c1 - c0 + 1))
+    fig._spans = spans
+    return fig, {label: fig.axes[i] for i, label in enumerate(order)}
+
+
+class GridSpec:
+    """A lightweight grid geometry for spanning subplots. Create with a figure's
+    row/column count, then slice it (NumPy-style) to place an axes across a
+    range of rows/columns via :meth:`Figure.add_subplot`."""
+
+    def __init__(self, nrows: int, ncols: int) -> None:
+        self.nrows = nrows
+        self.ncols = ncols
+
+    def __getitem__(self, key) -> tuple[int, int, int, int]:
+        return self._resolve(key)
+
+    def _resolve(self, key) -> tuple[int, int, int, int]:
+        rk, ck = key if isinstance(key, tuple) else (key, slice(None))
+
+        def span(k, n):
+            if isinstance(k, slice):
+                start, stop, _ = k.indices(n)
+                return start, max(stop - start, 1)
+            k = k if k >= 0 else k + n
+            return k, 1
+
+        r0, rs = span(rk, self.nrows)
+        c0, cs = span(ck, self.ncols)
+        return r0, c0, rs, cs

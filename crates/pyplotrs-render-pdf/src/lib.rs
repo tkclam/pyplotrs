@@ -168,6 +168,23 @@ impl PdfRenderer {
         let Some(path) = to_krilla_path(&m.marker) else {
             return;
         };
+        // Colormapped scatter: a per-point fill, so the shared-XObject dedup
+        // (which assumes one color) doesn't apply. Draw the shared outline with
+        // each point's own fill; the shape is still defined once in `path`.
+        if let Some(colors) = &m.colors {
+            for (pos, c) in m.positions.iter().zip(colors) {
+                surface.push_transform(&Transform::from_translate(pos.x as f32, pos.y as f32));
+                surface.set_fill(Some(Fill {
+                    paint: krilla_color(*c).into(),
+                    opacity: alpha(c.a),
+                    rule: to_fill_rule(m.fill_rule),
+                }));
+                surface.set_stroke(m.stroke.as_ref().map(to_krilla_stroke));
+                surface.draw_path(&path);
+                surface.pop();
+            }
+            return;
+        }
         // Describe the marker once as a reusable Form XObject. krilla writes the
         // XObject's content stream a single time and dedupes it across all the
         // `draw_graphic` invocations below, so a 1e6-point scatter is one small

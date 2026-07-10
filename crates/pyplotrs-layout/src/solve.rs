@@ -72,8 +72,12 @@ pub struct FigureSpec {
     pub suptitle_h: f64,
     /// Width reserved at the right of the figure for a shared legend (0 = none).
     pub legend_w: f64,
-    /// Per-cell bands, row-major, length `nrows * ncols`.
+    /// Per-cell bands. Row-major `nrows * ncols` when `spans` is `None`; one per
+    /// axes (aligned with `spans`) when spanning cells are used.
     pub cells: Vec<AxesBands>,
+    /// Optional spanning placement: one `(row, col, rowspan, colspan)` per axes
+    /// (in `cells` order). `None` = a plain uniform grid (the default).
+    pub spans: Option<Vec<(usize, usize, usize, usize)>>,
 }
 
 /// The computed rectangles for one axes.
@@ -151,19 +155,33 @@ pub fn solve(spec: &FigureSpec) -> LayoutResult {
     }
     .max(0.0);
 
-    let mut axes = Vec::with_capacity(nrows * ncols);
-    for row in 0..nrows {
-        for col in 0..ncols {
-            let idx = row * ncols + col;
-            let bands = spec.cells.get(idx).copied().unwrap_or_default();
+    // Grid cell at (row, col) spanning (rowspan, colspan) whole cells, including
+    // the inter-cell gaps it swallows.
+    let span_rect = |row: usize, col: usize, rowspan: usize, colspan: usize| {
+        let rs = rowspan.max(1);
+        let cs = colspan.max(1);
+        Rect::new(
+            grid.x + col as f64 * (cell_w + spec.wspace),
+            grid.y + row as f64 * (cell_h + spec.hspace),
+            cs as f64 * cell_w + (cs as f64 - 1.0) * spec.wspace,
+            rs as f64 * cell_h + (rs as f64 - 1.0) * spec.hspace,
+        )
+    };
 
-            let cell = Rect::new(
-                grid.x + col as f64 * (cell_w + spec.wspace),
-                grid.y + row as f64 * (cell_h + spec.hspace),
-                cell_w,
-                cell_h,
-            );
-            axes.push(layout_cell(cell, &bands));
+    let mut axes = Vec::new();
+    if let Some(spans) = &spec.spans {
+        // Explicit spanning placement (GridSpec / subplot_mosaic).
+        for (idx, &(row, col, rowspan, colspan)) in spans.iter().enumerate() {
+            let bands = spec.cells.get(idx).copied().unwrap_or_default();
+            axes.push(layout_cell(span_rect(row, col, rowspan, colspan), &bands));
+        }
+    } else {
+        for row in 0..nrows {
+            for col in 0..ncols {
+                let idx = row * ncols + col;
+                let bands = spec.cells.get(idx).copied().unwrap_or_default();
+                axes.push(layout_cell(span_rect(row, col, 1, 1), &bands));
+            }
         }
     }
 
@@ -238,6 +256,7 @@ mod tests {
                 y_tick_w: 24.0,
                 cbar_w: 0.0,
             }],
+            spans: None,
         };
         let out = solve(&spec);
         let ax = out.axes[0];
@@ -263,6 +282,7 @@ mod tests {
             suptitle_h: 0.0,
             legend_w: 0.0,
             cells: vec![AxesBands::default(), AxesBands::default()],
+            spans: None,
         };
         let out = solve(&spec);
         // Two equal cells with a 20pt gap inside a 580pt-wide inner area.

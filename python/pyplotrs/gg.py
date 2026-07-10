@@ -144,12 +144,98 @@ class Histogram(Geom):
         ax.hist(xs, bins=self.bins, color=color, label=label, density=self.density)
 
 
+class Bar(Geom):
+    """A bar geom over a (categorical) ``x``. With a ``y`` aesthetic the bar
+    heights are ``y``; without one, each bar counts the rows per ``x`` level
+    (``stat="count"``, ggplot's ``geom_bar``)."""
+
+    def __init__(self, *, width: float = 0.8) -> None:
+        self.width = width
+
+    def draw(self, ax, frame, mapping, color, label) -> None:
+        xcol = frame.column(mapping["x"])
+        if mapping.get("y"):
+            ax.bar([str(v) for v in xcol], _nums(frame.column(mapping["y"])),
+                   width=self.width, color=color, label=label)
+        else:
+            cats, counts = [], []
+            idx: dict = {}
+            for v in xcol:
+                s = str(v)
+                if s not in idx:
+                    idx[s] = len(cats)
+                    cats.append(s)
+                    counts.append(0)
+                counts[idx[s]] += 1
+            ax.bar(cats, counts, width=self.width, color=color, label=label)
+
+
+def _polyfit(xs: list[float], ys: list[float], degree: int) -> list[float]:
+    """Least-squares polynomial coefficients (highest power first) via the
+    normal equations, solved with plain Gaussian elimination (no NumPy)."""
+    m = degree + 1
+    # Vandermonde normal-equation matrix A (m x m) and vector b (m).
+    powers = [[x ** p for p in range(2 * degree + 1)] for x in xs]
+    sums = [sum(row[k] for row in powers) for k in range(2 * degree + 1)]
+    A = [[sums[i + j] for j in range(m)] for i in range(m)]
+    b = [sum(ys[r] * (xs[r] ** i) for r in range(len(xs))) for i in range(m)]
+    # Gaussian elimination with partial pivoting.
+    for i in range(m):
+        piv = max(range(i, m), key=lambda r: abs(A[r][i]))
+        if abs(A[piv][i]) < 1e-12:
+            continue
+        A[i], A[piv] = A[piv], A[i]
+        b[i], b[piv] = b[piv], b[i]
+        for r in range(m):
+            if r != i and A[r][i] != 0.0:
+                f = A[r][i] / A[i][i]
+                A[r] = [A[r][k] - f * A[i][k] for k in range(m)]
+                b[r] -= f * b[i]
+    coef = [b[i] / A[i][i] if abs(A[i][i]) > 1e-12 else 0.0 for i in range(m)]
+    return list(reversed(coef))  # highest power first
+
+
+class Smooth(Geom):
+    """A fitted trend line (ggplot's ``geom_smooth``). ``method="lm"`` fits a
+    degree-``degree`` polynomial by least squares (default linear); the curve is
+    drawn across the x-range. A statistical geom - no scipy/numpy needed."""
+
+    def __init__(self, *, method: str = "lm", degree: int = 1, points: int = 64,
+                 width: float | None = None) -> None:
+        self.method = method
+        self.degree = degree
+        self.points = points
+        self.width = width
+
+    def draw(self, ax, frame, mapping, color, label) -> None:
+        xs, ys = _xy(frame, mapping, sort=True)
+        if len(xs) < self.degree + 1:
+            return
+        coef = _polyfit(xs, ys, self.degree)
+
+        def ev(x):
+            r = 0.0
+            for c in coef:
+                r = r * x + c
+            return r
+
+        lo, hi = xs[0], xs[-1]
+        gx = [lo + (hi - lo) * i / (self.points - 1) for i in range(self.points)]
+        ax.line(gx, [ev(x) for x in gx], color=color, label=label, width=self.width)
+
+
 # -- faceting ---------------------------------------------------------------
 
 class _FacetWrap:
     def __init__(self, col: str, ncols: int = 3) -> None:
         self.col = col
         self.ncols = ncols
+
+
+class _FacetGrid:
+    def __init__(self, rows: str | None, cols: str | None) -> None:
+        self.rows = rows
+        self.cols = cols
 
 
 class facet:
@@ -159,6 +245,12 @@ class facet:
     def wrap(col: str, ncols: int = 3) -> _FacetWrap:
         """One panel per level of ``col``, wrapped at ``ncols`` columns."""
         return _FacetWrap(col, ncols)
+
+    @staticmethod
+    def grid(rows: str | None = None, cols: str | None = None) -> _FacetGrid:
+        """A 2D panel grid: one row per level of ``rows`` x one column per level
+        of ``cols`` (either may be ``None`` for a single row/column)."""
+        return _FacetGrid(rows, cols)
 
 
 # -- the plot ---------------------------------------------------------------
@@ -184,8 +276,8 @@ class Plot:
         return self
 
     def facet(self, spec) -> "Plot":
-        """Facet into small multiples, one panel per level of a column. ``spec``
-        is a :func:`facet.wrap` spec (or a column name for the default wrap)."""
+        """Facet into small multiples: a :func:`facet.wrap` spec (or a column
+        name for the default wrap), or a :func:`facet.grid` spec for a 2D grid."""
         if isinstance(spec, str):
             spec = _FacetWrap(spec)
         self._facet = spec
@@ -244,6 +336,39 @@ class Plot:
             return (0.0, 1.0)
         return rng(self._mapping.get("x")), rng(self._mapping.get("y"))
 
+    def _build_facet_grid(self, xlab, ylab, grouped) -> Figure:
+        """One panel per (row level x column level) of a :class:`_FacetGrid`."""
+        spec = self._facet
+        row_levels = self._frame.levels(spec.rows) if spec.rows else [None]
+        col_levels = self._frame.levels(spec.cols) if spec.cols else [None]
+        nrows, ncols = len(row_levels), len(col_levels)
+        figsize = self._figsize or (min(3.1 * ncols + 0.8, 13.0) * 72.0,
+                                    min(2.5 * nrows + 0.8, 10.0) * 72.0)
+        fig = Figure(figsize=figsize, nrows=nrows, ncols=ncols,
+                     sharex=True, sharey=True, theme=self._theme)
+        for r, rl in enumerate(row_levels):
+            for c, cl in enumerate(col_levels):
+                ax = fig.axes[r * ncols + c]
+                sub = self._frame
+                if spec.rows:
+                    sub = sub.where(spec.rows, rl)
+                if spec.cols:
+                    sub = sub.where(spec.cols, cl)
+                self._draw_panel(ax, sub)
+                title_bits = []
+                if spec.cols:
+                    title_bits.append(f"{spec.cols} = {cl}")
+                if spec.rows:
+                    title_bits.append(f"{spec.rows} = {rl}")
+                ax.set(title=" | ".join(title_bits) if title_bits else None,
+                       xlabel=xlab if r == nrows - 1 else None,
+                       ylabel=ylab if c == 0 else None)
+        if self._labels.get("title"):
+            fig.set(suptitle=self._labels["title"])
+        if grouped:
+            fig.legend()
+        return fig
+
     def build(self) -> Figure:
         """Realise the spec into a :class:`pyplotrs.Figure` (the terminal step).
 
@@ -252,6 +377,9 @@ class Plot:
             raise ValueError("add at least one geom, e.g. .add(gg.Point())")
         xlab, ylab = self._axis_labels()
         grouped = self._mapping.get("color") in self._frame.cols
+
+        if isinstance(self._facet, _FacetGrid):
+            return self._build_facet_grid(xlab, ylab, grouped)
 
         if self._facet is not None:
             levels = self._frame.levels(self._facet.col)
@@ -291,4 +419,5 @@ class Plot:
         self.build().save(path, **kwargs)
 
 
-__all__ = ["Plot", "Point", "Line", "Area", "Histogram", "Geom", "facet"]
+__all__ = ["Plot", "Point", "Line", "Area", "Histogram", "Bar", "Smooth",
+           "Geom", "facet"]
