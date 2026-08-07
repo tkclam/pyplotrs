@@ -21,6 +21,8 @@ All notable changes to pyplotrs are documented here. The format is based on
   `axis_label_weight`. Each selects a real face of the body family and is
   embedded as its own subset, so emphasis stays selectable, editable text.
   `resolved_font_variants()` reports which face each selector resolved to.
+  All four Liberation Sans faces are bundled, so emphasis works on a machine
+  with no fonts installed.
 - Animation export to GIF and APNG.
 - Output to PDF (editable/selectable/taggable text), SVG, PNG (with DPI) and
   self-contained HTML.

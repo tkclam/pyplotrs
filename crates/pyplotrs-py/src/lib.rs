@@ -31,6 +31,55 @@ use pyplotrs_layout::solve::{AxesBands, FigureSpec};
 /// when the host has none of the preferred sans-serif families installed, and
 /// it guarantees rendering never fails for lack of a system font.
 const BUNDLED_SANS: &[u8] = include_bytes!("../../../assets/fonts/LiberationSans-Regular.ttf");
+const BUNDLED_SANS_BOLD: &[u8] = include_bytes!("../../../assets/fonts/LiberationSans-Bold.ttf");
+const BUNDLED_SANS_ITALIC: &[u8] =
+    include_bytes!("../../../assets/fonts/LiberationSans-Italic.ttf");
+const BUNDLED_SANS_BOLD_ITALIC: &[u8] =
+    include_bytes!("../../../assets/fonts/LiberationSans-BoldItalic.ttf");
+
+/// All four bundled body faces, as `(FaceStyle, bytes, PostScript name)`.
+///
+/// Shipping the emphasis faces and not just Regular is what makes bold and
+/// italic hold the same promise as everything else: a figure looks the same on
+/// any machine. Resolving them from the host alone would work on a desktop but
+/// silently render upright inside a minimal container, which is exactly where
+/// figures get built in bulk.
+fn bundled_faces() -> [(FaceStyle, &'static [u8], &'static str); 4] {
+    [
+        (
+            FaceStyle {
+                bold: false,
+                italic: false,
+            },
+            BUNDLED_SANS,
+            "LiberationSans-Regular",
+        ),
+        (
+            FaceStyle {
+                bold: true,
+                italic: false,
+            },
+            BUNDLED_SANS_BOLD,
+            "LiberationSans-Bold",
+        ),
+        (
+            FaceStyle {
+                bold: false,
+                italic: true,
+            },
+            BUNDLED_SANS_ITALIC,
+            "LiberationSans-Italic",
+        ),
+        (
+            FaceStyle {
+                bold: true,
+                italic: true,
+            },
+            BUNDLED_SANS_BOLD_ITALIC,
+            "LiberationSans-BoldItalic",
+        ),
+    ]
+}
 
 /// System font database, built once. We load the host's fonts (honouring its
 /// fontconfig setup on Unix) and also register the bundled Liberation Sans, so
@@ -41,7 +90,11 @@ fn font_db() -> &'static Database {
     DB.get_or_init(|| {
         let mut db = Database::new();
         db.load_system_fonts();
-        db.load_font_data(BUNDLED_SANS.to_vec());
+        // Register every bundled face, not just Regular, so a family query for
+        // Liberation Sans can find a real bold/italic even with no host fonts.
+        for (_, bytes, _) in bundled_faces() {
+            db.load_font_data(bytes.to_vec());
+        }
         db
     })
 }
@@ -58,12 +111,17 @@ struct ResolvedFace {
     data: FontData,
 }
 
-/// The bundled body font, used directly from `BUNDLED_SANS` (no host lookup).
-fn bundled_body() -> ResolvedFace {
+/// The bundled body face for `face`, used directly (no host lookup). This is the
+/// last resort when none of the preferred families resolves.
+fn bundled_body(face: FaceStyle) -> ResolvedFace {
+    let (_, bytes, postscript) = bundled_faces()
+        .into_iter()
+        .find(|(f, _, _)| *f == face)
+        .unwrap_or(bundled_faces()[0]);
     ResolvedFace {
         family: "Liberation Sans".to_string(),
-        postscript: "LiberationSans-Regular".to_string(),
-        data: FontData::from_bytes(BUNDLED_SANS.to_vec(), 0),
+        postscript: postscript.to_string(),
+        data: FontData::from_bytes(bytes.to_vec(), 0),
     }
 }
 
@@ -168,7 +226,7 @@ fn resolve_from_host(families: &[String], face: FaceStyle) -> ResolvedFace {
                 data,
             })
         })
-        .unwrap_or_else(bundled_body)
+        .unwrap_or_else(|| bundled_body(face))
 }
 
 /// Resolve the body font (family name + bytes), memoised. Walks the preferred

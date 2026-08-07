@@ -112,25 +112,8 @@ def _emphasis_case():
 CASES["emphasis"] = _emphasis_case
 
 
-#: Goldens whose appearance depends on a font face the host may not have.
-#: Only the regular face is bundled with pyplotrs, so bold and italic are
-#: resolved from the system; a bare container (a manylinux wheel builder, say)
-#: has no bold Liberation Sans and would silently render these upright. That is
-#: a legitimate fallback, not a regression, so skip rather than fail.
-_NEEDS_REAL_BOLD = {"emphasis"}
-
-
-def _host_has_distinct_bold() -> bool:
-    from pyplotrs import _pyplotrs_core as _core
-
-    variants = dict(_core.resolved_font_variants())
-    return variants["body-bold"] != variants["body"]
-
-
 @pytest.mark.parametrize("name", sorted(CASES))
 def test_golden(name, tmp_path):
-    if name in _NEEDS_REAL_BOLD and not _host_has_distinct_bold():
-        pytest.skip("host has no distinct bold face; emphasis would render upright")
     fig = CASES[name]()
     out = tmp_path / f"{name}.png"
     fig.save(str(out))

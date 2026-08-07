@@ -123,7 +123,6 @@ regular one, so text stays legible but is not slanted. `resolved_font_variants()
 reports what each face landed on — two selectors reporting the same PostScript
 name means the host has no distinct face for one of them.
 
-!!! note "Only the regular face is bundled"
-    pyplotrs ships Liberation Sans Regular, so bold and italic come from the
-    host's installed fonts. Desktop and CI machines essentially always have
-    them; a minimal container may not, and there text falls back to regular.
+All four Liberation Sans faces are **bundled**, so emphasis works even on a
+machine with no fonts installed at all — a slim container, a wheel builder — and
+a figure looks the same wherever it is generated.

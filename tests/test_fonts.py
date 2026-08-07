@@ -46,35 +46,52 @@ def test_all_four_faces_resolve():
     assert all(v for v in variants.values())
 
 
-def test_faces_are_distinct_when_the_host_has_them():
+def test_faces_are_always_distinct():
     """Reported as PostScript names, which differ per face (ArialMT vs
     Arial-BoldMT); the *family* name is identical across all four and so cannot
     show whether a bold face was really found.
 
-    Skipped rather than failed on a host with no bold face - font matching is
-    approximate by design and falls back to regular.
+    This is an unconditional assertion because all four faces are bundled - it
+    must hold even on a host with no fonts installed at all.
     """
     variants = dict(_core.resolved_font_variants())
-    if variants["body-bold"] == variants["body"]:
-        pytest.skip(f"host has no distinct bold face for {_core.resolved_font_name()}")
     assert variants["body-bold"] != variants["body"]
     assert variants["body-italic"] != variants["body"]
     assert variants["body-bolditalic"] not in (variants["body"], variants["body-bold"])
 
 
-def test_changing_the_family_invalidates_every_cached_face():
-    """The cache is keyed per face, so `set_font_family` has to clear all of it -
-    not just the regular entry."""
+def test_every_face_falls_back_to_a_bundled_one():
+    """With no matching family, all four faces must come from the bundle.
+
+    This is the property that makes emphasis portable: a container with no fonts
+    installed still gets real bold and italic rather than four copies of regular.
+    """
     original = plt.get_font_family()
     try:
-        plt.set_font_family("Liberation Sans")
-        liberation = dict(_core.resolved_font_variants())
+        plt.set_font_family("No Such Family Exists")
+        assert set(dict(_core.resolved_font_variants()).values()) == {
+            "LiberationSans-Regular",
+            "LiberationSans-Bold",
+            "LiberationSans-Italic",
+            "LiberationSans-BoldItalic",
+        }
+    finally:
+        plt.set_font_family(*original)
+
+
+def test_changing_the_family_invalidates_every_cached_face():
+    """The cache is keyed per face, so `set_font_family` has to clear all of it,
+    not just the regular entry - otherwise bold keeps serving the old family."""
+    original = plt.get_font_family()
+    try:
         plt.set_font_family("DejaVu Sans")
-        dejavu = dict(_core.resolved_font_variants())
-        if liberation == dejavu:
-            pytest.skip("host lacks one of Liberation Sans / DejaVu Sans")
-        for key in liberation:
-            assert liberation[key] != dejavu[key], f"{key} was served from a stale cache"
+        before = dict(_core.resolved_font_variants())
+        plt.set_font_family("No Such Family Exists")
+        after = dict(_core.resolved_font_variants())
+        if before == after:
+            pytest.skip("host lacks DejaVu Sans, so there is no change to observe")
+        for key in before:
+            assert before[key] != after[key], f"{key} was served from a stale cache"
     finally:
         plt.set_font_family(*original)
 
@@ -87,8 +104,6 @@ def test_bold_measures_wider_than_regular():
     scene = _core.Scene(200.0, 100.0)
     regular = scene.measure_math("Handgloves", 11.0, "body")[0]
     bold = scene.measure_math("Handgloves", 11.0, "body-bold")[0]
-    if bold == regular:
-        pytest.skip("host has no distinct bold face")
     assert bold > regular
 
 
@@ -121,8 +136,6 @@ def test_weight_and_style_reach_the_output(tmp_path):
     # Every variant still emits real text, not outlines.
     for svg in (plain, bold, italic):
         assert "Handgloves" in svg
-    if _core.resolved_font_variants()[1][1] == _core.resolved_font_variants()[0][1]:
-        pytest.skip("host has no distinct bold face")
     assert bold != plain, "bold produced byte-identical SVG to regular"
     assert italic != plain, "italic produced byte-identical SVG to regular"
 
@@ -143,8 +156,6 @@ def test_pdf_embeds_a_separate_subset_per_face(tmp_path):
     assert b"/Type3" not in data
     subsets = set(re.findall(rb"/BaseFont\s*/([A-Z]{6}\+[^\s/>]+)", data))
     families = {name.split(b"+", 1)[1] for name in subsets}
-    if len(families) < 2:
-        pytest.skip("host has no distinct bold/italic faces to embed")
     assert len(families) >= 3, f"expected several faces embedded, got {families}"
     assert data.count(b"CIDFontType2") >= 3
 

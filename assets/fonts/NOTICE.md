@@ -7,9 +7,12 @@ font being installed on the host system.
 | File | Family | Role | License |
 |---|---|---|---|
 | `LiberationSans-Regular.ttf` | Liberation Sans | body / labels / ticks / legends — **fallback** sans-serif | SIL Open Font License 1.1 — see `LiberationSans-OFL.txt` |
+| `LiberationSans-Bold.ttf` | Liberation Sans | bold body text (`weight="bold"`, `Theme.title_weight`) | SIL Open Font License 1.1 — see `LiberationSans-OFL.txt` |
+| `LiberationSans-Italic.ttf` | Liberation Sans | italic body text (`style="italic"`) | SIL Open Font License 1.1 — see `LiberationSans-OFL.txt` |
+| `LiberationSans-BoldItalic.ttf` | Liberation Sans | bold italic body text | SIL Open Font License 1.1 — see `LiberationSans-OFL.txt` |
 | `STIXTwoMath-Regular.ttf` | STIX Two Math | `$...$` math spans (Greek, operators, radicals, Mathematical Alphanumeric Symbols) | SIL Open Font License 1.1 — see `STIXTwoMath-OFL.txt` |
 
-Both are licensed under the SIL Open Font License, Version 1.1, which permits
+All are licensed under the SIL Open Font License, Version 1.1, which permits
 bundling and redistribution (including embedding in documents) provided the
 license text accompanies the font software. The license texts are included
 alongside the fonts here and are shipped in the source distribution.
@@ -27,6 +30,12 @@ present on the user's machine.
 advances), so figures laid out against the bundled fallback size and line-break
 identically to ones rendered with the real Arial. It is the standard permissive
 Arial substitute.
+
+All four faces (Regular, Bold, Italic, Bold Italic, all version 2.1.5) are
+bundled rather than only Regular. Emphasis is otherwise resolved from the host,
+which works on a desktop but silently renders upright inside a minimal container
+— precisely where figures are generated in bulk — and that would break the
+guarantee that a saved figure looks the same everywhere.
 
 ### Saved figures view consistently across machines
 
