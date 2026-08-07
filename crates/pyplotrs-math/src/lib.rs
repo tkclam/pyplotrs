@@ -161,8 +161,14 @@ mod tests {
                 }
             }
         }
-        assert!(text.contains('\u{2212}'), "expected U+2212 minus in {text:?}");
-        assert!(!text.contains('-'), "must not contain ASCII hyphen in {text:?}");
+        assert!(
+            text.contains('\u{2212}'),
+            "expected U+2212 minus in {text:?}"
+        );
+        assert!(
+            !text.contains('-'),
+            "must not contain ASCII hyphen in {text:?}"
+        );
     }
 
     /// The radical rule must connect to the surd: its left edge meets the
@@ -255,8 +261,15 @@ mod tests {
     #[test]
     fn radical_stretches_with_content() {
         let (m, b) = fonts();
-        let (_, (_, a_short, d_short)) =
-            render(&m, &b, "$\\sqrt{x}$", 24.0, 0.0, 0.0, Color::rgba(0, 0, 0, 255));
+        let (_, (_, a_short, d_short)) = render(
+            &m,
+            &b,
+            "$\\sqrt{x}$",
+            24.0,
+            0.0,
+            0.0,
+            Color::rgba(0, 0, 0, 255),
+        );
         let (_, (_, a_tall, d_tall)) = render(
             &m,
             &b,

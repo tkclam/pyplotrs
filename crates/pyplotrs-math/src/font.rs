@@ -55,24 +55,43 @@ struct Outliner {
 
 impl ttf_parser::OutlineBuilder for Outliner {
     fn move_to(&mut self, x: f32, y: f32) {
-        self.path
-            .move_to((self.gx + x as f64 * self.scale, self.s - y as f64 * self.scale));
+        self.path.move_to((
+            self.gx + x as f64 * self.scale,
+            self.s - y as f64 * self.scale,
+        ));
     }
     fn line_to(&mut self, x: f32, y: f32) {
-        self.path
-            .line_to((self.gx + x as f64 * self.scale, self.s - y as f64 * self.scale));
+        self.path.line_to((
+            self.gx + x as f64 * self.scale,
+            self.s - y as f64 * self.scale,
+        ));
     }
     fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
         self.path.quad_to(
-            (self.gx + x1 as f64 * self.scale, self.s - y1 as f64 * self.scale),
-            (self.gx + x as f64 * self.scale, self.s - y as f64 * self.scale),
+            (
+                self.gx + x1 as f64 * self.scale,
+                self.s - y1 as f64 * self.scale,
+            ),
+            (
+                self.gx + x as f64 * self.scale,
+                self.s - y as f64 * self.scale,
+            ),
         );
     }
     fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
         self.path.curve_to(
-            (self.gx + x1 as f64 * self.scale, self.s - y1 as f64 * self.scale),
-            (self.gx + x2 as f64 * self.scale, self.s - y2 as f64 * self.scale),
-            (self.gx + x as f64 * self.scale, self.s - y as f64 * self.scale),
+            (
+                self.gx + x1 as f64 * self.scale,
+                self.s - y1 as f64 * self.scale,
+            ),
+            (
+                self.gx + x2 as f64 * self.scale,
+                self.s - y2 as f64 * self.scale,
+            ),
+            (
+                self.gx + x as f64 * self.scale,
+                self.s - y as f64 * self.scale,
+            ),
         );
     }
     fn close(&mut self) {
@@ -203,7 +222,12 @@ impl<'a> MathFont<'a> {
     // Each falls back to a fraction of the size when the font lacks a MATH
     // table (STIX Two Math always has one, so the fallback is only a guard).
 
-    fn cval(&self, size: f32, getter: impl Fn(ttf_parser::math::Constants<'a>) -> i16, default_em: f32) -> f32 {
+    fn cval(
+        &self,
+        size: f32,
+        getter: impl Fn(ttf_parser::math::Constants<'a>) -> i16,
+        default_em: f32,
+    ) -> f32 {
         match self.math.and_then(|m| m.constants) {
             Some(c) => getter(c) as f32 * self.scale(size),
             None => default_em * size,
@@ -250,7 +274,11 @@ impl<'a> MathFont<'a> {
         self.cval(size, |c| c.sub_superscript_gap_min().value, 0.2)
     }
     pub fn sup_bottom_max_with_sub(&self, size: f32) -> f32 {
-        self.cval(size, |c| c.superscript_bottom_max_with_subscript().value, 0.35)
+        self.cval(
+            size,
+            |c| c.superscript_bottom_max_with_subscript().value,
+            0.35,
+        )
     }
     pub fn space_after_script(&self, size: f32) -> f32 {
         self.cval(size, |c| c.space_after_script().value, 0.04)

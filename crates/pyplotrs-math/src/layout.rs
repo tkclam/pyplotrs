@@ -65,10 +65,14 @@ pub(crate) fn translate_path(p: &BezPath, dx: f64, dy: f64) -> BezPath {
 fn place(dst: &mut Vec<Draw>, src: Vec<Draw>, dx: f32, dy: f32) {
     for d in src {
         match d {
-            Draw::Text { x, y, run } => dst.push(Draw::Text { x: x + dx, y: y + dy, run }),
-            Draw::Fill { path } => {
-                dst.push(Draw::Fill { path: translate_path(&path, dx as f64, dy as f64) })
-            }
+            Draw::Text { x, y, run } => dst.push(Draw::Text {
+                x: x + dx,
+                y: y + dy,
+                run,
+            }),
+            Draw::Fill { path } => dst.push(Draw::Fill {
+                path: translate_path(&path, dx as f64, dy as f64),
+            }),
             Draw::Stroke { path, width } => dst.push(Draw::Stroke {
                 path: translate_path(&path, dx as f64, dy as f64),
                 width,
@@ -175,8 +179,14 @@ const SPACE: [[i8; 8]; 8] = [
 
 fn class_idx(c: Class) -> usize {
     match c {
-        Class::Ord => 0, Class::Op => 1, Class::Bin => 2, Class::Rel => 3,
-        Class::Open => 4, Class::Close => 5, Class::Punct => 6, Class::Inner => 7,
+        Class::Ord => 0,
+        Class::Op => 1,
+        Class::Bin => 2,
+        Class::Rel => 3,
+        Class::Open => 4,
+        Class::Close => 5,
+        Class::Punct => 6,
+        Class::Inner => 7,
     }
 }
 
@@ -217,7 +227,12 @@ impl<'a> Engine<'a> {
         body_font: &'a FontData,
         src: &str,
     ) -> Self {
-        Engine { mf, math_font, body_font, chars: src.chars().collect() }
+        Engine {
+            mf,
+            math_font,
+            body_font,
+            chars: src.chars().collect(),
+        }
     }
 
     /// Lay out the whole (math) source at `size`.
@@ -232,7 +247,11 @@ impl<'a> Engine<'a> {
         let font = if math { self.math_font } else { self.body_font };
         let gid = self.mf.glyph(ch).unwrap_or(0);
         let (adv, ink, italic) = if math {
-            (self.mf.advance(gid, size), self.mf.ink(gid, size), self.mf.italic(gid, size))
+            (
+                self.mf.advance(gid, size),
+                self.mf.ink(gid, size),
+                self.mf.italic(gid, size),
+            )
         } else {
             // body font: shape one char for a correct advance
             let run = pyplotrs_text::shape_text(font, &ch.to_string(), size);
@@ -242,14 +261,24 @@ impl<'a> Engine<'a> {
                 width: w,
                 ascent: vm.ascent,
                 depth: vm.descent,
-                draws: vec![Draw::Text { x: 0.0, y: 0.0, run }],
+                draws: vec![Draw::Text {
+                    x: 0.0,
+                    y: 0.0,
+                    run,
+                }],
                 ..Default::default()
             };
         };
         let run = GlyphRun {
             font: font.clone(),
             size,
-            glyphs: vec![PositionedGlyph { glyph_id: gid, x: 0.0, y: 0.0, advance: adv, cluster: 0 }],
+            glyphs: vec![PositionedGlyph {
+                glyph_id: gid,
+                x: 0.0,
+                y: 0.0,
+                advance: adv,
+                cluster: 0,
+            }],
             source_text: ch.to_string(),
         };
         Layout {
@@ -259,7 +288,11 @@ impl<'a> Engine<'a> {
             italic,
             lead: Some((gid, size)),
             trail: Some((gid, size)),
-            draws: vec![Draw::Text { x: 0.0, y: 0.0, run }],
+            draws: vec![Draw::Text {
+                x: 0.0,
+                y: 0.0,
+                run,
+            }],
         }
     }
 
@@ -282,14 +315,26 @@ impl<'a> Engine<'a> {
             width: w,
             ascent: vm.ascent,
             depth: vm.descent,
-            draws: vec![Draw::Text { x: 0.0, y: 0.0, run }],
+            draws: vec![Draw::Text {
+                x: 0.0,
+                y: 0.0,
+                run,
+            }],
             ..Default::default()
         }
     }
 
     // ---- parsing -------------------------------------------------------
 
-    fn parse_items(&self, lo: usize, hi: usize, size: f32, style: Style, level: usize, disp: bool) -> Vec<Item> {
+    fn parse_items(
+        &self,
+        lo: usize,
+        hi: usize,
+        size: f32,
+        style: Style,
+        level: usize,
+        disp: bool,
+    ) -> Vec<Item> {
         let mut items: Vec<Item> = Vec::new();
         let mut disp = disp;
         let mut i = lo;
@@ -303,10 +348,30 @@ impl<'a> Engine<'a> {
             if c == '\\' {
                 let (name, nj) = self.read_command(i);
                 match name.as_str() {
-                    "displaystyle" => { disp = true; i = nj; continue; }
-                    "textstyle" | "scriptstyle" | "scriptscriptstyle" => { disp = false; i = nj; continue; }
-                    "limits" => { if let Some(l) = items.last_mut() { l.limits = Some(true); } i = nj; continue; }
-                    "nolimits" => { if let Some(l) = items.last_mut() { l.limits = Some(false); } i = nj; continue; }
+                    "displaystyle" => {
+                        disp = true;
+                        i = nj;
+                        continue;
+                    }
+                    "textstyle" | "scriptstyle" | "scriptscriptstyle" => {
+                        disp = false;
+                        i = nj;
+                        continue;
+                    }
+                    "limits" => {
+                        if let Some(l) = items.last_mut() {
+                            l.limits = Some(true);
+                        }
+                        i = nj;
+                        continue;
+                    }
+                    "nolimits" => {
+                        if let Some(l) = items.last_mut() {
+                            l.limits = Some(false);
+                        }
+                        i = nj;
+                        continue;
+                    }
                     _ => {}
                 }
             }
@@ -318,19 +383,38 @@ impl<'a> Engine<'a> {
                 let (mut sup, mut sub) = (None, None);
                 let (csize, clevel) = self.script_child(size, level);
                 let (arg_lo, arg_hi, ni) = self.read_arg(i + 1, hi);
-                let l = self.assemble(self.parse_items(arg_lo, arg_hi, csize, style, clevel, false), csize, clevel);
-                if c == '^' { sup = Some(l) } else { sub = Some(l) }
+                let l = self.assemble(
+                    self.parse_items(arg_lo, arg_hi, csize, style, clevel, false),
+                    csize,
+                    clevel,
+                );
+                if c == '^' {
+                    sup = Some(l)
+                } else {
+                    sub = Some(l)
+                }
                 i = ni;
                 // optional second script of the other kind
                 let mut j = i;
-                while j < hi && self.chars[j] == ' ' { j += 1; }
+                while j < hi && self.chars[j] == ' ' {
+                    j += 1;
+                }
                 if j < hi && (self.chars[j] == '^' || self.chars[j] == '_') {
                     let other = self.chars[j];
-                    let want_other = (other == '^' && sup.is_none()) || (other == '_' && sub.is_none());
+                    let want_other =
+                        (other == '^' && sup.is_none()) || (other == '_' && sub.is_none());
                     if want_other {
                         let (a_lo, a_hi, nj) = self.read_arg(j + 1, hi);
-                        let l2 = self.assemble(self.parse_items(a_lo, a_hi, csize, style, clevel, false), csize, clevel);
-                        if other == '^' { sup = Some(l2) } else { sub = Some(l2) }
+                        let l2 = self.assemble(
+                            self.parse_items(a_lo, a_hi, csize, style, clevel, false),
+                            csize,
+                            clevel,
+                        );
+                        if other == '^' {
+                            sup = Some(l2)
+                        } else {
+                            sub = Some(l2)
+                        }
                         i = nj;
                     }
                 }
@@ -340,7 +424,12 @@ impl<'a> Engine<'a> {
                 } else {
                     self.attach_scripts(nucleus, sup, sub, size)
                 };
-                items.push(Item { class: ncls, layout: scripted, space: false, limits: None });
+                items.push(Item {
+                    class: ncls,
+                    layout: scripted,
+                    space: false,
+                    limits: None,
+                });
                 continue;
             }
             let (item, ni) = self.parse_atom(i, hi, size, style, level, disp);
@@ -352,12 +441,32 @@ impl<'a> Engine<'a> {
         items
     }
 
-    fn parse_atom(&self, i: usize, hi: usize, size: f32, style: Style, level: usize, disp: bool) -> (Option<Item>, usize) {
+    fn parse_atom(
+        &self,
+        i: usize,
+        hi: usize,
+        size: f32,
+        style: Style,
+        level: usize,
+        disp: bool,
+    ) -> (Option<Item>, usize) {
         let c = self.chars[i];
         if c == '{' {
             let (lo, ghi, ni) = self.read_group(i);
-            let l = self.assemble(self.parse_items(lo, ghi, size, style, level, disp), size, level);
-            return (Some(Item { class: Class::Ord, layout: l, space: false, limits: None }), ni);
+            let l = self.assemble(
+                self.parse_items(lo, ghi, size, style, level, disp),
+                size,
+                level,
+            );
+            return (
+                Some(Item {
+                    class: Class::Ord,
+                    layout: l,
+                    space: false,
+                    limits: None,
+                }),
+                ni,
+            );
         }
         if c == '\\' {
             return self.parse_command(i, hi, size, style, level, disp);
@@ -365,10 +474,26 @@ impl<'a> Engine<'a> {
         // literal character
         let displayed = tables::styled_char_for_literal(c, style);
         let class = tables::char_class(c);
-        (Some(Item { class, layout: self.glyph_box(displayed, size, true), space: false, limits: None }), i + 1)
+        (
+            Some(Item {
+                class,
+                layout: self.glyph_box(displayed, size, true),
+                space: false,
+                limits: None,
+            }),
+            i + 1,
+        )
     }
 
-    fn parse_command(&self, i: usize, hi: usize, size: f32, style: Style, level: usize, disp: bool) -> (Option<Item>, usize) {
+    fn parse_command(
+        &self,
+        i: usize,
+        hi: usize,
+        size: f32,
+        style: Style,
+        level: usize,
+        disp: bool,
+    ) -> (Option<Item>, usize) {
         let (name, mut j) = self.read_command(i);
         // structural commands
         match name.as_str() {
@@ -377,41 +502,93 @@ impl<'a> Engine<'a> {
                 let (n_lo, n_hi, j1) = self.read_arg(j, hi);
                 let (d_lo, d_hi, j2) = self.read_arg(j1, hi);
                 let (csize, clevel) = self.script_child(size, level);
-                let num = self.assemble(self.parse_items(n_lo, n_hi, csize, style, clevel, false), csize, clevel);
-                let den = self.assemble(self.parse_items(d_lo, d_hi, csize, style, clevel, false), csize, clevel);
+                let num = self.assemble(
+                    self.parse_items(n_lo, n_hi, csize, style, clevel, false),
+                    csize,
+                    clevel,
+                );
+                let den = self.assemble(
+                    self.parse_items(d_lo, d_hi, csize, style, clevel, false),
+                    csize,
+                    clevel,
+                );
                 let bar = name == "frac" || name == "tfrac" || name == "dfrac";
                 let frac = self.make_fraction(num, den, bar, size);
                 if name == "binom" {
                     let delim = self.make_delim(frac, '(', ')', size);
-                    return (Some(Item { class: Class::Inner, layout: delim, space: false, limits: None }), j2);
+                    return (
+                        Some(Item {
+                            class: Class::Inner,
+                            layout: delim,
+                            space: false,
+                            limits: None,
+                        }),
+                        j2,
+                    );
                 }
-                return (Some(Item { class: Class::Ord, layout: frac, space: false, limits: None }), j2);
+                return (
+                    Some(Item {
+                        class: Class::Ord,
+                        layout: frac,
+                        space: false,
+                        limits: None,
+                    }),
+                    j2,
+                );
             }
             "sqrt" => {
                 // optional [index]
                 let mut index = None;
                 let mut k = j;
-                while k < hi && self.chars[k] == ' ' { k += 1; }
+                while k < hi && self.chars[k] == ' ' {
+                    k += 1;
+                }
                 if k < hi && self.chars[k] == '[' {
                     if let Some(close) = (k..hi).find(|&p| self.chars[p] == ']') {
                         let (isize, ilevel) = self.script_child(size, level.max(1));
                         index = Some(self.assemble(
-                            self.parse_items(k + 1, close, isize, style, ilevel, false), isize, ilevel,
+                            self.parse_items(k + 1, close, isize, style, ilevel, false),
+                            isize,
+                            ilevel,
                         ));
                         j = close + 1;
                     }
                 }
                 let (a_lo, a_hi, jn) = self.read_arg(j, hi);
-                let content = self.assemble(self.parse_items(a_lo, a_hi, size, style, level, disp), size, level);
+                let content = self.assemble(
+                    self.parse_items(a_lo, a_hi, size, style, level, disp),
+                    size,
+                    level,
+                );
                 let rad = self.make_radical(content, index, size);
-                return (Some(Item { class: Class::Ord, layout: rad, space: false, limits: None }), jn);
+                return (
+                    Some(Item {
+                        class: Class::Ord,
+                        layout: rad,
+                        space: false,
+                        limits: None,
+                    }),
+                    jn,
+                );
             }
             "left" => {
                 let (ld, j1) = self.read_delim(j, hi);
                 let (inner_lo, inner_hi, rd, j2) = self.read_until_right(j1, hi);
-                let content = self.assemble(self.parse_items(inner_lo, inner_hi, size, style, level, disp), size, level);
+                let content = self.assemble(
+                    self.parse_items(inner_lo, inner_hi, size, style, level, disp),
+                    size,
+                    level,
+                );
                 let delim = self.make_delim(content, ld, rd, size);
-                return (Some(Item { class: Class::Inner, layout: delim, space: false, limits: None }), j2);
+                return (
+                    Some(Item {
+                        class: Class::Inner,
+                        layout: delim,
+                        space: false,
+                        limits: None,
+                    }),
+                    j2,
+                );
             }
             "right" => {
                 // stray \right: skip its delimiter token
@@ -421,33 +598,89 @@ impl<'a> Engine<'a> {
             "text" => {
                 let (lo, ghi, jn) = self.read_arg(j, hi);
                 let s: String = self.chars[lo..ghi].iter().collect();
-                return (Some(Item { class: Class::Ord, layout: self.text_run(&s, size), space: false, limits: None }), jn);
+                return (
+                    Some(Item {
+                        class: Class::Ord,
+                        layout: self.text_run(&s, size),
+                        space: false,
+                        limits: None,
+                    }),
+                    jn,
+                );
             }
             _ => {}
         }
         // accents
         if let Some((kind, wide)) = tables::accent(&name) {
             let (a_lo, a_hi, jn) = self.read_arg(j, hi);
-            let content = self.assemble(self.parse_items(a_lo, a_hi, size, style, level, disp), size, level);
-            return (Some(Item { class: Class::Ord, layout: self.make_accent(content, kind, wide, size), space: false, limits: None }), jn);
+            let content = self.assemble(
+                self.parse_items(a_lo, a_hi, size, style, level, disp),
+                size,
+                level,
+            );
+            return (
+                Some(Item {
+                    class: Class::Ord,
+                    layout: self.make_accent(content, kind, wide, size),
+                    space: false,
+                    limits: None,
+                }),
+                jn,
+            );
         }
         // math alphabets (\mathbf ...) and \operatorname
         if let Some(sub_style) = tables::alphabet_style(&name) {
             let (a_lo, a_hi, jn) = self.read_arg(j, hi);
             if name == "operatorname" {
                 let s: String = self.chars[a_lo..a_hi].iter().collect();
-                return (Some(Item { class: Class::Op, layout: self.upright_run(&s, size), space: false, limits: None }), jn);
+                return (
+                    Some(Item {
+                        class: Class::Op,
+                        layout: self.upright_run(&s, size),
+                        space: false,
+                        limits: None,
+                    }),
+                    jn,
+                );
             }
-            let l = self.assemble(self.parse_items(a_lo, a_hi, size, sub_style, level, disp), size, level);
-            return (Some(Item { class: Class::Ord, layout: l, space: false, limits: None }), jn);
+            let l = self.assemble(
+                self.parse_items(a_lo, a_hi, size, sub_style, level, disp),
+                size,
+                level,
+            );
+            return (
+                Some(Item {
+                    class: Class::Ord,
+                    layout: l,
+                    space: false,
+                    limits: None,
+                }),
+                jn,
+            );
         }
         // spacing commands
         if let Some(em) = tables::space_em(&name) {
-            return (Some(Item { class: Class::Ord, layout: kern_layout(em * size), space: true, limits: None }), j);
+            return (
+                Some(Item {
+                    class: Class::Ord,
+                    layout: kern_layout(em * size),
+                    space: true,
+                    limits: None,
+                }),
+                j,
+            );
         }
         // function names (upright, \mathop)
         if tables::is_function_name(&name) {
-            return (Some(Item { class: Class::Op, layout: self.upright_run(&name, size), space: false, limits: None }), j);
+            return (
+                Some(Item {
+                    class: Class::Op,
+                    layout: self.upright_run(&name, size),
+                    space: false,
+                    limits: None,
+                }),
+                j,
+            );
         }
         // named symbols
         if let Some((ch, class)) = tables::symbol(&name) {
@@ -465,10 +698,26 @@ impl<'a> Engine<'a> {
             } else {
                 None
             };
-            return (Some(Item { class, layout, space: false, limits }), j);
+            return (
+                Some(Item {
+                    class,
+                    layout,
+                    space: false,
+                    limits,
+                }),
+                j,
+            );
         }
         // unknown command: render its name upright
-        (Some(Item { class: Class::Ord, layout: self.upright_run(&name, size), space: false, limits: None }), j)
+        (
+            Some(Item {
+                class: Class::Ord,
+                layout: self.upright_run(&name, size),
+                space: false,
+                limits: None,
+            }),
+            j,
+        )
     }
 
     // ---- assembling a list with inter-atom spacing ---------------------
@@ -507,15 +756,28 @@ impl<'a> Engine<'a> {
                 continue;
             }
             // previous non-space class
-            let prev = (0..k).rev().find(|&p| !items[p].space).map(|p| items[p].class);
-            let demote_prev = match prev {
-                None => true,
-                Some(Class::Bin) | Some(Class::Op) | Some(Class::Rel) | Some(Class::Open) | Some(Class::Punct) => true,
-                _ => false,
-            };
+            let prev = (0..k)
+                .rev()
+                .find(|&p| !items[p].space)
+                .map(|p| items[p].class);
+            // TeXbook rule 5: a Bin with nothing usable before it - start of
+            // list, or another operator/relation/open/punct - is really an Ord.
+            let demote_prev = matches!(
+                prev,
+                None | Some(Class::Bin)
+                    | Some(Class::Op)
+                    | Some(Class::Rel)
+                    | Some(Class::Open)
+                    | Some(Class::Punct)
+            );
             // next non-space class
-            let next = ((k + 1)..n).find(|&p| !items[p].space).map(|p| items[p].class);
-            let demote_next = matches!(next, None | Some(Class::Rel) | Some(Class::Close) | Some(Class::Punct));
+            let next = ((k + 1)..n)
+                .find(|&p| !items[p].space)
+                .map(|p| items[p].class);
+            let demote_next = matches!(
+                next,
+                None | Some(Class::Rel) | Some(Class::Close) | Some(Class::Punct)
+            );
             if demote_prev || demote_next {
                 items[k].class = Class::Ord;
             }
@@ -550,7 +812,13 @@ impl<'a> Engine<'a> {
         kb + ks
     }
 
-    fn attach_scripts(&self, nucleus: Layout, sup: Option<Layout>, sub: Option<Layout>, size: f32) -> Layout {
+    fn attach_scripts(
+        &self,
+        nucleus: Layout,
+        sup: Option<Layout>,
+        sub: Option<Layout>,
+        size: f32,
+    ) -> Layout {
         use crate::font::Corner::{BottomLeft, BottomRight, TopLeft, TopRight};
         let mut hb = Hbuild::new();
         let nuc_italic = nucleus.italic;
@@ -563,9 +831,15 @@ impl<'a> Engine<'a> {
 
         match (sup, sub) {
             (Some(p), Some(b)) => {
-                let mut u = self.mf.sup_shift_up(size).max(nuc_ascent - self.mf.sup_drop_max(size));
+                let mut u = self
+                    .mf
+                    .sup_shift_up(size)
+                    .max(nuc_ascent - self.mf.sup_drop_max(size));
                 u = u.max(self.mf.sup_bottom_min(size) + p.depth);
-                let mut v = self.mf.sub_shift_down(size).max(nuc_depth + self.mf.sub_drop_min(size));
+                let mut v = self
+                    .mf
+                    .sub_shift_down(size)
+                    .max(nuc_depth + self.mf.sub_drop_min(size));
                 // ensure gap between sup bottom and sub top
                 let gap_min = self.mf.sub_sup_gap_min(size);
                 let gap = (u - p.depth) - (b.ascent - v);
@@ -589,7 +863,10 @@ impl<'a> Engine<'a> {
                 hb.finish()
             }
             (Some(p), None) => {
-                let mut u = self.mf.sup_shift_up(size).max(nuc_ascent - self.mf.sup_drop_max(size));
+                let mut u = self
+                    .mf
+                    .sup_shift_up(size)
+                    .max(nuc_ascent - self.mf.sup_drop_max(size));
                 u = u.max(self.mf.sup_bottom_min(size) + p.depth);
                 let pw = p.width;
                 let pa = p.ascent;
@@ -601,7 +878,10 @@ impl<'a> Engine<'a> {
                 hb.finish()
             }
             (None, Some(b)) => {
-                let mut v = self.mf.sub_shift_down(size).max(nuc_depth + self.mf.sub_drop_min(size));
+                let mut v = self
+                    .mf
+                    .sub_shift_down(size)
+                    .max(nuc_depth + self.mf.sub_drop_min(size));
                 v = v.max(b.ascent - self.mf.sub_top_max(size));
                 let bw = b.width;
                 let bd = b.depth;
@@ -635,29 +915,64 @@ impl<'a> Engine<'a> {
         let ascent = (vink.y1 - s).max(0.0);
         let depth = (s - vink.y0).max(0.0);
         let (draws, lead, trail) = if vgid != gid {
-            (vec![Draw::Fill { path: self.mf.outline(vgid, size, 0.0, s) }], None, None)
+            (
+                vec![Draw::Fill {
+                    path: self.mf.outline(vgid, size, 0.0, s),
+                }],
+                None,
+                None,
+            )
         } else {
             let run = GlyphRun {
                 font: self.math_font.clone(),
                 size,
-                glyphs: vec![PositionedGlyph { glyph_id: gid, x: 0.0, y: 0.0, advance: adv, cluster: 0 }],
+                glyphs: vec![PositionedGlyph {
+                    glyph_id: gid,
+                    x: 0.0,
+                    y: 0.0,
+                    advance: adv,
+                    cluster: 0,
+                }],
                 source_text: ch.to_string(),
             };
-            (vec![Draw::Text { x: 0.0, y: s, run }], Some((gid, size)), Some((gid, size)))
+            (
+                vec![Draw::Text { x: 0.0, y: s, run }],
+                Some((gid, size)),
+                Some((gid, size)),
+            )
         };
-        Layout { width: adv, ascent, depth, italic, lead, trail, draws }
+        Layout {
+            width: adv,
+            ascent,
+            depth,
+            italic,
+            lead,
+            trail,
+            draws,
+        }
     }
 
     /// Place scripts as over/under *limits* (display-style big operators and
     /// `\limits`), centred above and below the nucleus.
-    fn attach_limits(&self, nucleus: Layout, sup: Option<Layout>, sub: Option<Layout>, size: f32) -> Layout {
+    fn attach_limits(
+        &self,
+        nucleus: Layout,
+        sup: Option<Layout>,
+        sub: Option<Layout>,
+        size: f32,
+    ) -> Layout {
         let width = nucleus
             .width
             .max(sup.as_ref().map_or(0.0, |l| l.width))
             .max(sub.as_ref().map_or(0.0, |l| l.width));
         let (na, nd) = (nucleus.ascent, nucleus.depth);
         let mut draws = Vec::new();
-        place(&mut draws, nucleus.draws, (width - nucleus.width) / 2.0, 0.0);
+        place(
+            &mut draws,
+            nucleus.draws,
+            (width - nucleus.width) / 2.0,
+            0.0,
+        );
         let mut ascent = na;
         let mut depth = nd;
         if let Some(p) = sup {
@@ -674,7 +989,13 @@ impl<'a> Engine<'a> {
             place(&mut draws, b.draws, (width - b.width) / 2.0, shift);
             depth = depth.max(shift + bd);
         }
-        Layout { width, ascent, depth, draws, ..Default::default() }
+        Layout {
+            width,
+            ascent,
+            depth,
+            draws,
+            ..Default::default()
+        }
     }
 
     // ---- matrices / cases ----------------------------------------------
@@ -705,7 +1026,13 @@ impl<'a> Engine<'a> {
             .into_iter()
             .map(|row| {
                 row.into_iter()
-                    .map(|(a, b)| self.assemble(self.parse_items(a, b, size, style, level, disp), size, level))
+                    .map(|(a, b)| {
+                        self.assemble(
+                            self.parse_items(a, b, size, style, level, disp),
+                            size,
+                            level,
+                        )
+                    })
                     .collect()
             })
             .collect();
@@ -715,7 +1042,15 @@ impl<'a> Engine<'a> {
         } else {
             self.make_delim(grid, left, right, size)
         };
-        (Some(Item { class: Class::Inner, layout, space: false, limits: None }), after)
+        (
+            Some(Item {
+                class: Class::Inner,
+                layout,
+                space: false,
+                limits: None,
+            }),
+            after,
+        )
     }
 
     fn make_matrix(&self, rows: Vec<Vec<Layout>>, size: f32, left_align: bool) -> Layout {
@@ -730,8 +1065,14 @@ impl<'a> Engine<'a> {
                 col_w[j] = col_w[j].max(c.width);
             }
         }
-        let row_a: Vec<f32> = rows.iter().map(|r| r.iter().map(|c| c.ascent).fold(0.0, f32::max)).collect();
-        let row_d: Vec<f32> = rows.iter().map(|r| r.iter().map(|c| c.depth).fold(0.0, f32::max)).collect();
+        let row_a: Vec<f32> = rows
+            .iter()
+            .map(|r| r.iter().map(|c| c.ascent).fold(0.0, f32::max))
+            .collect();
+        let row_d: Vec<f32> = rows
+            .iter()
+            .map(|r| r.iter().map(|c| c.depth).fold(0.0, f32::max))
+            .collect();
         let colsep = size * 0.6;
         let rowsep = size * 0.35;
         let pad = size * 0.16;
@@ -745,7 +1086,11 @@ impl<'a> Engine<'a> {
             let baseline = y + row_a[r];
             let mut x = pad;
             for (jcol, cell) in row.into_iter().enumerate() {
-                let cx = if left_align { x } else { x + (col_w[jcol] - cell.width) / 2.0 };
+                let cx = if left_align {
+                    x
+                } else {
+                    x + (col_w[jcol] - cell.width) / 2.0
+                };
                 place(&mut draws, cell.draws, cx, baseline);
                 x += col_w[jcol] + colsep;
             }
@@ -764,9 +1109,21 @@ impl<'a> Engine<'a> {
 
     fn make_fraction(&self, num: Layout, den: Layout, bar: bool, size: f32) -> Layout {
         let axis = self.mf.axis_height(size);
-        let t = if bar { self.mf.fraction_rule_thickness(size) } else { 0.0 };
-        let num_gap = if bar { self.mf.fraction_num_gap(size) } else { size * 0.05 };
-        let den_gap = if bar { self.mf.fraction_denom_gap(size) } else { size * 0.05 };
+        let t = if bar {
+            self.mf.fraction_rule_thickness(size)
+        } else {
+            0.0
+        };
+        let num_gap = if bar {
+            self.mf.fraction_num_gap(size)
+        } else {
+            size * 0.05
+        };
+        let den_gap = if bar {
+            self.mf.fraction_denom_gap(size)
+        } else {
+            size * 0.05
+        };
         let u = self
             .mf
             .fraction_num_shift(size)
@@ -786,7 +1143,12 @@ impl<'a> Engine<'a> {
         place(&mut draws, num.draws, num_x, -u);
         place(&mut draws, den.draws, den_x, v);
         if bar {
-            draws.push(fill_rect(pad * 0.25, -axis - t / 2.0, width - pad * 0.25, -axis + t / 2.0));
+            draws.push(fill_rect(
+                pad * 0.25,
+                -axis - t / 2.0,
+                width - pad * 0.25,
+                -axis + t / 2.0,
+            ));
         }
         Layout {
             width,
@@ -816,14 +1178,24 @@ impl<'a> Engine<'a> {
         let s = vink.y1 - (hc + gap + t);
         // index overhang on the left
         let lead = match &index {
-            Some(idx) => (idx.width + self.mf.radical_kern_before(size) + self.mf.radical_kern_after(size)).max(0.0),
+            Some(idx) => {
+                (idx.width + self.mf.radical_kern_before(size) + self.mf.radical_kern_after(size))
+                    .max(0.0)
+            }
             None => 0.0,
         };
         let mut draws = Vec::new();
-        draws.push(Draw::Fill { path: self.mf.outline(vgid, size, lead, s) });
+        draws.push(Draw::Fill {
+            path: self.mf.outline(vgid, size, lead, s),
+        });
         // overbar rule, connecting at the surd's advance width
         let rx0 = lead + va;
-        draws.push(fill_rect(rx0, -(hc + gap + t), rx0 + content.width, -(hc + gap)));
+        draws.push(fill_rect(
+            rx0,
+            -(hc + gap + t),
+            rx0 + content.width,
+            -(hc + gap),
+        ));
         // content under the bar
         let cw = content.width;
         place(&mut draws, content.draws, rx0, 0.0);
@@ -878,17 +1250,32 @@ impl<'a> Engine<'a> {
         let ascent = (vink.y1 - s).max(0.0);
         let depth = (s - vink.y0).max(0.0);
         let draws = if vgid != gid {
-            vec![Draw::Fill { path: self.mf.outline(vgid, size, 0.0, s) }]
+            vec![Draw::Fill {
+                path: self.mf.outline(vgid, size, 0.0, s),
+            }]
         } else {
             let run = GlyphRun {
                 font: self.math_font.clone(),
                 size,
-                glyphs: vec![PositionedGlyph { glyph_id: gid, x: 0.0, y: 0.0, advance: adv, cluster: 0 }],
+                glyphs: vec![PositionedGlyph {
+                    glyph_id: gid,
+                    x: 0.0,
+                    y: 0.0,
+                    advance: adv,
+                    cluster: 0,
+                }],
                 source_text: ch.to_string(),
             };
             vec![Draw::Text { x: 0.0, y: s, run }]
         };
-        Layout { width: adv, ascent, depth, italic: 0.0, draws, ..Default::default() }
+        Layout {
+            width: adv,
+            ascent,
+            depth,
+            italic: 0.0,
+            draws,
+            ..Default::default()
+        }
     }
 
     // ---- accents -------------------------------------------------------
@@ -913,27 +1300,64 @@ impl<'a> Engine<'a> {
         let mut strokes: Vec<Draw> = Vec::new();
         match kind {
             "bar" => strokes.push(stroke_poly(&[(lx, y_bot), (rx, y_bot)], th, false)),
-            "hat" => strokes.push(stroke_poly(&[(lx, y_bot), (cx, y_top), (rx, y_bot)], th, false)),
-            "check" => strokes.push(stroke_poly(&[(lx, y_top), (cx, y_bot), (rx, y_top)], th, false)),
+            "hat" => strokes.push(stroke_poly(
+                &[(lx, y_bot), (cx, y_top), (rx, y_bot)],
+                th,
+                false,
+            )),
+            "check" => strokes.push(stroke_poly(
+                &[(lx, y_top), (cx, y_bot), (rx, y_top)],
+                th,
+                false,
+            )),
             "vec" => {
                 let hw = (aw * 0.34).min(size * 0.22);
                 let hh = ah * 0.55;
                 strokes.push(stroke_poly(&[(lx, y_mid), (rx, y_mid)], th, false));
-                strokes.push(stroke_poly(&[(rx - hw, y_mid - hh), (rx, y_mid), (rx - hw, y_mid + hh)], th, false));
+                strokes.push(stroke_poly(
+                    &[(rx - hw, y_mid - hh), (rx, y_mid), (rx - hw, y_mid + hh)],
+                    th,
+                    false,
+                ));
             }
             "tilde" => strokes.push(stroke_poly(
-                &[(lx, y_mid), (lx + aw * 0.25, y_top), (cx, y_mid), (rx - aw * 0.25, y_bot), (rx, y_mid)],
-                th, false,
+                &[
+                    (lx, y_mid),
+                    (lx + aw * 0.25, y_top),
+                    (cx, y_mid),
+                    (rx - aw * 0.25, y_bot),
+                    (rx, y_mid),
+                ],
+                th,
+                false,
             )),
             "breve" => strokes.push(stroke_poly(
-                &[(lx, y_top), (lx + aw * 0.22, y_bot), (rx - aw * 0.22, y_bot), (rx, y_top)],
-                th, false,
+                &[
+                    (lx, y_top),
+                    (lx + aw * 0.22, y_bot),
+                    (rx - aw * 0.22, y_bot),
+                    (rx, y_top),
+                ],
+                th,
+                false,
             )),
-            "acute" => strokes.push(stroke_poly(&[(cx - aw * 0.28, y_bot), (cx + aw * 0.28, y_top)], th, false)),
-            "grave" => strokes.push(stroke_poly(&[(cx - aw * 0.28, y_top), (cx + aw * 0.28, y_bot)], th, false)),
+            "acute" => strokes.push(stroke_poly(
+                &[(cx - aw * 0.28, y_bot), (cx + aw * 0.28, y_top)],
+                th,
+                false,
+            )),
+            "grave" => strokes.push(stroke_poly(
+                &[(cx - aw * 0.28, y_top), (cx + aw * 0.28, y_bot)],
+                th,
+                false,
+            )),
             "dot" | "ddot" => {
                 let r = th * 1.1;
-                let centers: &[f32] = if kind == "dot" { &[0.0] } else { &[-aw * 0.26, aw * 0.26] };
+                let centers: &[f32] = if kind == "dot" {
+                    &[0.0]
+                } else {
+                    &[-aw * 0.26, aw * 0.26]
+                };
                 for &off in centers {
                     let dcx = cx + off;
                     draws.push(fill_rect(dcx - r, y_mid - r, dcx + r, y_mid + r));
@@ -1127,7 +1551,10 @@ impl<'a> Engine<'a> {
 }
 
 fn kern_layout(w: f32) -> Layout {
-    Layout { width: w, ..Default::default() }
+    Layout {
+        width: w,
+        ..Default::default()
+    }
 }
 
 /// A shaped, kerned body-font run (for non-math segments and `\text`).
@@ -1139,7 +1566,11 @@ pub(crate) fn shaped_text_layout(font: &FontData, s: &str, size: f32) -> Layout 
         width: w,
         ascent: vm.ascent,
         depth: vm.descent,
-        draws: vec![Draw::Text { x: 0.0, y: 0.0, run }],
+        draws: vec![Draw::Text {
+            x: 0.0,
+            y: 0.0,
+            run,
+        }],
         ..Default::default()
     }
 }
