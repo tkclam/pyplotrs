@@ -4030,7 +4030,8 @@ class Figure:
 
     def __init__(self, figsize: tuple[float, float] = (480, 360), nrows: int = 1,
                  ncols: int = 1, sharex: bool = False, sharey: bool = False,
-                 projection: str | None = None, theme=None, units: str = "pt") -> None:
+                 projection: str | None = None, theme=None, units: str = "pt",
+                 width_ratios=None, height_ratios=None) -> None:
         self.figsize = figsize          # raw, as given (back-compat / repr)
         self.units = units
         self.size_pt = _figsize_to_points(figsize, units)  # resolved, canonical
@@ -4041,6 +4042,11 @@ class Figure:
         self.theme: Theme = _theme.get(theme)
         self.suptitle: str | None = None
         self._legend: dict | None = None
+        # Relative column widths / row heights. Normalised in the Rust solver, so
+        # only the proportions matter; `None` means an even grid.
+        self._width_ratios = None if width_ratios is None else [float(v) for v in width_ratios]
+        self._height_ratios = (
+            None if height_ratios is None else [float(v) for v in height_ratios])
         make = _axes_class(projection)
         self.axes = [make(self.theme) for _ in range(nrows * ncols)]
         # Spanning placement (GridSpec / subplot_mosaic): one
@@ -4052,14 +4058,22 @@ class Figure:
             self.suptitle = suptitle
         return self
 
-    def add_gridspec(self, nrows: int, ncols: int) -> "GridSpec":
+    def add_gridspec(self, nrows: int, ncols: int, *,
+                     width_ratios=None, height_ratios=None) -> "GridSpec":
         """Switch this figure to spanning-subplot mode over an ``nrows`` x
         ``ncols`` grid and return a :class:`GridSpec`. Populate it with
-        :meth:`add_subplot`; existing auto-created axes are cleared."""
+        :meth:`add_subplot`; existing auto-created axes are cleared.
+
+        ``width_ratios``/``height_ratios`` weight the columns and rows (see
+        :func:`subplots`)."""
         self.nrows = nrows
         self.ncols = ncols
         self.axes = []
         self._spans = []
+        if width_ratios is not None:
+            self._width_ratios = [float(v) for v in width_ratios]
+        if height_ratios is not None:
+            self._height_ratios = [float(v) for v in height_ratios]
         return GridSpec(nrows, ncols)
 
     def add_subplot(self, spec, *, projection: str | None = None) -> "Axes":
@@ -4165,6 +4179,8 @@ class Figure:
             suptitle_h=suptitle_h,
             legend_w=legend_w,
             spans=self._spans,
+            width_ratios=self._width_ratios,
+            height_ratios=self._height_ratios,
         )
 
         for ax, axl, (xr, yr), xt, yt in zip(self.axes, layout.axes, ranges, xticks, yticks):
@@ -4282,7 +4298,7 @@ class Figure:
 
 def subplots(nrows: int = 1, ncols: int = 1, *, figsize: tuple[float, float] = (480, 360),
              sharex: bool = False, sharey: bool = False, projection: str | None = None,
-             theme=None, units: str = "pt"):
+             theme=None, units: str = "pt", width_ratios=None, height_ratios=None):
     """Create a [`Figure`] with an ``nrows`` x ``ncols`` grid of axes.
 
     ``figsize`` is the canvas ``(width, height)`` in **points** by default, so a
@@ -4292,9 +4308,16 @@ def subplots(nrows: int = 1, ncols: int = 1, *, figsize: tuple[float, float] = (
     flows to every axes. Returns ``(fig, ax)`` for a 1x1 grid,
     ``(fig, [ax, ...])`` when one dimension is 1, and ``(fig, [[ax, ...], ...])``
     otherwise (row-major).
+
+    ``width_ratios`` / ``height_ratios`` give relative column widths and row
+    heights, e.g. ``width_ratios=[2, 1]`` for a wide panel beside a narrow one.
+    Only the proportions matter (``[2, 1]`` and ``[0.5, 0.25]`` are the same),
+    and the gutters stay a fixed size - weighting changes the panels, not the
+    space between them.
     """
     fig = Figure(figsize=figsize, nrows=nrows, ncols=ncols, sharex=sharex, sharey=sharey,
-                 projection=projection, theme=theme, units=units)
+                 projection=projection, theme=theme, units=units,
+                 width_ratios=width_ratios, height_ratios=height_ratios)
     if nrows == 1 and ncols == 1:
         return fig, fig.axes[0]
     if nrows == 1 or ncols == 1:

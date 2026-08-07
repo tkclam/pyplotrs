@@ -78,6 +78,13 @@ pub struct FigureSpec {
     /// Optional spanning placement: one `(row, col, rowspan, colspan)` per axes
     /// (in `cells` order). `None` = a plain uniform grid (the default).
     pub spans: Option<Vec<(usize, usize, usize, usize)>>,
+    /// Relative column widths, one per column. `None` = all equal. Values are
+    /// normalised, so `[2.0, 1.0]` and `[0.5, 0.25]` mean the same thing; the
+    /// ratios apply to the *cell* including its label bands, matching
+    /// matplotlib's `width_ratios`.
+    pub width_ratios: Option<Vec<f64>>,
+    /// Relative row heights, one per row. `None` = all equal.
+    pub height_ratios: Option<Vec<f64>>,
 }
 
 /// The computed rectangles for one axes.
@@ -142,29 +149,24 @@ pub fn solve(spec: &FigureSpec) -> LayoutResult {
         (inner.h - spec.suptitle_h).max(0.0),
     );
 
-    let cell_w = if ncols > 0 {
-        (grid.w - (ncols as f64 - 1.0) * spec.wspace) / ncols as f64
-    } else {
-        grid.w
-    }
-    .max(0.0);
-    let cell_h = if nrows > 0 {
-        (grid.h - (nrows as f64 - 1.0) * spec.hspace) / nrows as f64
-    } else {
-        grid.h
-    }
-    .max(0.0);
+    // Track/offset tables rather than a single cell size, so columns and rows
+    // can differ in extent. `offsets[i]` is the start of track `i` relative to
+    // the grid origin; `sizes[i]` its extent, gaps excluded.
+    let (col_w, col_x) = tracks(grid.w, ncols, spec.wspace, spec.width_ratios.as_deref());
+    let (row_h, row_y) = tracks(grid.h, nrows, spec.hspace, spec.height_ratios.as_deref());
 
     // Grid cell at (row, col) spanning (rowspan, colspan) whole cells, including
     // the inter-cell gaps it swallows.
     let span_rect = |row: usize, col: usize, rowspan: usize, colspan: usize| {
-        let rs = rowspan.max(1);
-        let cs = colspan.max(1);
+        let r0 = row.min(nrows - 1);
+        let c0 = col.min(ncols - 1);
+        let r1 = (r0 + rowspan.max(1)).min(nrows) - 1;
+        let c1 = (c0 + colspan.max(1)).min(ncols) - 1;
         Rect::new(
-            grid.x + col as f64 * (cell_w + spec.wspace),
-            grid.y + row as f64 * (cell_h + spec.hspace),
-            cs as f64 * cell_w + (cs as f64 - 1.0) * spec.wspace,
-            rs as f64 * cell_h + (rs as f64 - 1.0) * spec.hspace,
+            grid.x + col_x[c0],
+            grid.y + row_y[r0],
+            (col_x[c1] + col_w[c1] - col_x[c0]).max(0.0),
+            (row_y[r1] + row_h[r1] - row_y[r0]).max(0.0),
         )
     };
 
@@ -190,6 +192,33 @@ pub fn solve(spec: &FigureSpec) -> LayoutResult {
         suptitle,
         legend,
     }
+}
+
+/// Split `total` into `n` tracks separated by `gap`, weighted by `ratios`.
+///
+/// Returns `(sizes, offsets)`. Gaps are taken out first so they stay a fixed
+/// number of points regardless of the weighting - a 3:1 split should change the
+/// panels, not the gutter between them. A missing, wrong-length, or
+/// non-positive `ratios` falls back to equal tracks rather than erroring: a
+/// layout hint is not worth failing a render over.
+fn tracks(total: f64, n: usize, gap: f64, ratios: Option<&[f64]>) -> (Vec<f64>, Vec<f64>) {
+    let n = n.max(1);
+    let usable = (total - (n as f64 - 1.0) * gap).max(0.0);
+
+    let weights: Vec<f64> = match ratios {
+        Some(r) if r.len() == n && r.iter().all(|v| v.is_finite() && *v > 0.0) => r.to_vec(),
+        _ => vec![1.0; n],
+    };
+    let sum: f64 = weights.iter().sum();
+
+    let sizes: Vec<f64> = weights.iter().map(|w| usable * w / sum).collect();
+    let mut offsets = Vec::with_capacity(n);
+    let mut at = 0.0;
+    for size in &sizes {
+        offsets.push(at);
+        at += size + gap;
+    }
+    (sizes, offsets)
 }
 
 /// Reserve the bands within one cell and return the plot area + band rects.
@@ -257,6 +286,8 @@ mod tests {
                 cbar_w: 0.0,
             }],
             spans: None,
+            width_ratios: None,
+            height_ratios: None,
         };
         let out = solve(&spec);
         let ax = out.axes[0];
@@ -267,6 +298,73 @@ mod tests {
         approx(ax.plot.x1(), 395.0);
         // Bottom leaves room for x ticks + xlabel.
         approx(ax.plot.y1(), 295.0 - 14.0 - 12.0);
+    }
+
+    /// A 2:1 width ratio must make the first column exactly twice the second,
+    /// and must not change the gutter between them - gaps are a fixed number of
+    /// points, not a share of the figure.
+    #[test]
+    fn width_ratios_weight_columns_but_not_gaps() {
+        let equal = solve(&spec_with_ratios(None));
+        let weighted = solve(&spec_with_ratios(Some(vec![2.0, 1.0])));
+
+        let (a, b) = (weighted.axes[0].cell, weighted.axes[1].cell);
+        assert!(
+            (a.w - 2.0 * b.w).abs() < 1e-9,
+            "expected a 2:1 split, got {} and {}",
+            a.w,
+            b.w
+        );
+        // Total extent, and therefore the gutter, is unchanged.
+        let equal_span = equal.axes[1].cell.x1() - equal.axes[0].cell.x;
+        let weighted_span = b.x1() - a.x;
+        assert!((equal_span - weighted_span).abs() < 1e-9);
+        assert!((b.x - a.x1() - 12.0).abs() < 1e-9, "gutter changed");
+    }
+
+    /// Ratios are normalised, so only their proportions matter.
+    #[test]
+    fn width_ratios_are_scale_invariant() {
+        let a = solve(&spec_with_ratios(Some(vec![3.0, 1.0])));
+        let b = solve(&spec_with_ratios(Some(vec![0.75, 0.25])));
+        assert!((a.axes[0].cell.w - b.axes[0].cell.w).abs() < 1e-9);
+    }
+
+    /// A malformed hint falls back to equal tracks rather than erroring - a
+    /// layout preference is not worth failing a render over.
+    #[test]
+    fn malformed_ratios_fall_back_to_equal() {
+        let equal = solve(&spec_with_ratios(None));
+        for bad in [
+            vec![1.0],
+            vec![1.0, 0.0],
+            vec![1.0, f64::NAN],
+            vec![-1.0, 2.0],
+        ] {
+            let got = solve(&spec_with_ratios(Some(bad.clone())));
+            assert!(
+                (got.axes[0].cell.w - equal.axes[0].cell.w).abs() < 1e-9,
+                "ratios {bad:?} should have fallen back to equal tracks"
+            );
+        }
+    }
+
+    fn spec_with_ratios(width_ratios: Option<Vec<f64>>) -> FigureSpec {
+        FigureSpec {
+            width: 400.0,
+            height: 200.0,
+            nrows: 1,
+            ncols: 2,
+            outer_margin: 5.0,
+            hspace: 10.0,
+            wspace: 12.0,
+            suptitle_h: 0.0,
+            legend_w: 0.0,
+            cells: vec![AxesBands::default(); 2],
+            spans: None,
+            width_ratios,
+            height_ratios: None,
+        }
     }
 
     #[test]
@@ -283,6 +381,8 @@ mod tests {
             legend_w: 0.0,
             cells: vec![AxesBands::default(), AxesBands::default()],
             spans: None,
+            width_ratios: None,
+            height_ratios: None,
         };
         let out = solve(&spec);
         // Two equal cells with a 20pt gap inside a 580pt-wide inner area.

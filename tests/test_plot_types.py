@@ -16,6 +16,7 @@ import random
 import pytest
 
 import pyplotrs as plt
+from pyplotrs import _pyplotrs_core as _core
 
 FORMATS = ("pdf", "svg", "png")
 
@@ -184,3 +185,73 @@ def test_removed_helpers_are_gone():
 
     for name in ("_streamlines", "_bilerp", "_resolve_color"):
         assert not hasattr(figure, name), f"{name} is dead code and should be removed"
+
+
+# -- layout: width / height ratios -------------------------------------------
+
+def _cell_sizes(n, *, vertical=False, ratios=None, gap=12.0):
+    """Cell extents from the Rust solver for a 1xN (or Nx1) grid."""
+    bands = [(0.0,) * 6] * n
+    kwargs = {"height_ratios": ratios} if vertical else {"width_ratios": ratios}
+    layout = _core.solve_layout(
+        200.0 if vertical else 600.0,
+        600.0 if vertical else 200.0,
+        n if vertical else 1,
+        1 if vertical else n,
+        bands,
+        hspace=gap if vertical else 0.0,
+        wspace=0.0 if vertical else gap,
+        **kwargs,
+    )
+    return [(a.cell.h if vertical else a.cell.w) for a in layout.axes]
+
+
+def test_width_ratios_weight_the_columns():
+    wide, narrow = _cell_sizes(2, ratios=[3.0, 1.0])
+    assert wide == pytest.approx(narrow * 3.0)
+
+
+def test_height_ratios_weight_the_rows():
+    short, tall = _cell_sizes(2, vertical=True, ratios=[1.0, 3.0])
+    assert tall == pytest.approx(short * 3.0)
+
+
+def test_ratios_do_not_change_the_gutter():
+    """Weighting should move the panels, not the space between them."""
+    assert sum(_cell_sizes(2, ratios=[3.0, 1.0])) == pytest.approx(
+        sum(_cell_sizes(2, ratios=None))
+    )
+
+
+def test_ratios_are_scale_invariant():
+    assert _cell_sizes(2, ratios=[3.0, 1.0]) == pytest.approx(
+        _cell_sizes(2, ratios=[0.75, 0.25])
+    )
+
+
+@pytest.mark.parametrize("bad", [[1.0], [1.0, 0.0], [-1.0, 2.0], [1.0, float("nan")]])
+def test_malformed_ratios_fall_back_to_equal(bad):
+    """A layout hint is not worth failing a render over."""
+    assert _cell_sizes(2, ratios=bad) == pytest.approx(_cell_sizes(2, ratios=None))
+
+
+def test_ratios_reach_the_rendered_figure(tmp_path):
+    """End to end: the same figure with and without ratios must differ."""
+    def render(name, **kw):
+        fig, axs = plt.subplots(1, 2, figsize=(600, 200), **kw)
+        for ax in axs:
+            ax.line([0, 1], [0, 1])
+        out = tmp_path / f"{name}.png"
+        fig.save(str(out))
+        return out.read_bytes()
+
+    assert render("weighted", width_ratios=[3, 1]) != render("even")
+
+
+def test_gridspec_accepts_ratios(tmp_path):
+    fig = plt.figure(figsize=(400, 300))
+    gs = fig.add_gridspec(2, 2, width_ratios=[2, 1])
+    fig.add_subplot(gs[0, :]).line([0, 1], [0, 1])
+    fig.add_subplot(gs[1, 0]).line([0, 1], [1, 0])
+    fig.add_subplot(gs[1, 1]).line([0, 1], [0, 1])
+    fig.save(str(tmp_path / "gs.png"))

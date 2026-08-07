@@ -1350,7 +1350,7 @@ fn nice_ticks(vmin: f64, vmax: f64, max_ticks: usize) -> Vec<(f64, String)> {
     width, height, nrows, ncols,
     cells,
     outer_margin=5.0, hspace=0.0, wspace=0.0, suptitle_h=0.0, legend_w=0.0,
-    spans=None,
+    spans=None, width_ratios=None, height_ratios=None,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn solve_layout(
@@ -1365,6 +1365,8 @@ fn solve_layout(
     suptitle_h: f64,
     legend_w: f64,
     spans: Option<Vec<(usize, usize, usize, usize)>>,
+    width_ratios: Option<Vec<f64>>,
+    height_ratios: Option<Vec<f64>>,
 ) -> Layout {
     let spec = FigureSpec {
         width,
@@ -1377,6 +1379,8 @@ fn solve_layout(
         suptitle_h,
         legend_w,
         spans,
+        width_ratios,
+        height_ratios,
         cells: cells
             .into_iter()
             .map(

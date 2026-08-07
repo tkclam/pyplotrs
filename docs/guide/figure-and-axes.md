@@ -87,3 +87,23 @@ Marks accept any iterable of numbers — Python lists, tuples, generators, NumPy
 arrays, pandas/polars columns. There is no hard dependency on NumPy. Non-finite
 values (`NaN`/`inf`) are ignored when autoscaling and **break a line into a gap**
 (rather than distorting the plot), matching matplotlib's behaviour.
+
+## Unequal panel sizes
+
+`width_ratios` and `height_ratios` weight the columns and rows:
+
+```python
+fig, axs = plt.subplots(1, 2, width_ratios=[3, 1])   # wide panel, narrow panel
+fig, axs = plt.subplots(2, 2, height_ratios=[1, 2])  # short row over a tall one
+```
+
+Only the proportions matter — `[3, 1]` and `[0.75, 0.25]` are the same — and the
+gutters keep their size, so weighting changes the panels rather than the space
+between them. A malformed hint (wrong length, zero or negative) falls back to an
+even grid instead of raising.
+
+`Figure.add_gridspec` takes them too:
+
+```python
+gs = fig.add_gridspec(2, 2, width_ratios=[2, 1])
+```

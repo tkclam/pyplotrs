@@ -27,6 +27,8 @@ All notable changes to pyplotrs are documented here. The format is based on
   `hist2d`, `hexbin`, `pcolormesh`, `contour`, `contourf`.
 - `hlines` / `vlines` (data-coordinate segments that autoscale, unlike the
   `axhline` / `axvline` guides) and `fill_betweenx`.
+- `width_ratios` / `height_ratios` on `subplots` and `Figure.add_gridspec`
+  for unequal panel sizes.
 - Animation export to GIF and APNG.
 - Output to PDF (editable/selectable/taggable text), SVG, PNG (with DPI) and
   self-contained HTML.
