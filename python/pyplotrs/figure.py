@@ -978,6 +978,18 @@ class _AxesBase:
             return math.sqrt(float(size))
         return default
 
+    def _ordered_marks(self, marks=None) -> list[dict]:
+        """Marks in draw order: ascending ``zorder``, then insertion order.
+
+        The sort is stable, so marks sharing a ``zorder`` - which is all of them
+        by default - keep the order they were added in. Insertion order stays
+        the primary model, as it is the one you can read off the code; ``zorder``
+        is the escape hatch for when a mark has to sit above something added
+        after it.
+        """
+        seq = self._marks if marks is None else marks
+        return sorted(seq, key=lambda m: m.get("zorder", 0.0))
+
     def _mark_color(self, color, alpha: float = 1.0):
         """The resolved colour for a mark, with ``alpha`` folded in.
 
@@ -1139,7 +1151,7 @@ class Axes(_AxesBase):
     def line(self, xs, ys, *, label: str | None = None, color=None,
              linewidth: float | None = None, alpha: float = 1.0,
              linestyle: str = "solid", marker: str | None = None,
-             markersize: float = 5.0, simplify: bool = True) -> "Axes":
+             markersize: float = 5.0, simplify: bool = True, zorder: float = 0.0) -> "Axes":
         """Plot a polyline through ``(xs, ys)``.
 
         ``color`` may be ``None`` (cycle the palette), ``"C0".."C7"``, or an
@@ -1153,6 +1165,7 @@ class Axes(_AxesBase):
         exactly (e.g. when the polyline *is* the data being exported).
         """
         self._marks.append({
+                "zorder": float(zorder),
             "kind": "line",
             "xs": self._coords(xs, "x"),
             "ys": self._coords(ys, "y"),
@@ -1171,7 +1184,7 @@ class Axes(_AxesBase):
                 marker: str = "o", edgecolor=None, edgewidth: float = 1.0,
                 size: float | None = None,
                 c=None, cmap="viridis", norm=None, vmin: float | None = None,
-                vmax: float | None = None):
+                vmax: float | None = None, zorder: float = 0.0):
         """Scatter markers at ``(xs, ys)``.
 
         ``markersize`` is the marker **diameter in points**, the same unit every
@@ -1185,6 +1198,7 @@ class Axes(_AxesBase):
         xs = self._coords(xs, "x")
         ys = self._coords(ys, "y")
         mark = {
+            "zorder": float(zorder),
             "kind": "scatter",
             "xs": xs,
             "ys": ys,
@@ -1211,12 +1225,13 @@ class Axes(_AxesBase):
         return _Mappable(self, cm, nrm.vmin, nrm.vmax, norm=nrm)
 
     def bar(self, x, height, *, width: float = 0.8, bottom=0.0, color=None,
-            alpha: float = 1.0, label: str | None = None, edgecolor=None) -> "Axes":
+            alpha: float = 1.0, label: str | None = None, edgecolor=None, zorder: float = 0.0) -> "Axes":
         """Draw vertical bars of the given ``height`` at positions ``x``. ``x``
         may be strings (categories), which set a categorical x-axis."""
         xs = self._coords(x, "x")
         heights = [float(v) for v in height]
         self._marks.append({
+                "zorder": float(zorder),
             "kind": "bar",
             "xs": xs,
             "heights": heights,
@@ -1229,7 +1244,7 @@ class Axes(_AxesBase):
         return self
 
     def hist(self, data, *, bins: int = 10, color=None, alpha: float = 1.0,
-             label: str | None = None, range=None, density: bool = False) -> "Axes":
+             label: str | None = None, range=None, density: bool = False, zorder: float = 0.0) -> "Axes":
         """Bin ``data`` into ``bins`` equal-width bins and draw the histogram.
 
         The binning loop runs in Rust (``_core.histogram``), matching what
@@ -1240,6 +1255,7 @@ class Axes(_AxesBase):
         span = (float(range[0]), float(range[1])) if range else None
         edges, counts = _core.histogram(vals, max(int(bins), 1), span, bool(density))
         self._marks.append({
+                "zorder": float(zorder),
             "kind": "hist",
             "edges": edges,
             "counts": counts,
@@ -1249,10 +1265,11 @@ class Axes(_AxesBase):
         return self
 
     def fill_between(self, xs, y1, y2=0.0, *, color=None, alpha: float = 0.3,
-                     label: str | None = None) -> "Axes":
+                     label: str | None = None, zorder: float = 0.0) -> "Axes":
         """Fill the band between ``y1`` and ``y2`` across ``xs``."""
         xs = self._coords(xs, "x")
         self._marks.append({
+                "zorder": float(zorder),
             "kind": "fill",
             "orient": "y",
             "xs": xs,
@@ -1265,11 +1282,12 @@ class Axes(_AxesBase):
         return self
 
     def fill_betweenx(self, ys, x1, x2=0.0, *, color=None, alpha: float = 0.3,
-                      label: str | None = None) -> "Axes":
+                      label: str | None = None, zorder: float = 0.0) -> "Axes":
         """Fill the band between ``x1`` and ``x2`` across ``ys`` - the transpose
         of :meth:`fill_between`, for bands around a horizontal profile."""
         ys = self._coords(ys, "y")
         self._marks.append({
+                "zorder": float(zorder),
             "kind": "fill",
             "orient": "x",
             "ys": ys,
@@ -1283,30 +1301,33 @@ class Axes(_AxesBase):
 
     def hlines(self, y, xmin, xmax, *, color=None, linewidth: float | None = None,
                alpha: float = 1.0, linestyle: str = "solid",
-               label: str | None = None) -> "Axes":
+               label: str | None = None, zorder: float = 0.0) -> "Axes":
         """Horizontal line segments at each ``y``, spanning ``xmin`` to ``xmax``
         in **data** coordinates.
 
         Unlike :meth:`axhline`, which spans a fraction of the axes and is a
         guide, these are data and participate in autoscaling. Each argument may
         be a scalar or a sequence; scalars broadcast."""
-        return self._add_lines("h", y, xmin, xmax, color, linewidth, linestyle, label, alpha)
+        return self._add_lines("h", y, xmin, xmax, color, linewidth, linestyle, label,
+                               alpha, zorder)
 
     def vlines(self, x, ymin, ymax, *, color=None, linewidth: float | None = None,
                alpha: float = 1.0, linestyle: str = "solid",
-               label: str | None = None) -> "Axes":
+               label: str | None = None, zorder: float = 0.0) -> "Axes":
         """Vertical line segments at each ``x``, spanning ``ymin`` to ``ymax`` in
         **data** coordinates (see :meth:`hlines`)."""
-        return self._add_lines("v", x, ymin, ymax, color, linewidth, linestyle, label, alpha)
+        return self._add_lines("v", x, ymin, ymax, color, linewidth, linestyle, label,
+                               alpha, zorder)
 
     def _add_lines(self, orient, pos, lo, hi, color, linewidth, linestyle, label,
-                   alpha=1.0) -> "Axes":
+                   alpha=1.0, zorder: float = 0.0) -> "Axes":
         """Shared body of :meth:`hlines` / :meth:`vlines`."""
         pos = _to_f64(pos if hasattr(pos, "__len__") else [pos])
         n = len(pos)
         lo = _to_f64(_as_seq(lo, n))
         hi = _to_f64(_as_seq(hi, n))
         self._marks.append({
+                "zorder": float(zorder),
             "kind": "lines", "orient": orient, "pos": pos, "lo": lo, "hi": hi,
             "color": self._mark_color(color, alpha),
             "width": self._theme.line_width if linewidth is None else float(linewidth),
@@ -1317,12 +1338,13 @@ class Axes(_AxesBase):
     def errorbar(self, xs, ys, *, yerr=None, xerr=None, color=None, label: str | None = None,
                  marker: str | None = "o", markersize: float = 5.0,
                  linewidth: float = 1.5, alpha: float = 1.0,
-                 capsize: float = 3.0, linestyle: str = "solid") -> "Axes":
+                 capsize: float = 3.0, linestyle: str = "solid", zorder: float = 0.0) -> "Axes":
         """Plot ``(xs, ys)`` with symmetric ``yerr``/``xerr`` error bars."""
         xs = [float(x) for x in xs]
         ys = [float(y) for y in ys]
         n = len(xs)
         self._marks.append({
+                "zorder": float(zorder),
             "kind": "errorbar",
             "xs": xs,
             "ys": ys,
@@ -1350,11 +1372,12 @@ class Axes(_AxesBase):
     # -- discrete family ----------------------------------------------------
 
     def barh(self, y, width, *, height: float = 0.8, left=0.0, color=None,
-             alpha: float = 1.0, label: str | None = None, edgecolor=None) -> "Axes":
+             alpha: float = 1.0, label: str | None = None, edgecolor=None, zorder: float = 0.0) -> "Axes":
         """Horizontal bars of the given ``width`` at vertical positions ``y``.
         ``y`` may be strings (categories), which set a categorical y-axis."""
         ys = self._coords(y, "y")
         self._marks.append({
+                "zorder": float(zorder),
             "kind": "barh", "ys": ys, "widths": [float(v) for v in width],
             "lefts": _as_seq(left, len(ys)), "height": float(height),
             "color": self._mark_color(color, alpha), "label": label,
@@ -1404,7 +1427,7 @@ class Axes(_AxesBase):
         return self
 
     def pie(self, sizes, *, labels=None, colors=None, startangle: float = 90.0,
-            radius: float = 1.0) -> "Axes":
+            radius: float = 1.0, zorder: float = 0.0) -> "Axes":
         """Pie chart of ``sizes`` (auto-normalized). Turns the frame off and fixes
         an equal aspect so wedges stay circular."""
         vals = [float(v) for v in sizes]
@@ -1418,7 +1441,7 @@ class Axes(_AxesBase):
                            "color": self._next_color(col),
                            "label": labels[i] if labels else None})
             ang += sweep
-        self._marks.append({"kind": "pie", "wedges": wedges, "radius": float(radius)})
+        self._marks.append({"zorder": float(zorder), "kind": "pie", "wedges": wedges, "radius": float(radius)})
         self._frame_off = True
         self._aspect = "equal"
         # Reserve room around the pie for the slice labels drawn just outside the
@@ -1491,10 +1514,11 @@ class Axes(_AxesBase):
 
     def step(self, xs, ys, *, where: str = "pre", color=None,
              linewidth: float | None = None, alpha: float = 1.0,
-             linestyle: str = "solid", label: str | None = None) -> "Axes":
+             linestyle: str = "solid", label: str | None = None, zorder: float = 0.0) -> "Axes":
         """Step plot through ``(xs, ys)``; ``where`` is ``pre``/``post``/``mid``."""
         px, py = _step_points(list(_to_f64(xs)), list(_to_f64(ys)), where)
         self._marks.append({
+                "zorder": float(zorder),
             "kind": "line", "xs": _to_f64(px), "ys": _to_f64(py), "label": label,
             "color": self._mark_color(color, alpha),
             "width": self._theme.line_width if linewidth is None else float(linewidth),
@@ -1504,7 +1528,7 @@ class Axes(_AxesBase):
 
     def stairs(self, values, edges=None, *, color=None, linewidth: float | None = None,
                alpha: float = 1.0, fill: bool = False, baseline: float = 0.0,
-               label: str | None = None) -> "Axes":
+               label: str | None = None, zorder: float = 0.0) -> "Axes":
         """Step outline of ``values`` over bin ``edges`` (``len(values)+1`` edges;
         defaults to ``0..n``). ``fill=True`` fills down to ``baseline``."""
         values = _to_f64(values)
@@ -1517,6 +1541,7 @@ class Axes(_AxesBase):
             top.extend((v, v))
         if fill:
             self._marks.append({
+                "zorder": float(zorder),
                 "kind": "fill", "xs": xs, "y1": top,
                 "y2": _to_f64(_as_seq(baseline, len(xs))),
                 "color": self._next_color(color), "alpha": 0.3, "label": label,
@@ -1525,6 +1550,7 @@ class Axes(_AxesBase):
             px = array("d", [edges[0]]) + xs + array("d", [edges[-1]])
             py = array("d", [baseline]) + top + array("d", [baseline])
             self._marks.append({
+                "zorder": float(zorder),
                 "kind": "line", "xs": px, "ys": py, "label": label,
                 "color": self._mark_color(color, alpha),
                 "width": self._theme.line_width if linewidth is None else float(linewidth),
@@ -1534,10 +1560,11 @@ class Axes(_AxesBase):
 
     def stem(self, xs, ys, *, bottom: float = 0.0, color=None, alpha: float = 1.0,
              marker: str = "o", markersize: float = 5.0,
-             label: str | None = None) -> "Axes":
+             label: str | None = None, zorder: float = 0.0) -> "Axes":
         """Stem plot: a vertical line from ``bottom`` to each ``(x, y)`` topped by
         a marker, with a baseline."""
         self._marks.append({
+                "zorder": float(zorder),
             "kind": "stem", "xs": self._coords(xs, "x"), "ys": self._coords(ys, "y"),
             "bottom": float(bottom), "color": self._mark_color(color, alpha),
             "marker": marker, "markersize": float(markersize), "label": label,
@@ -2358,7 +2385,7 @@ class Axes(_AxesBase):
 
         # All data marks, clipped to the plot rect.
         scene.begin_group(1.0, 0.0, 0.0, 1.0, 0.0, 0.0, clip=(px, py, pw, ph))
-        for m in self._marks:
+        for m in self._ordered_marks():
             self._draw_mark(scene, m, proj)
         scene.end_group()
 

@@ -324,3 +324,55 @@ def test_colormapped_scatter_placeholder_follows_the_theme():
     fig, ax = plt.subplots(theme=theme)
     ax.scatter([0, 1], [0, 1], c=[0.0, 1.0])
     assert ax._marks[0]["color"] == (10, 20, 30, 255)
+
+
+# -- zorder ------------------------------------------------------------------
+
+_ZORDER_METHODS = [
+    "line", "scatter", "bar", "barh", "hist", "errorbar", "fill_between",
+    "fill_betweenx", "step", "stairs", "stem", "hlines", "vlines", "pie",
+]
+
+
+@pytest.mark.parametrize("name", _ZORDER_METHODS)
+def test_zorder_is_accepted(name):
+    """All or nothing: a styling knob on only some marks is the inconsistency
+    this phase exists to remove."""
+    assert "zorder" in inspect.signature(getattr(Axes, name)).parameters
+
+
+def test_default_zorder_preserves_insertion_order():
+    """Insertion order is the primary model - it is the one you can read off the
+    code - so the sort must be stable and a no-op when nobody sets zorder."""
+    fig, ax = plt.subplots()
+    for i in range(5):
+        ax.line([0, 1], [i, i])
+    assert ax._ordered_marks() == ax._marks
+
+
+def test_zorder_lifts_a_mark_above_later_ones():
+    fig, ax = plt.subplots()
+    ax.line([0, 1], [0, 1], zorder=2)          # added first, drawn last
+    ax.fill_between([0, 1], [0, 1], 0, zorder=1)
+    order = [m["kind"] for m in ax._ordered_marks()]
+    assert order == ["fill", "line"]
+
+
+def test_zorder_ties_keep_insertion_order():
+    fig, ax = plt.subplots()
+    ax.bar([0], [1], zorder=1)
+    ax.line([0, 1], [0, 1], zorder=1)
+    ax.scatter([0], [0], zorder=1)
+    assert [m["kind"] for m in ax._ordered_marks()] == ["bar", "line", "scatter"]
+
+
+def test_zorder_changes_the_rendered_output(tmp_path):
+    def render(name, line_z, fill_z):
+        fig, ax = plt.subplots(figsize=(240, 180))
+        ax.line([0, 1, 2], [0, 2, 1], linewidth=6, zorder=line_z)
+        ax.fill_between([0, 1, 2], [0, 2, 1], 0, alpha=1.0, color="C1", zorder=fill_z)
+        out = tmp_path / f"{name}.png"
+        fig.save(str(out))
+        return out.read_bytes()
+
+    assert render("line_on_top", 2, 1) != render("fill_on_top", 1, 2)

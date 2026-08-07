@@ -126,3 +126,18 @@ name means the host has no distinct face for one of them.
 All four Liberation Sans faces are **bundled**, so emphasis works even on a
 machine with no fonts installed at all — a slim container, a wheel builder — and
 a figure looks the same wherever it is generated.
+
+## Layering
+
+Marks draw in the order you add them, which is usually all the control you need
+and is the one thing you can read straight off the code. When something has to
+sit above a mark added *after* it, give it a higher `zorder`:
+
+```python
+ax.line(xs, ys, zorder=2)              # drawn last despite being added first
+ax.fill_between(xs, ys, 0, zorder=1)
+```
+
+Ties keep insertion order, so setting `zorder` on one mark does not reshuffle
+the rest. Reference lines (`axhline`, `axvline`, spans) and patches always draw
+above the data marks.

@@ -47,6 +47,10 @@ All notable changes to pyplotrs are documented here. The format is based on
   `markersize`, on `line`, `errorbar` and now `scatter` too - previously
   `scatter(size=)` was an *area* in pt². `size` is still accepted and still
   means area, so ported matplotlib code keeps drawing the right size.
+- **`zorder` on every mark**, for the case where something has to sit above a
+  mark added after it. Insertion order remains the primary model - it is the one
+  you can read off the code - and the sort is stable, so a figure that never
+  sets `zorder` draws exactly as before.
 - **`alpha` on every mark** (`line`, `scatter`, `bar`, `barh`, `hist`,
   `errorbar`, `step`, `stairs`, `stem`, `hlines`, `vlines`), not just the three
   that had it.
