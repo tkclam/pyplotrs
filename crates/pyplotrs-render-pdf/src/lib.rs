@@ -9,22 +9,22 @@
 
 use std::collections::HashMap;
 
+use krilla::color::rgb;
+use krilla::geom::{Path, PathBuilder, Point, Size as KSize, Transform};
+use krilla::graphic::Graphic;
+use krilla::metadata::Metadata;
+use krilla::num::NormalizedF32;
+use krilla::page::PageSettings;
+use krilla::paint::{Fill, FillRule, LineCap, LineJoin, Stroke, StrokeDash};
+use krilla::surface::Surface;
+use krilla::tagging::{ContentTag, Tag, TagGroup, TagTree};
+use krilla::text::{Font, GlyphId, KrillaGlyph};
+use krilla::Document;
 use pyplotrs_core::kurbo::{Affine, PathEl};
 use pyplotrs_core::{
     Color, FillRule as CoreFillRule, Group, ImageNode, LineCap as CoreLineCap,
     LineJoin as CoreLineJoin, MarkerNode, Node, PathNode, Scene, Stroke as CoreStroke, TextNode,
 };
-use krilla::color::rgb;
-use krilla::geom::{Path, PathBuilder, Point, Size as KSize, Transform};
-use krilla::graphic::Graphic;
-use krilla::num::NormalizedF32;
-use krilla::page::PageSettings;
-use krilla::paint::{Fill, FillRule, LineCap, LineJoin, Stroke, StrokeDash};
-use krilla::metadata::Metadata;
-use krilla::surface::Surface;
-use krilla::tagging::{ContentTag, Tag, TagGroup, TagTree};
-use krilla::text::{Font, GlyphId, KrillaGlyph};
-use krilla::Document;
 
 fn to_krilla_path(geometry: &pyplotrs_core::kurbo::BezPath) -> Option<Path> {
     let mut pb = PathBuilder::new();
@@ -32,7 +32,9 @@ fn to_krilla_path(geometry: &pyplotrs_core::kurbo::BezPath) -> Option<Path> {
         match *el {
             PathEl::MoveTo(p) => pb.move_to(p.x as f32, p.y as f32),
             PathEl::LineTo(p) => pb.line_to(p.x as f32, p.y as f32),
-            PathEl::QuadTo(p1, p2) => pb.quad_to(p1.x as f32, p1.y as f32, p2.x as f32, p2.y as f32),
+            PathEl::QuadTo(p1, p2) => {
+                pb.quad_to(p1.x as f32, p1.y as f32, p2.x as f32, p2.y as f32)
+            }
             PathEl::CurveTo(p1, p2, p3) => pb.cubic_to(
                 p1.x as f32,
                 p1.y as f32,
@@ -103,8 +105,7 @@ impl PdfRenderer {
         self.fonts
             .entry(run_font.key())
             .or_insert_with(|| {
-                Font::new(run_font.data.clone().into(), run_font.index)
-                    .expect("invalid font data")
+                Font::new(run_font.data.clone().into(), run_font.index).expect("invalid font data")
             })
             .clone()
     }
@@ -265,19 +266,26 @@ impl PdfRenderer {
 }
 
 /// Render `scene` to PDF bytes.
-pub fn render_pdf(scene: &Scene) -> Vec<u8> {
+///
+/// Fails rather than panics on a degenerate scene (a zero or negative figure
+/// size) or a serialization error, so the Python binding can raise a normal
+/// exception instead of unwinding across the FFI boundary as a `PanicException`
+/// - which derives from `BaseException` and so escapes `except Exception`.
+pub fn render_pdf(scene: &Scene) -> Result<Vec<u8>, String> {
     let mut document = Document::new();
-    render_into(&mut document, scene, None);
-    document.finish().expect("PDF serialization should not fail")
+    render_into(&mut document, scene, None)?;
+    document
+        .finish()
+        .map_err(|e| format!("PDF serialization failed: {e:?}"))
 }
 
 /// Render `scene` as a **tagged, accessible PDF**: all marks are wrapped in one
 /// `Figure` structure element carrying `alt` text (so a screen reader announces
 /// the chart), and the document gets a `/Lang` + title in its metadata and a
 /// marked structure tree. `title` defaults the figure's document title.
-pub fn render_pdf_tagged(scene: &Scene, title: Option<&str>, alt: &str) -> Vec<u8> {
+pub fn render_pdf_tagged(scene: &Scene, title: Option<&str>, alt: &str) -> Result<Vec<u8>, String> {
     let mut document = Document::new();
-    render_into(&mut document, scene, Some(alt));
+    render_into(&mut document, scene, Some(alt))?;
 
     let mut meta = Metadata::new()
         .language("en".to_string())
@@ -286,18 +294,24 @@ pub fn render_pdf_tagged(scene: &Scene, title: Option<&str>, alt: &str) -> Vec<u
         meta = meta.title(t.to_string());
     }
     document.set_metadata(meta);
-    document.finish().expect("PDF serialization should not fail")
+    document
+        .finish()
+        .map_err(|e| format!("PDF serialization failed: {e:?}"))
 }
 
 /// Shared render body. When `alt` is `Some`, the page's content is enclosed in a
 /// single tagged marked-content sequence referenced by a `Figure` struct
 /// element (the whole chart is one accessible figure with alternate text), and a
 /// tag tree is attached to the document.
-fn render_into(document: &mut Document, scene: &Scene, alt: Option<&str>) {
-    let mut page = document.start_page_with(
-        PageSettings::from_wh(scene.size.width as f32, scene.size.height as f32)
-            .expect("scene size must be positive"),
-    );
+fn render_into(document: &mut Document, scene: &Scene, alt: Option<&str>) -> Result<(), String> {
+    let settings = PageSettings::from_wh(scene.size.width as f32, scene.size.height as f32)
+        .ok_or_else(|| {
+            format!(
+                "figure size must be positive, got {} x {} pt",
+                scene.size.width, scene.size.height
+            )
+        })?;
+    let mut page = document.start_page_with(settings);
     let mut surface = page.surface();
 
     let mut renderer = PdfRenderer {
@@ -322,4 +336,5 @@ fn render_into(document: &mut Document, scene: &Scene, alt: Option<&str>) {
         tree.push(figure);
         document.set_tag_tree(tree);
     }
+    Ok(())
 }

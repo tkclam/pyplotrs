@@ -25,7 +25,9 @@ fn to_tiny_skia_path(geometry: &pyplotrs_core::kurbo::BezPath) -> Option<tiny_sk
         match *el {
             PathEl::MoveTo(p) => pb.move_to(p.x as f32, p.y as f32),
             PathEl::LineTo(p) => pb.line_to(p.x as f32, p.y as f32),
-            PathEl::QuadTo(p1, p2) => pb.quad_to(p1.x as f32, p1.y as f32, p2.x as f32, p2.y as f32),
+            PathEl::QuadTo(p1, p2) => {
+                pb.quad_to(p1.x as f32, p1.y as f32, p2.x as f32, p2.y as f32)
+            }
             PathEl::CurveTo(p1, p2, p3) => pb.cubic_to(
                 p1.x as f32,
                 p1.y as f32,
@@ -140,10 +142,22 @@ fn render_path(pixmap: &mut Pixmap, p: &PathNode, transform: Affine, clip: Optio
     };
     let ts = to_ts_transform(transform);
     if let Some(fill) = p.fill {
-        pixmap.fill_path(&path, &solid_paint(fill), to_ts_fill_rule(p.fill_rule), ts, clip);
+        pixmap.fill_path(
+            &path,
+            &solid_paint(fill),
+            to_ts_fill_rule(p.fill_rule),
+            ts,
+            clip,
+        );
     }
     if let Some(stroke) = &p.stroke {
-        pixmap.stroke_path(&path, &solid_paint(stroke.color), &to_ts_stroke(stroke), ts, clip);
+        pixmap.stroke_path(
+            &path,
+            &solid_paint(stroke.color),
+            &to_ts_stroke(stroke),
+            ts,
+            clip,
+        );
     }
 }
 
@@ -177,12 +191,20 @@ const STAMP_PHASES: i32 = 8;
 const STAMP_MIN_COUNT: usize = 64;
 const STAMP_MAX_PX: f32 = 96.0;
 
+/// Largest raster we will try to allocate, in bytes (4 GB - about a 32000 x
+/// 32000 px image). Past this the request is almost certainly a units or dpi
+/// mistake, and honouring it would abort the process instead of raising.
+const MAX_RASTER_BYTES: f64 = 4.0e9;
+
 fn render_markers(pixmap: &mut Pixmap, m: &MarkerNode, transform: Affine, clip: Option<&Mask>) {
     let Some(path) = to_tiny_skia_path(&m.marker) else {
         return;
     };
     let fill_paint = m.fill.map(solid_paint);
-    let stroke_paint = m.stroke.as_ref().map(|s| (solid_paint(s.color), to_ts_stroke(s)));
+    let stroke_paint = m
+        .stroke
+        .as_ref()
+        .map(|s| (solid_paint(s.color), to_ts_stroke(s)));
     let fill_rule = to_ts_fill_rule(m.fill_rule);
 
     // Colormapped scatter: one fill per point, so the single-color stamp tile
@@ -459,17 +481,36 @@ fn render_node(pixmap: &mut Pixmap, node: &Node, transform: Affine, clip: Option
 
 /// Render `scene` to a [`Pixmap`] (RGBA8, white background) at `scale`
 /// device-pixels per scene-point.
-pub fn render_pixmap(scene: &Scene, scale: f64) -> Pixmap {
+pub fn render_pixmap(scene: &Scene, scale: f64) -> Result<Pixmap, String> {
     // `scale` is device-pixels per scene-point (i.e. dpi / 72). Geometry,
     // glyph outlines, images and clips are all mapped by a single root scale,
     // so text is *re-rasterized* crisply at the target resolution rather than
     // upscaled.
-    let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    let scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
     // Round (not ceil) to the nearest pixel so exact cases land exactly, e.g.
     // a 4x3in figure at 300dpi is 1200x900, not 1200x901 from f64 creep.
     let width = (scene.size.width * scale).round().max(1.0) as u32;
     let height = (scene.size.height * scale).round().max(1.0) as u32;
-    let mut pixmap = Pixmap::new(width, height).expect("scene size must be non-zero");
+    // Bound the raster *before* allocating. A big figure at a big dpi is an
+    // easy mistake (a 4000x3000 in poster at 2400 dpi asks for 276 TB), and
+    // Rust's allocator aborts the process on OOM rather than returning - so
+    // `Pixmap::new` returning `None` is not a defence we can rely on. Check the
+    // arithmetic in f64 to avoid overflowing the multiply itself.
+    let bytes = (width as f64) * (height as f64) * 4.0;
+    if bytes > MAX_RASTER_BYTES {
+        return Err(format!(
+            "raster would be {width} x {height} px ({:.1} GB, limit {:.0} GB); \
+             reduce the figure size or the dpi",
+            bytes / 1e9,
+            MAX_RASTER_BYTES / 1e9
+        ));
+    }
+    let mut pixmap = Pixmap::new(width, height)
+        .ok_or_else(|| format!("cannot allocate a {width} x {height} px raster"))?;
     pixmap.fill(tiny_skia::Color::WHITE);
 
     let root = Affine::scale(scale);
@@ -477,15 +518,19 @@ pub fn render_pixmap(scene: &Scene, scale: f64) -> Pixmap {
         render_node(&mut pixmap, node, root, None);
     }
 
-    pixmap
+    Ok(pixmap)
 }
 
 /// Render `scene` to PNG-encoded bytes at `dpi` (dots per inch). The output
 /// carries a `pHYs` chunk recording its physical size, so consumers such as
 /// LaTeX `\includegraphics` place it at the intended dimensions.
-pub fn render_png(scene: &Scene, dpi: f64) -> Vec<u8> {
-    let dpi = if dpi.is_finite() && dpi > 0.0 { dpi } else { 72.0 };
-    let pixmap = render_pixmap(scene, dpi / 72.0);
+pub fn render_png(scene: &Scene, dpi: f64) -> Result<Vec<u8>, String> {
+    let dpi = if dpi.is_finite() && dpi > 0.0 {
+        dpi
+    } else {
+        72.0
+    };
+    let pixmap = render_pixmap(scene, dpi / 72.0)?;
     encode_png_with_dpi(&pixmap, dpi)
 }
 
@@ -493,7 +538,7 @@ pub fn render_png(scene: &Scene, dpi: f64) -> Vec<u8> {
 /// chunk derived from `dpi`. The final pixmap is fully opaque (white fill
 /// composited under everything), so its premultiplied buffer equals straight
 /// RGBA and can be written directly.
-fn encode_png_with_dpi(pixmap: &Pixmap, dpi: f64) -> Vec<u8> {
+fn encode_png_with_dpi(pixmap: &Pixmap, dpi: f64) -> Result<Vec<u8>, String> {
     let ppu = (dpi / 0.0254).round() as u32; // pixels per metre
     let mut out = Vec::new();
     {
@@ -505,12 +550,14 @@ fn encode_png_with_dpi(pixmap: &Pixmap, dpi: f64) -> Vec<u8> {
             yppu: ppu,
             unit: png::Unit::Meter,
         }));
-        let mut writer = encoder.write_header().expect("png header");
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| format!("PNG header write failed: {e}"))?;
         writer
             .write_image_data(pixmap.data())
-            .expect("png image data");
+            .map_err(|e| format!("PNG data write failed: {e}"))?;
     }
-    out
+    Ok(out)
 }
 
 /// Render a sequence of equally-sized scenes to an animated GIF.
@@ -524,31 +571,44 @@ fn encode_png_with_dpi(pixmap: &Pixmap, dpi: f64) -> Vec<u8> {
 /// The pixmap buffer is premultiplied RGBA, but the rendered scene is always
 /// opaque (white fill under everything), so it equals straight RGBA and GIF's
 /// 1-bit alpha is never exercised.
-pub fn render_gif(scenes: &[&Scene], scale: f64, delay_cs: u16, infinite: bool) -> Vec<u8> {
-    assert!(!scenes.is_empty(), "animation needs at least one frame");
-    let pixmaps: Vec<Pixmap> = scenes.iter().map(|s| render_pixmap(s, scale)).collect();
+pub fn render_gif(
+    scenes: &[&Scene],
+    scale: f64,
+    delay_cs: u16,
+    infinite: bool,
+) -> Result<Vec<u8>, String> {
+    if scenes.is_empty() {
+        return Err("animation needs at least one frame".to_string());
+    }
+    let pixmaps: Vec<Pixmap> = scenes
+        .iter()
+        .map(|s| render_pixmap(s, scale))
+        .collect::<Result<_, _>>()?;
     let (w, h) = (pixmaps[0].width() as u16, pixmaps[0].height() as u16);
 
     let mut out = Vec::new();
     {
-        let mut encoder = gif::Encoder::new(&mut out, w, h, &[]).expect("gif encoder");
+        let mut encoder = gif::Encoder::new(&mut out, w, h, &[])
+            .map_err(|e| format!("GIF encoder init failed: {e}"))?;
         encoder
             .set_repeat(if infinite {
                 gif::Repeat::Infinite
             } else {
                 gif::Repeat::Finite(0)
             })
-            .expect("gif repeat");
+            .map_err(|e| format!("GIF repeat write failed: {e}"))?;
         for pm in &pixmaps {
             let mut rgba = pm.data().to_vec();
             // speed 10: a balance between NeuQuant quality (1) and speed (30) —
             // plots have few distinct colours so quantization is near-lossless.
             let mut frame = gif::Frame::from_rgba_speed(w, h, &mut rgba, 10);
             frame.delay = delay_cs;
-            encoder.write_frame(&frame).expect("gif frame");
+            encoder
+                .write_frame(&frame)
+                .map_err(|e| format!("GIF frame write failed: {e}"))?;
         }
     }
-    out
+    Ok(out)
 }
 
 /// Render a sequence of equally-sized scenes to an animated PNG (APNG).
@@ -564,10 +624,19 @@ pub fn render_apng(
     delay_num: u16,
     delay_den: u16,
     infinite: bool,
-) -> Vec<u8> {
-    assert!(!scenes.is_empty(), "animation needs at least one frame");
-    let dpi = if dpi.is_finite() && dpi > 0.0 { dpi } else { 72.0 };
-    let pixmaps: Vec<Pixmap> = scenes.iter().map(|s| render_pixmap(s, dpi / 72.0)).collect();
+) -> Result<Vec<u8>, String> {
+    if scenes.is_empty() {
+        return Err("animation needs at least one frame".to_string());
+    }
+    let dpi = if dpi.is_finite() && dpi > 0.0 {
+        dpi
+    } else {
+        72.0
+    };
+    let pixmaps: Vec<Pixmap> = scenes
+        .iter()
+        .map(|s| render_pixmap(s, dpi / 72.0))
+        .collect::<Result<_, _>>()?;
     let (w, h) = (pixmaps[0].width(), pixmaps[0].height());
     let ppu = (dpi / 0.0254).round() as u32;
 
@@ -583,16 +652,20 @@ pub fn render_apng(
         }));
         encoder
             .set_animated(pixmaps.len() as u32, u32::from(!infinite))
-            .expect("apng animation control");
+            .map_err(|e| format!("APNG animation control write failed: {e}"))?;
         encoder
             .set_frame_delay(delay_num, delay_den)
-            .expect("apng frame delay");
-        let mut writer = encoder.write_header().expect("apng header");
+            .map_err(|e| format!("APNG frame delay write failed: {e}"))?;
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| format!("APNG header write failed: {e}"))?;
         for pm in &pixmaps {
-            writer.write_image_data(pm.data()).expect("apng frame");
+            writer
+                .write_image_data(pm.data())
+                .map_err(|e| format!("APNG frame write failed: {e}"))?;
         }
     }
-    out
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -633,7 +706,10 @@ mod tests {
         let mut total = 0u64;
         let mut non_white = 0usize;
         for (pa, pb) in da.chunks_exact(4).zip(db.chunks_exact(4)) {
-            let d = (0..3).map(|k| (pa[k] as i32 - pb[k] as i32).unsigned_abs()).max().unwrap();
+            let d = (0..3)
+                .map(|k| (pa[k] as i32 - pb[k] as i32).unsigned_abs())
+                .max()
+                .unwrap();
             total += d as u64;
             if pa[0] != 255 || pa[1] != 255 || pa[2] != 255 {
                 non_white += 1;
@@ -649,7 +725,10 @@ mod tests {
     fn stamped_markers_match_per_path_fill() {
         let fill = Color::rgb(0, 110, 200);
         let pos = positions();
-        assert!(pos.len() >= STAMP_MIN_COUNT, "must trigger the stamp fast path");
+        assert!(
+            pos.len() >= STAMP_MIN_COUNT,
+            "must trigger the stamp fast path"
+        );
 
         let stamped = render_pixmap(
             &clip_group(vec![Node::Markers(MarkerNode {
@@ -661,7 +740,8 @@ mod tests {
                 colors: None,
             })]),
             2.0,
-        );
+        )
+        .unwrap();
 
         // Reference: one PathNode per position (the per-point fallback path).
         let per_path: Vec<Node> = pos
@@ -675,11 +755,17 @@ mod tests {
                 })
             })
             .collect();
-        let reference = render_pixmap(&clip_group(per_path), 2.0);
+        let reference = render_pixmap(&clip_group(per_path), 2.0).unwrap();
 
         let (avg, non_white) = avg_and_content(&stamped, &reference);
-        assert!(non_white > 2000, "expected substantial marker coverage, got {non_white}px");
-        assert!(avg < 2.0, "stamped vs per-path avg diff too high: {avg:.3}/255");
+        assert!(
+            non_white > 2000,
+            "expected substantial marker coverage, got {non_white}px"
+        );
+        assert!(
+            avg < 2.0,
+            "stamped vs per-path avg diff too high: {avg:.3}/255"
+        );
     }
 
     /// A few distinct frames -> a valid 89a GIF with the canvas size of frame 0,
@@ -690,7 +776,7 @@ mod tests {
         let frames: Vec<Scene> = (0..4).map(frame_scene).collect();
         let refs: Vec<&Scene> = frames.iter().collect();
 
-        let looping = render_gif(&refs, 1.0, 5, true);
+        let looping = render_gif(&refs, 1.0, 5, true).unwrap();
         assert_eq!(&looping[..6], b"GIF89a");
         let w = u16::from_le_bytes([looping[6], looping[7]]);
         let h = u16::from_le_bytes([looping[8], looping[9]]);
@@ -702,7 +788,7 @@ mod tests {
             "infinite loop must emit a NETSCAPE2.0 application extension"
         );
 
-        let once = render_gif(&refs, 1.0, 5, false);
+        let once = render_gif(&refs, 1.0, 5, false).unwrap();
         assert!(
             !once.windows(11).any(|w| w == b"NETSCAPE2.0"),
             "play-once must not emit a loop block"
@@ -716,7 +802,7 @@ mod tests {
     fn render_apng_structure() {
         let frames: Vec<Scene> = (0..3).map(frame_scene).collect();
         let refs: Vec<&Scene> = frames.iter().collect();
-        let png = render_apng(&refs, 96.0, 1, 20, true);
+        let png = render_apng(&refs, 96.0, 1, 20, true).unwrap();
         assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
 
         // Walk the chunk stream: [len:4][type:4][data:len][crc:4].

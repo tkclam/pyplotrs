@@ -13,15 +13,15 @@ use std::sync::{Mutex, OnceLock};
 
 use fontdb::{Database, Family, Query, Stretch, Style, Weight};
 
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
+use pyo3::types::PyBytes;
 use pyplotrs_core::kurbo::{Affine, BezPath, Circle, Point, Rect as KRect, Shape, Size};
 use pyplotrs_core::{
     ClipPath, Color, FillRule, FontData, Group, ImageData, ImageNode, LineCap, LineJoin,
     MarkerNode, Node, PathNode, Scene as CoreScene, Stroke as CoreStroke, TextNode,
 };
 use pyplotrs_layout::solve::{AxesBands, FigureSpec};
-use pyo3::exceptions::PyValueError;
-use pyo3::prelude::*;
-use pyo3::types::PyBytes;
 
 /// The bundled body fallback (Liberation Sans Regular, SIL OFL): metrically
 /// compatible with Arial/Helvetica, so figures laid out against it line-break
@@ -833,13 +833,14 @@ impl Scene {
         tagged: bool,
         title: Option<&str>,
         alt: Option<&str>,
-    ) -> Bound<'py, PyBytes> {
+    ) -> PyResult<Bound<'py, PyBytes>> {
         let bytes = if tagged {
             pyplotrs_render_pdf::render_pdf_tagged(&self.inner, title, alt.unwrap_or("figure"))
         } else {
             pyplotrs_render_pdf::render_pdf(&self.inner)
-        };
-        PyBytes::new(py, &bytes)
+        }
+        .map_err(PyValueError::new_err)?;
+        Ok(PyBytes::new(py, &bytes))
     }
 
     /// Render to an SVG document string (real `<text>` elements).
@@ -851,8 +852,10 @@ impl Scene {
     /// chunk recording its physical size). PDF/SVG are resolution-independent
     /// and ignore dpi.
     #[pyo3(signature = (dpi=200.0))]
-    fn to_png<'py>(&self, py: Python<'py>, dpi: f64) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, &pyplotrs_render_raster::render_png(&self.inner, dpi))
+    fn to_png<'py>(&self, py: Python<'py>, dpi: f64) -> PyResult<Bound<'py, PyBytes>> {
+        let bytes =
+            pyplotrs_render_raster::render_png(&self.inner, dpi).map_err(PyValueError::new_err)?;
+        Ok(PyBytes::new(py, &bytes))
     }
 }
 
@@ -980,14 +983,16 @@ fn solve_layout(
         spans,
         cells: cells
             .into_iter()
-            .map(|(title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w)| AxesBands {
-                title_h,
-                xlabel_h,
-                ylabel_w,
-                x_tick_h,
-                y_tick_w,
-                cbar_w,
-            })
+            .map(
+                |(title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w)| AxesBands {
+                    title_h,
+                    xlabel_h,
+                    ylabel_w,
+                    x_tick_h,
+                    y_tick_w,
+                    cbar_w,
+                },
+            )
             .collect(),
     };
     let result = pyplotrs_layout::solve::solve(&spec);
@@ -1030,7 +1035,8 @@ fn scenes_to_gif<'py>(
     // outlive the render call, so no copying or unsafe is needed.
     let guards: Vec<PyRef<Scene>> = scenes.iter().map(|s| s.borrow(py)).collect();
     let refs: Vec<&CoreScene> = guards.iter().map(|g| &g.inner).collect();
-    let bytes = pyplotrs_render_raster::render_gif(&refs, scale, delay_cs, infinite);
+    let bytes = pyplotrs_render_raster::render_gif(&refs, scale, delay_cs, infinite)
+        .map_err(PyValueError::new_err)?;
     Ok(PyBytes::new(py, &bytes))
 }
 
@@ -1052,7 +1058,8 @@ fn scenes_to_apng<'py>(
     }
     let guards: Vec<PyRef<Scene>> = scenes.iter().map(|s| s.borrow(py)).collect();
     let refs: Vec<&CoreScene> = guards.iter().map(|g| &g.inner).collect();
-    let bytes = pyplotrs_render_raster::render_apng(&refs, dpi, delay_num, delay_den, infinite);
+    let bytes = pyplotrs_render_raster::render_apng(&refs, dpi, delay_num, delay_den, infinite)
+        .map_err(PyValueError::new_err)?;
     Ok(PyBytes::new(py, &bytes))
 }
 
@@ -1341,8 +1348,16 @@ fn hexbin(
 ) -> Vec<(f64, f64, f64)> {
     let nx = gridsize.max(1);
     let ny = ((nx as f64 / 3.0_f64.sqrt()).round() as usize).max(1);
-    let sx = if xhi > xlo { (xhi - xlo) / nx as f64 } else { 1.0 };
-    let sy = if yhi > ylo { (yhi - ylo) / ny as f64 } else { 1.0 };
+    let sx = if xhi > xlo {
+        (xhi - xlo) / nx as f64
+    } else {
+        1.0
+    };
+    let sy = if yhi > ylo {
+        (yhi - ylo) / ny as f64
+    } else {
+        1.0
+    };
     // Two interleaved grids: full (n1) and half-offset (n2).
     let mut n1 = std::collections::HashMap::<(i64, i64), f64>::new();
     let mut n2 = std::collections::HashMap::<(i64, i64), f64>::new();
