@@ -48,7 +48,8 @@ docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
 bench = ["matplotlib>=3.8", "numpy>=1.24"]
 # Interactive development: run the verify notebooks under notebooks/ with a Jupyter
 # kernel (e.g. `uv pip install -e .[dev]`, then select the kernel in VS Code/Jupyter).
-dev = ["ipykernel>=6"]
+# matplotlib is used only as a side-by-side visual reference in the verify notebooks.
+dev = ["ipykernel>=6", "matplotlib>=3.8"]
 
 [tool.maturin]
 module-name = "pyplotrs._pyplotrs_core"
