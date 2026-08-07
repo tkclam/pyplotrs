@@ -2,9 +2,21 @@
 
     (mark type) x (point count) x (panel count) x (output format)
 
-grid, the "blazingly fast" marketing receipt. Each cell times the *export*
-(``fig.save`` / ``fig.savefig``) of an already-built figure - the rendering
-engine, not user scene construction - and records wall time and file size.
+grid, and the receipt behind any speed claim. Each cell times ``fig.save`` /
+``fig.savefig`` and records the wall time and file size.
+
+Note what that does and does not include, because the two libraries divide the
+work differently. ``Axes.line()`` in pyplotrs only appends a mark description;
+scale resolution, tick location, layout solving, text shaping, geometry and
+rendering all happen inside ``save``. So for pyplotrs the timed region is very
+nearly the whole pipeline, whereas matplotlib has already built its artists by
+then. Data ingestion sits outside the timer for both. If anything this
+understates pyplotrs rather than flattering it - but the older claim here, that
+each cell timed "the export of an already-built figure", was simply wrong.
+
+Every cell is warmed up and then reported as the best of several runs (see
+``WARMUP``/``REPEATS``); a single untimed-warmup measurement charges one-off
+font-cache construction to whichever cell runs first.
 
 The total point budget ``N`` is split evenly across the panels, so a given row
 does the same total drawing work regardless of how many subplots it's spread
@@ -60,6 +72,13 @@ def _scatter_xy(n: int):
 
 
 def _figsize(nrows: int, ncols: int) -> tuple[float, float]:
+    """Figure size in **inches**, matplotlib's unit.
+
+    pyplotrs sizes figures in points by default, so `_build_pyplotrs` must pass
+    ``units="in"`` explicitly. Omitting it silently rendered a 3.6 x 3.0 *point*
+    figure - roughly ten pixels across - against matplotlib's 3.6 x 3.0 *inch*
+    one, which invalidated every number this script has ever printed.
+    """
     return (3.0 * ncols + 0.6, 2.4 * nrows + 0.6)
 
 
@@ -75,7 +94,9 @@ def _fmt_size(b: int) -> str:
 # -- pyplotrs ----------------------------------------------------------------
 
 def _build_pyplotrs(mark: str, n: int, nrows: int, ncols: int):
-    fig, _ = pyplotrs.subplots(nrows, ncols, figsize=_figsize(nrows, ncols))
+    fig, _ = pyplotrs.subplots(
+        nrows, ncols, figsize=_figsize(nrows, ncols), units="in"
+    )
     per = max(2, n // (nrows * ncols))
     for ax in fig.axes:
         if mark == "line":
@@ -87,12 +108,43 @@ def _build_pyplotrs(mark: str, n: int, nrows: int, ncols: int):
     return fig
 
 
+#: Untimed warm-up saves before measuring, then the number of measured repeats
+#: (the minimum is reported). Both libraries do first-call work that has nothing
+#: to do with the workload - matplotlib builds its font cache, pyplotrs resolves
+#: and memoises the system font - and charging that to whichever cell happens to
+#: run first is how the old single-shot harness produced a "27x" headline that
+#: was really a warm-up artifact.
+WARMUP = 1
+REPEATS = 3
+
+
+def _best(save, path: str) -> tuple[float, int]:
+    """Warm up, then return the best of ``REPEATS`` timed saves, with the size.
+
+    Minimum rather than mean: the quantity of interest is the cost of the work
+    itself, and every source of noise on a shared machine only ever adds time.
+    """
+    for _ in range(WARMUP):
+        save(path)
+    best = float("inf")
+    for _ in range(REPEATS):
+        t0 = time.perf_counter()
+        save(path)
+        best = min(best, time.perf_counter() - t0)
+    return best, os.path.getsize(path)
+
+
+#: Raster resolution used for both libraries. They disagree by default -
+#: pyplotrs `save()` is 200 dpi, matplotlib `savefig()` follows `figure.dpi` at
+#: 100 - so leaving it implicit had pyplotrs rendering four times the pixels in
+#: every PNG row and losing races it was never actually in.
+BENCH_DPI = 100.0
+
+
 def _time_pyplotrs(mark, n, nrows, ncols, fmt) -> tuple[float, int]:
     fig = _build_pyplotrs(mark, n, nrows, ncols)
     path = f"{OUT}/pyplotrs_{mark}_{n}_{nrows}x{ncols}.{fmt}"
-    t0 = time.perf_counter()
-    fig.save(path)
-    return time.perf_counter() - t0, os.path.getsize(path)
+    return _best(lambda p: fig.save(p, dpi=BENCH_DPI), path)
 
 
 # -- matplotlib (optional) -------------------------------------------------
@@ -115,11 +167,10 @@ def _build_mpl(plt, mark: str, n: int, nrows: int, ncols: int):
 def _time_mpl(plt, mark, n, nrows, ncols, fmt) -> tuple[float, int]:
     fig = _build_mpl(plt, mark, n, nrows, ncols)
     path = f"{OUT}/mpl_{mark}_{n}_{nrows}x{ncols}.{fmt}"
-    t0 = time.perf_counter()
-    fig.savefig(path)
-    dt = time.perf_counter() - t0
-    plt.close(fig)
-    return dt, os.path.getsize(path)
+    try:
+        return _best(lambda p: fig.savefig(p, dpi=BENCH_DPI), path)
+    finally:
+        plt.close(fig)
 
 
 # -- driver ----------------------------------------------------------------
@@ -160,9 +211,17 @@ def write_markdown(rows, have_mpl: bool, path: str):
         "",
         "Export wall-time and file size across **mark x point-count x panels x "
         "format**. `N` is the figure's *total* point budget, split evenly over "
-        "the panels. Times measure `save()` of a pre-built figure (the render "
-        "engine), best of a single run on this machine. Regenerate with "
-        "`.venv/bin/python benchmarks/matrix.py`.",
+        "the panels. Times are `save()` / `savefig()`, "
+        f"best of {REPEATS} runs after {WARMUP} untimed warm-up, at a matched "
+        f"{BENCH_DPI:.0f} dpi and figure size, on this machine. "
+        "Regenerate with `.venv/bin/python benchmarks/matrix.py`.",
+        "",
+        "Read the numbers with two caveats. For pyplotrs the timed region is "
+        "close to the whole pipeline - `line()` only records a mark, and layout, "
+        "shaping and rendering all happen inside `save()` - whereas matplotlib "
+        "has built its artists beforehand. Data ingestion is outside the timer "
+        "for both, as is import time (`import pyplotrs` is ~12 ms against "
+        "~237 ms for `matplotlib.pyplot`, which no row here reflects).",
         "",
     ]
     if have_mpl:
