@@ -13,6 +13,7 @@ use std::sync::{Mutex, OnceLock};
 
 use fontdb::{Database, Family, Query, Stretch, Style, Weight};
 
+use pyo3::buffer::PyBuffer;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
@@ -172,6 +173,199 @@ fn parse_fill_rule(s: &str) -> FillRule {
         "evenodd" => FillRule::EvenOdd,
         _ => FillRule::NonZero,
     }
+}
+
+/// Bulk `f64` input from Python, extracted through the **buffer protocol** when
+/// the caller can offer one.
+///
+/// This is the seam that decides how fast a large plot is. PyO3's stock
+/// `Vec<f64>` extraction walks the object as a generic sequence and calls
+/// `__float__` on every element, so a million-point array costs a million
+/// interpreter round-trips. Anything exposing a 1-D contiguous `f64` buffer -
+/// `array.array('d')` (what `Axes._coords` now produces) or a NumPy
+/// `float64` array - is instead copied out at memcpy speed.
+///
+/// The fallback keeps plain Python lists working, so this is a pure speedup
+/// with no API change and no new dependency: NumPy is fast here because it
+/// speaks the buffer protocol, not because pyplotrs imports it.
+pub struct F64Data(Vec<f64>);
+
+impl F64Data {
+    #[inline]
+    fn as_slice(&self) -> &[f64] {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for F64Data {
+    type Target = [f64];
+    #[inline]
+    fn deref(&self) -> &[f64] {
+        &self.0
+    }
+}
+
+impl<'a, 'py> FromPyObject<'a, 'py> for F64Data {
+    type Error = PyErr;
+
+    fn extract(obj: pyo3::Borrowed<'a, 'py, PyAny>) -> Result<Self, Self::Error> {
+        if let Ok(buf) = PyBuffer::<f64>::get(&obj) {
+            // `to_vec` is a straight copy out of the exporter's memory. Reject
+            // non-contiguous or multi-dimensional views rather than silently
+            // reading them in the wrong order.
+            if buf.dimensions() == 1 && buf.is_c_contiguous() {
+                return Ok(F64Data(buf.to_vec(obj.py())?));
+            }
+        }
+        Ok(F64Data(obj.extract::<Vec<f64>>()?))
+    }
+}
+
+/// Finite minimum and maximum of `values`, or `None` when nothing is finite.
+///
+/// Autoscaling ignores `NaN`/`inf` the way matplotlib does. Doing that scan here
+/// rather than in Python is worth a lot: it used to be
+/// `[v for v in values if math.isfinite(v)]` followed by `min()`/`max()`, i.e.
+/// three passes plus a full intermediate list, and it dominated the profile of a
+/// large save - 79% of a one-million-point PNG export.
+#[pyfunction]
+fn data_range(values: F64Data) -> Option<(f64, f64)> {
+    finite_range(values.as_slice())
+}
+
+/// Finite min/max over a slice; the shared body behind [`data_range`].
+fn finite_range(values: &[f64]) -> Option<(f64, f64)> {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    let mut any = false;
+    for &v in values {
+        if v.is_finite() {
+            any = true;
+            if v < lo {
+                lo = v;
+            }
+            if v > hi {
+                hi = v;
+            }
+        }
+    }
+    if any {
+        Some((lo, hi))
+    } else {
+        None
+    }
+}
+
+/// Finite min/max restricted to **strictly positive** values, for log-family
+/// scales whose domain excludes zero and negatives. `None` when nothing
+/// qualifies.
+#[pyfunction]
+fn positive_range(values: F64Data) -> Option<(f64, f64)> {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    let mut any = false;
+    for &v in values.as_slice() {
+        if v > 0.0 && v.is_finite() {
+            any = true;
+            if v < lo {
+                lo = v;
+            }
+            if v > hi {
+                hi = v;
+            }
+        }
+    }
+    if any {
+        Some((lo, hi))
+    } else {
+        None
+    }
+}
+
+/// Finite min/max over `values[i] + offsets[i]`, and - when `two_sided` -
+/// `values[i] - offsets[i]` as well, without materializing either sequence.
+///
+/// `two_sided` distinguishes the two callers, and getting it wrong is not
+/// visible in a crash: **errorbars** extend both ways from the datum, while a
+/// **bar** runs from its base to `base + height` only. Treating a bar as
+/// two-sided invents a mirrored negative bound and silently rescales the axis.
+#[pyfunction]
+#[pyo3(signature = (values, offsets, two_sided=true))]
+fn offset_range(values: F64Data, offsets: F64Data, two_sided: bool) -> Option<(f64, f64)> {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    let mut any = false;
+    let n = values.len().min(offsets.len());
+    for i in 0..n {
+        let (v, e) = (values[i], offsets[i]);
+        let candidates: &[f64] = if two_sided { &[v - e, v + e] } else { &[v + e] };
+        for &candidate in candidates {
+            if candidate.is_finite() {
+                any = true;
+                if candidate < lo {
+                    lo = candidate;
+                }
+                if candidate > hi {
+                    hi = candidate;
+                }
+            }
+        }
+    }
+    if any {
+        Some((lo, hi))
+    } else {
+        None
+    }
+}
+
+/// Bin `values` into `bins` equal-width bins, returning `(edges, counts)`.
+///
+/// The 1-D counterpart of [`hist2d`], which was already in Rust while this ran
+/// as a `for v in vals:` loop in Python. Semantics match that loop exactly:
+/// values outside `[lo, hi]` are dropped, the top edge is inclusive (it lands in
+/// the last bin), and `density` divides by `n * width`.
+///
+/// `range` is the explicit `(lo, hi)`; when `None` the finite data range is used.
+/// A degenerate range is widened by 1.0, as an all-equal sample otherwise has
+/// nowhere to go.
+#[pyfunction]
+#[pyo3(signature = (values, bins, range=None, density=false))]
+fn histogram(
+    values: F64Data,
+    bins: usize,
+    range: Option<(f64, f64)>,
+    density: bool,
+) -> (Vec<f64>, Vec<f64>) {
+    let vals = values.as_slice();
+    let bins = bins.max(1);
+    let (mut lo, mut hi) = range.or_else(|| finite_range(vals)).unwrap_or((0.0, 1.0));
+    if !(lo.is_finite() && hi.is_finite()) {
+        lo = 0.0;
+        hi = 1.0;
+    }
+    if lo == hi {
+        hi = lo + 1.0;
+    }
+    let width = (hi - lo) / bins as f64;
+    let edges: Vec<f64> = (0..=bins).map(|i| lo + width * i as f64).collect();
+
+    let mut counts = vec![0.0f64; bins];
+    for &v in vals {
+        if v < lo || v > hi {
+            continue;
+        }
+        let idx = (((v - lo) / width) as usize).min(bins - 1);
+        counts[idx] += 1.0;
+    }
+    if density {
+        let total = vals.len() as f64 * width;
+        if total != 0.0 {
+            for c in counts.iter_mut() {
+                *c /= total;
+            }
+        }
+    }
+    (edges, counts)
 }
 
 /// Symlog parameters (matplotlib defaults: linthresh=1, linscale=1, base=10).
@@ -439,8 +633,8 @@ impl Scene {
     #[allow(clippy::too_many_arguments)]
     fn add_line_xform(
         &mut self,
-        xs: Vec<f64>,
-        ys: Vec<f64>,
+        xs: F64Data,
+        ys: F64Data,
         ax: f64,
         bx: f64,
         ay: f64,
@@ -517,8 +711,8 @@ impl Scene {
     #[allow(clippy::too_many_arguments)]
     fn add_markers_xform(
         &mut self,
-        xs: Vec<f64>,
-        ys: Vec<f64>,
+        xs: F64Data,
+        ys: F64Data,
         ax: f64,
         bx: f64,
         ay: f64,
@@ -600,8 +794,8 @@ impl Scene {
     #[allow(clippy::too_many_arguments)]
     fn add_markers_xform_colored(
         &mut self,
-        xs: Vec<f64>,
-        ys: Vec<f64>,
+        xs: F64Data,
+        ys: F64Data,
         ax: f64,
         bx: f64,
         ay: f64,
@@ -660,7 +854,7 @@ impl Scene {
     #[allow(clippy::too_many_arguments)]
     fn add_colormapped_image(
         &mut self,
-        values: Vec<f64>,
+        values: F64Data,
         width: u32,
         height: u32,
         vmin: f64,
@@ -1128,10 +1322,10 @@ fn _iso_t(va: f64, vb: f64, level: f64) -> f64 {
 /// the caller maps those to data space against its coordinate vectors.
 #[pyfunction]
 fn contour_lines(
-    values: Vec<f64>,
+    values: F64Data,
     w: usize,
     h: usize,
-    levels: Vec<f64>,
+    levels: F64Data,
 ) -> Vec<(u32, f64, f64, f64, f64)> {
     let mut out = Vec::new();
     if w < 2 || h < 2 {
@@ -1205,10 +1399,10 @@ fn contour_lines(
 /// the top), matching `add_image`'s top-down placement.
 #[pyfunction]
 fn contourf_image(
-    values: Vec<f64>,
+    values: F64Data,
     w: usize,
     h: usize,
-    edges: Vec<f64>,
+    edges: F64Data,
     band_lut: Vec<u8>,
     upsample: usize,
 ) -> (Vec<u8>, usize, usize) {
@@ -1266,8 +1460,8 @@ fn contourf_image(
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
 fn hist2d(
-    xs: Vec<f64>,
-    ys: Vec<f64>,
+    xs: F64Data,
+    ys: F64Data,
     nx: usize,
     ny: usize,
     xlo: f64,
@@ -1338,8 +1532,8 @@ fn gaussian_kde(samples: Vec<f64>, grid: Vec<f64>, bandwidth: f64) -> Vec<f64> {
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
 fn hexbin(
-    xs: Vec<f64>,
-    ys: Vec<f64>,
+    xs: F64Data,
+    ys: F64Data,
     gridsize: usize,
     xlo: f64,
     xhi: f64,
@@ -1401,6 +1595,10 @@ fn _pyplotrs_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Layout>()?;
     m.add_function(wrap_pyfunction!(nice_ticks, m)?)?;
     m.add_function(wrap_pyfunction!(solve_layout, m)?)?;
+    m.add_function(wrap_pyfunction!(data_range, m)?)?;
+    m.add_function(wrap_pyfunction!(positive_range, m)?)?;
+    m.add_function(wrap_pyfunction!(offset_range, m)?)?;
+    m.add_function(wrap_pyfunction!(histogram, m)?)?;
     m.add_function(wrap_pyfunction!(scenes_to_gif, m)?)?;
     m.add_function(wrap_pyfunction!(scenes_to_apng, m)?)?;
     m.add_function(wrap_pyfunction!(set_sans_serif, m)?)?;

@@ -1,4 +1,4 @@
-"""pyplotrs Figure/Axes API (Phase 1b).
+"""pyplotrs Figure/Axes API.
 
 Layout is solved in a single pass by the Rust ``pyplotrs-layout`` engine using
 *pre-measured* real text extents: every band (title, axis labels, tick labels)
@@ -7,15 +7,20 @@ and there is no draw-measure-adjust loop. Axis ticks come from the Rust "nice
 numbers" locator. Data is drawn clipped to the plot area, and the y-axis label
 is rotated via an affine group.
 
-Phase 1b adds the core 2D mark vocabulary - line, scatter (marker shape
-library), bar, hist, fill_between, errorbar - and an auto-legend whose glyphs
-mirror the actual mark styles.
+**This module orchestrates; Rust computes.** Coordinate data is held as
+``array.array("d")`` (see :func:`_to_f64`) so it crosses into Rust through the
+buffer protocol as a memcpy rather than a per-element interpreter round-trip,
+and the scans over it - autoscaling, histogram binning, the data-to-device
+transform, polyline simplification - all run on the Rust side. Anything that
+loops over individual data points in this file is a bug or a to-do, not a
+design.
 """
 
 from __future__ import annotations
 
 import html
 import math
+from array import array
 from typing import Sequence
 
 from . import _pyplotrs_core as _core
@@ -175,25 +180,157 @@ def _as_seq(value, n: int) -> list[float]:
     return [float(v) for v in items]
 
 
-def _finite(values: Sequence[float]) -> list[float]:
-    """The finite (non-NaN, non-inf) members of ``values``.
+def _to_f64(values) -> "array":
+    """Coerce a numeric sequence to a contiguous ``array.array("d")``.
 
-    Autoscaling ignores non-finite data — as matplotlib does — so a single
-    ``NaN``/``inf`` (common in real datasets with gaps) can't collapse an axis
-    to ``(-inf, inf)`` or an order-dependent range."""
-    return [v for v in values if math.isfinite(v)]
+    This is the single ingest point for coordinate data, and the reason large
+    plots are fast. ``array("d")`` exposes the buffer protocol, so the Rust side
+    copies it out with a memcpy instead of calling ``__float__`` once per
+    element; the same is true of a NumPy ``float64`` array, which is passed
+    straight through its own buffer here. Everything else falls back to an
+    element-wise conversion, which is still one pass rather than the three the
+    old ingest made.
+
+    ``array`` rather than NumPy deliberately: it is standard library (pyplotrs
+    has no runtime dependencies) and it has list-like truthiness, so the
+    ``if some_coords:`` checks scattered through this module keep working -
+    a NumPy array would raise "truth value is ambiguous" instead.
+    """
+    if type(values) is array and values.typecode == "d":
+        return values
+    try:
+        view = memoryview(values)
+    except TypeError:
+        pass
+    else:
+        if view.ndim == 1 and view.c_contiguous:
+            if view.format == "d":
+                out = array("d")
+                out.frombytes(view.cast("B"))  # memcpy
+                return out
+            # Some other contiguous numeric type (float32, int64, ...): one
+            # C-level pass, still far cheaper than a Python comprehension.
+            try:
+                return array("d", view)
+            except (TypeError, ValueError):
+                pass
+    # A plain list/tuple/generator. `array("d", ...)` converts in C and raises
+    # on the first non-number, which doubles as the "are these numeric?" test -
+    # so the common case never pays for a separate isinstance scan.
+    try:
+        return array("d", values)
+    except (TypeError, ValueError):
+        return array("d", [float(v) for v in values])
 
 
-def _data_range(values: Sequence[float], pad: float = _DATA_PAD) -> tuple[float, float]:
-    finite = _finite(values)
-    if not finite:
+def _concat(arrays: list) -> "array":
+    """Join coordinate arrays into one. Only the non-linear-scale autoscaling
+    path needs this; the linear path folds bounds instead (see :class:`_RangeAcc`)."""
+    if not arrays:
+        return array("d")
+    if len(arrays) == 1:
+        return _to_f64(arrays[0])
+    out = array("d")
+    for a in arrays:
+        out.extend(_to_f64(a))
+    return out
+
+
+def _data_range(values, pad: float = _DATA_PAD) -> tuple[float, float]:
+    """Padded ``(lo, hi)`` over the finite members of ``values``.
+
+    Non-finite data is ignored, as matplotlib does, so a single ``NaN``/``inf``
+    (common in real data with gaps) can't collapse an axis to ``(-inf, inf)``.
+    The scan itself runs in Rust - it used to be a Python ``math.isfinite``
+    comprehension plus ``min``/``max``, three passes over a full intermediate
+    list, and it accounted for 79% of a one-million-point export.
+    """
+    return _pad_range(_core.data_range(_to_f64(values)))
+
+
+def _pad_range(bounds: tuple[float, float] | None,
+               pad: float = _DATA_PAD) -> tuple[float, float]:
+    """Apply the data margin to a raw ``(lo, hi)``; ``None`` means no data."""
+    if bounds is None:
         return (0.0, 1.0)
-    lo, hi = min(finite), max(finite)
+    lo, hi = bounds
     if lo == hi:
         lo -= 0.5
         hi += 0.5
     span = hi - lo
     return lo - span * pad, hi + span * pad
+
+
+class _RangeAcc:
+    """Running finite ``(lo, hi)`` over many marks, without concatenating them.
+
+    Autoscaling used to build one Python list holding *every point of every
+    mark* and scan that. This keeps only the running bounds: each bulk array is
+    reduced in Rust and folded in, so the cost is O(points) in Rust and O(marks)
+    in Python instead of O(points) in Python plus a full copy.
+
+    Bulk arrays are also retained by reference (never copied) for
+    :meth:`arrays`, because non-linear scales do their own domain-aware
+    autoscaling and need the values, not just the bounds.
+    """
+
+    __slots__ = ("lo", "hi", "_arrays")
+
+    def __init__(self) -> None:
+        self.lo = math.inf
+        self.hi = -math.inf
+        self._arrays: list = []
+
+    def _fold(self, bounds: tuple[float, float] | None) -> None:
+        if bounds is not None:
+            lo, hi = bounds
+            if lo < self.lo:
+                self.lo = lo
+            if hi > self.hi:
+                self.hi = hi
+
+    def add_array(self, values) -> None:
+        """Fold in a bulk coordinate array (reduced in Rust)."""
+        if len(values) == 0:
+            return
+        self._arrays.append(values)
+        self._fold(_core.data_range(values))
+
+    def add_offsets(self, values, offsets, *, two_sided: bool = True) -> None:
+        """Fold in ``values + offsets``, and ``values - offsets`` too when
+        ``two_sided``, reduced in Rust without building the intermediates.
+
+        ``two_sided=True`` is an errorbar (the whisker extends both ways);
+        ``False`` is a bar, which runs from its base to ``base + height`` and
+        nowhere else."""
+        if len(values) == 0 or offsets is None or len(offsets) == 0:
+            return
+        bounds = _core.offset_range(values, offsets, two_sided)
+        self._fold(bounds)
+        if bounds is not None:
+            self._arrays.append(array("d", bounds))
+
+    def add(self, *scalars: float) -> None:
+        """Fold in a handful of individual values (bar edges, extents, ...)."""
+        finite = [v for v in scalars if math.isfinite(v)]
+        if finite:
+            self._fold((min(finite), max(finite)))
+            self._arrays.append(array("d", finite))
+
+    @property
+    def empty(self) -> bool:
+        return self.lo > self.hi
+
+    def bounds(self) -> tuple[float, float] | None:
+        """Raw finite ``(lo, hi)``, or ``None`` if nothing finite was added."""
+        return None if self.empty else (self.lo, self.hi)
+
+    def padded(self, pad: float = _DATA_PAD) -> tuple[float, float]:
+        return _pad_range(self.bounds(), pad)
+
+    def arrays(self) -> list:
+        """Every contributed array, for scales that autoscale their own domain."""
+        return self._arrays
 
 
 def _xform_coeffs(sx, sy) -> tuple[float, float, float, float]:
@@ -858,31 +995,37 @@ class Axes:
             return c
         return self._theme.resolve(color)
 
-    def _coords(self, values, axis: str) -> list[float]:
-        """Coerce plot coordinates to floats. Datetime-like values switch that
-        axis to a :class:`~pyplotrs.scales.DateScale` (mapped via ``date2num``);
-        strings (or other non-numerics) switch it to a
-        :class:`~pyplotrs.scales.CategoricalScale`, mapping each distinct label to
-        an integer position (first-seen order)."""
-        values = list(values)
+    def _coords(self, values, axis: str) -> "array":
+        """Coerce plot coordinates to a contiguous ``array("d")``.
+
+        Datetime-like values switch that axis to a
+        :class:`~pyplotrs.scales.DateScale` (mapped via ``date2num``); strings
+        switch it to a :class:`~pyplotrs.scales.CategoricalScale`, mapping each
+        distinct label to an integer position in first-seen order.
+
+        The numeric case is the hot one and is handled first, without ever
+        materializing an intermediate Python list: anything already offering an
+        ``f64`` buffer (a NumPy array, another ``array("d")``) is taken as-is.
+        Only inputs that are *not* plain numbers pay for the datetime/string
+        inspection below.
+        """
+        # Buffer-backed numeric input can't be dates or strings - take the fast
+        # path before touching the sequence at all.
+        try:
+            view = memoryview(values)
+        except TypeError:
+            view = None
+        if view is not None and view.ndim == 1 and view.c_contiguous:
+            return _to_f64(values)
+
+        if not isinstance(values, (list, tuple)):
+            values = list(values)
         if values and _scales.is_datetime_like(values[0]):
-            scale = self._xscale if axis == "x" else self._yscale
-            if not isinstance(scale, _scales.DateScale):
-                scale = _scales.DateScale()
-                if axis == "x":
-                    self._xscale = scale
-                else:
-                    self._yscale = scale
-            return [_scales.date2num(v) for v in values]
+            scale = self._axis_scale(axis, _scales.DateScale)
+            return array("d", [_scales.date2num(v) for v in values])
         if any(isinstance(v, str) for v in values):
-            scale = self._xscale if axis == "x" else self._yscale
-            if not isinstance(scale, _scales.CategoricalScale):
-                scale = _scales.CategoricalScale([])
-                if axis == "x":
-                    self._xscale = scale
-                else:
-                    self._yscale = scale
-            out = []
+            scale = self._axis_scale(axis, _scales.CategoricalScale)
+            out = array("d")
             for v in values:
                 s = str(v)
                 if s not in scale.index:
@@ -890,7 +1033,19 @@ class Axes:
                     scale.categories.append(s)
                 out.append(float(scale.index[s]))
             return out
-        return [float(v) for v in values]
+        return _to_f64(values)
+
+    def _axis_scale(self, axis: str, kind):
+        """The scale on ``axis``, replacing it with a fresh ``kind`` if it isn't
+        one already. Used when the *data* dictates the scale (dates, categories)."""
+        scale = self._xscale if axis == "x" else self._yscale
+        if not isinstance(scale, kind):
+            scale = _scales.CategoricalScale([]) if kind is _scales.CategoricalScale else kind()
+            if axis == "x":
+                self._xscale = scale
+            else:
+                self._yscale = scale
+        return scale
 
     # -- public API: marks --------------------------------------------------
 
@@ -979,28 +1134,15 @@ class Axes:
 
     def hist(self, data, *, bins: int = 10, color=None, label: str | None = None,
              range=None, density: bool = False) -> "Axes":
-        """Bin ``data`` into ``bins`` equal-width bins and draw the histogram."""
-        vals = [float(v) for v in data]
-        if not vals:
-            vals = [0.0, 1.0]
-        lo, hi = (float(range[0]), float(range[1])) if range else (min(vals), max(vals))
-        if lo == hi:
-            hi = lo + 1.0
-        bins = max(int(bins), 1)
-        width = (hi - lo) / bins
-        edges = [lo + width * i for i in _irange(bins + 1)]
-        counts = [0.0] * bins
-        for v in vals:
-            if v < lo or v > hi:
-                continue
-            idx = int((v - lo) / width)
-            if idx >= bins:
-                idx = bins - 1
-            counts[idx] += 1.0
-        if density:
-            total = len(vals) * width
-            if total:
-                counts = [c / total for c in counts]
+        """Bin ``data`` into ``bins`` equal-width bins and draw the histogram.
+
+        The binning loop runs in Rust (``_core.histogram``), matching what
+        ``hist2d`` already did."""
+        vals = _to_f64(data)
+        if not len(vals):
+            vals = array("d", (0.0, 1.0))
+        span = (float(range[0]), float(range[1])) if range else None
+        edges, counts = _core.histogram(vals, max(int(bins), 1), span, bool(density))
         self._marks.append({
             "kind": "hist",
             "edges": edges,
@@ -1506,145 +1648,156 @@ class Axes:
     # -- layout helpers -----------------------------------------------------
 
     def _ranges(self) -> tuple[tuple[float, float], tuple[float, float]]:
-        xs_all: list[float] = []
-        ys_all: list[float] = []
+        """Autoscaled ``(xrange, yrange)`` for this axes.
+
+        Bulk coordinate arrays are reduced to their finite min/max **in Rust**
+        and folded into a running bound (see :class:`_RangeAcc`); only the
+        handful of derived scalars each mark contributes - bar edges, image
+        extents, whisker ends - are touched in Python. Previously this
+        concatenated every point of every mark into one list and scanned that,
+        which was the single most expensive step in saving a large figure.
+        """
+        xs = _RangeAcc()
+        ys = _RangeAcc()
         has_bar = False
         has_image = False
         for m in self._marks:
             k = m["kind"]
             if k in ("line", "scatter"):
-                xs_all += m["xs"]
-                ys_all += m["ys"]
+                xs.add_array(m["xs"])
+                ys.add_array(m["ys"])
             elif k == "bar":
                 has_bar = True
                 hw = m["width"] / 2.0
-                for x in m["xs"]:
-                    xs_all += [x - hw, x + hw]
-                for b, h in zip(m["bottoms"], m["heights"]):
-                    ys_all += [b, b + h]
+                bx = _core.data_range(m["xs"])
+                if bx is not None:
+                    xs.add(bx[0] - hw, bx[1] + hw)
+                ys.add_array(m["bottoms"])
+                ys.add_offsets(m["bottoms"], m["heights"], two_sided=False)
             elif k == "hist":
                 has_bar = True
-                xs_all += [m["edges"][0], m["edges"][-1]]
-                ys_all += m["counts"]
-                ys_all.append(0.0)
+                xs.add(m["edges"][0], m["edges"][-1])
+                ys.add_array(m["counts"])
+                ys.add(0.0)
             elif k == "fill":
-                xs_all += m["xs"]
-                ys_all += m["y1"]
-                ys_all += m["y2"]
+                xs.add_array(m["xs"])
+                ys.add_array(m["y1"])
+                ys.add_array(m["y2"])
             elif k == "errorbar":
-                xs_all += m["xs"]
-                ys_all += m["ys"]
-                if m["yerr"]:
-                    for y, e in zip(m["ys"], m["yerr"]):
-                        ys_all += [y - e, y + e]
-                if m["xerr"]:
-                    for x, e in zip(m["xs"], m["xerr"]):
-                        xs_all += [x - e, x + e]
+                xs.add_array(m["xs"])
+                ys.add_array(m["ys"])
+                if m["yerr"] is not None and len(m["yerr"]):
+                    ys.add_offsets(m["ys"], m["yerr"])
+                if m["xerr"] is not None and len(m["xerr"]):
+                    xs.add_offsets(m["xs"], m["xerr"])
             elif k == "image":
                 has_image = True
                 x0, x1, y0, y1 = m["extent"]
-                xs_all += [x0, x1]
-                ys_all += [y0, y1]
+                xs.add(x0, x1)
+                ys.add(y0, y1)
             elif k == "barh":
                 has_bar = True
                 hh = m["height"] / 2.0
-                for y in m["ys"]:
-                    ys_all += [y - hh, y + hh]
-                for lft, wdt in zip(m["lefts"], m["widths"]):
-                    xs_all += [lft, lft + wdt]
+                by = _core.data_range(m["ys"])
+                if by is not None:
+                    ys.add(by[0] - hh, by[1] + hh)
+                xs.add_array(m["lefts"])
+                xs.add_offsets(m["lefts"], m["widths"], two_sided=False)
             elif k == "stem":
-                xs_all += m["xs"]
-                ys_all += m["ys"]
-                ys_all.append(m["bottom"])
+                xs.add_array(m["xs"])
+                ys.add_array(m["ys"])
+                ys.add(m["bottom"])
             elif k == "broken_barh":
                 for x0, wdt in m["bars"]:
-                    xs_all += [x0, x0 + wdt]
-                ys_all += [m["y0"], m["y0"] + m["h"]]
+                    xs.add(x0, x0 + wdt)
+                ys.add(m["y0"], m["y0"] + m["h"])
             elif k == "eventplot":
                 horiz = m["orientation"] == "horizontal"
                 for i, row in enumerate(m["rows"]):
                     off = m["offset"] * i
                     half = m["length"] / 2.0
                     if horiz:
-                        xs_all += row
-                        ys_all += [off - half, off + half]
+                        xs.add_array(_to_f64(row))
+                        ys.add(off - half, off + half)
                     else:
-                        ys_all += row
-                        xs_all += [off - half, off + half]
+                        ys.add_array(_to_f64(row))
+                        xs.add(off - half, off + half)
             elif k == "boxplot":
                 hw = m["width"] / 2.0
                 for pos, st in zip(m["positions"], m["stats"]):
-                    xs_all += [pos - hw, pos + hw]
-                    ys_all += [st["lo"], st["hi"]]
-                    ys_all += st["fliers"]
+                    xs.add(pos - hw, pos + hw)
+                    ys.add(st["lo"], st["hi"])
+                    if st["fliers"]:
+                        ys.add_array(_to_f64(st["fliers"]))
             elif k == "violin":
                 hw = m["width"] / 2.0
                 for pos, (grid, _dens) in zip(m["positions"], m["violins"]):
-                    xs_all += [pos - hw, pos + hw]
-                    ys_all += grid
+                    xs.add(pos - hw, pos + hw)
+                    ys.add_array(_to_f64(grid))
             elif k == "hexbin":
                 for cx, cy in m["centers"]:
-                    xs_all.append(cx)
-                    ys_all.append(cy)
+                    xs.add(cx)
+                    ys.add(cy)
             elif k in ("quadmesh", "contourf"):
                 has_image = True
                 x0, x1, y0, y1 = m["extent"]
-                xs_all += [x0, x1]
-                ys_all += [y0, y1]
+                xs.add(x0, x1)
+                ys.add(y0, y1)
             elif k == "contour":
                 x0, x1, y0, y1 = m["extent"]
-                xs_all += [x0, x1]
-                ys_all += [y0, y1]
+                xs.add(x0, x1)
+                ys.add(y0, y1)
             elif k == "quiver":
-                xs_all += m["xs"]
-                ys_all += m["ys"]
+                xs.add_array(m["xs"])
+                ys.add_array(m["ys"])
+                scale = m["scale"]
                 for x, y, u, v in zip(m["xs"], m["ys"], m["us"], m["vs"]):
-                    xs_all.append(x + u * m["scale"])
-                    ys_all.append(y + v * m["scale"])
+                    xs.add(x + u * scale)
+                    ys.add(y + v * scale)
             elif k == "pie":
                 r = m["radius"]
-                xs_all += [-r, r]
-                ys_all += [-r, r]
+                xs.add(-r, r)
+                ys.add(-r, r)
 
         # Patches contribute their bounding box (reference lines/spans do not).
         for p in self._patches:
             bx, by = _patch_bbox(p)
-            xs_all += bx
-            ys_all += by
+            xs.add(*bx)
+            ys.add(*by)
 
-        if not xs_all:
-            xs_all, ys_all = [0.0, 1.0], [0.0, 1.0]
+        if xs.empty:
+            xs.add(0.0, 1.0)
+            ys.add(0.0, 1.0)
 
         # Images set tight limits exactly at their extent (no data margin).
         if self._xlim:
             xr = self._xlim
         elif has_image:
-            fx = _finite(xs_all) or [0.0, 1.0]
-            xr = (min(fx), max(fx))
+            xr = xs.bounds() or (0.0, 1.0)
         else:
-            xr = _data_range(xs_all)
+            xr = xs.padded()
 
         if self._ylim:
             yr = self._ylim
         elif has_image:
-            fy = _finite(ys_all) or [0.0, 1.0]
-            yr = (min(fy), max(fy))
+            yr = ys.bounds() or (0.0, 1.0)
         elif has_bar:
-            fy = _finite(ys_all) or [0.0, 1.0]
-            lo, hi = min(fy), max(fy)
-            if lo >= 0.0:
-                yr = (0.0, hi + (hi or 1.0) * _DATA_PAD)
-            else:
-                yr = _data_range(ys_all)
+            lo, hi = ys.bounds() or (0.0, 1.0)
+            # Bars are read against a baseline, so a non-negative series keeps
+            # zero in view rather than floating above it.
+            yr = (0.0, hi + (hi or 1.0) * _DATA_PAD) if lo >= 0.0 else ys.padded()
         else:
-            yr = _data_range(ys_all)
+            yr = ys.padded()
 
         # Non-linear scales own their autoscaling (positive-domain clipping and
         # transformed-space padding), unless the user pinned explicit limits.
+        # This is the one path that still needs the values rather than the
+        # bounds, so it pays for a concatenation - non-linear scales are the
+        # uncommon case, and the arrays were retained by reference anyway.
         if not self._xscale.is_identity and not self._xlim:
-            xr = self._xscale.data_limits(xs_all)
+            xr = self._xscale.data_limits(_concat(xs.arrays()))
         if not self._yscale.is_identity and not self._ylim:
-            yr = self._yscale.data_limits(ys_all)
+            yr = self._yscale.data_limits(_concat(ys.arrays()))
         return xr, yr
 
     def _bands(self, scene: "_core.Scene", xr, yr) -> tuple[

@@ -95,7 +95,9 @@ def test_datetime_axis_switches_scale_and_orders_correctly():
     days = [dt.date(2026, 1, 1), dt.date(2026, 6, 1), dt.date(2026, 12, 1)]
     ax.line(days, [1, 2, 3])
     assert isinstance(ax._xscale, scales.DateScale)
-    xs = ax._marks[0]["xs"]
+    # Coordinates are held as array("d") so they cross into Rust as a buffer;
+    # compare as a list rather than relying on array/list equality.
+    xs = list(ax._marks[0]["xs"])
     assert xs == sorted(xs), "date2num did not preserve chronological order"
 
 
