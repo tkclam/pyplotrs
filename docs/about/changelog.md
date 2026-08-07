@@ -51,6 +51,9 @@ All notable changes to pyplotrs are documented here. The format is based on
   `errorbar`, `step`, `stairs`, `stem`, `hlines`, `vlines`), not just the three
   that had it.
 - Figure legends now include 3D and polar panels, which were silently skipped.
+- `legend(loc="best")` now lives up to its name: it scores each corner by how
+  much data the box would cover and takes the clearest. It was previously a
+  plain alias for `upper right`.
 
 ### Fixed
 
@@ -71,3 +74,5 @@ All notable changes to pyplotrs are documented here. The format is based on
   measured around them (visible under `themes.presentation`).
 - A degenerate figure size, or a raster too large to allocate, raises
   `ValueError` instead of unwinding out of Rust as a `PanicException`.
+- The polar outer spine and a colormapped scatter's legend swatch follow the
+  theme instead of hardcoded constants.

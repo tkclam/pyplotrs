@@ -10,7 +10,6 @@ value, while marker size was an area on ``scatter`` and a diameter on
 from __future__ import annotations
 
 import inspect
-import math
 
 import pytest
 
@@ -224,3 +223,104 @@ def test_2d_legend_entries_keep_their_kind():
     ax.line([0, 1], [0, 1], label="line")
     kinds = [e["kind"] for e in ax._legend_entries()]
     assert kinds == ["bar", "line"]
+
+
+# -- legend(loc="best") ------------------------------------------------------
+
+@pytest.mark.parametrize("name,ys,expect_left,expect_top", [
+    # A rising line clears the upper left; a falling one clears the upper right.
+    ("rising", [i / 20 for i in range(21)], True, True),
+    ("falling", [1 - i / 20 for i in range(21)], False, True),
+])
+def test_best_picks_a_corner_clear_of_the_data(name, ys, expect_left, expect_top):
+    """`best` used to be a plain alias for `upper right`, so it happily sat on
+    top of a rising line."""
+    xs = [i / 20 for i in range(21)]
+    fig, ax = plt.subplots(figsize=(300, 220))
+    ax.line(xs, ys, label=name)
+    ax.legend()
+
+    positions = {
+        "upper right": (100.0, 0.0), "upper left": (0.0, 0.0),
+        "lower right": (100.0, 100.0), "lower left": (0.0, 100.0),
+        "upper center": (50.0, 0.0), "lower center": (50.0, 100.0),
+    }
+
+    class _P:
+        sx = staticmethod(lambda v: v * 100.0)
+        sy = staticmethod(lambda v: 100.0 - v * 100.0)
+
+    bx, by = ax._best_legend_position(positions, 30.0, 20.0, _P())
+    assert (bx < 50.0) is expect_left, f"{name}: horizontal choice {bx}"
+    assert (by < 50.0) is expect_top, f"{name}: vertical choice {by}"
+
+
+def test_best_falls_back_without_a_projection():
+    """Callers that have no projection (a figure-level legend) must still get a
+    sane answer rather than an error."""
+    fig, ax = plt.subplots()
+    ax.line([0, 1], [0, 1], label="a")
+    positions = {"upper right": (9.0, 9.0), "upper left": (0.0, 0.0),
+                 "lower right": (9.0, 0.0), "lower left": (0.0, 9.0),
+                 "upper center": (4.0, 0.0), "lower center": (4.0, 9.0)}
+    assert ax._best_legend_position(positions, 1.0, 1.0, None) == (9.0, 9.0)
+
+
+def test_best_probe_is_bounded_regardless_of_data_size():
+    """The search runs at draw time, so it must not become an O(n) pass."""
+    fig, ax = plt.subplots()
+    ax.line(list(range(100_000)), list(range(100_000)), label="big")
+
+    class _P:
+        sx = staticmethod(float)
+        sy = staticmethod(float)
+
+    from pyplotrs.figure import _LEGEND_PROBE_POINTS
+    assert len(ax._sample_device_points(_P())) <= _LEGEND_PROBE_POINTS + 1
+
+
+def test_explicit_loc_is_still_honoured(tmp_path):
+    fig, ax = plt.subplots(figsize=(240, 180))
+    ax.line([0, 1], [0, 1], label="a")
+    ax.legend(loc="lower right")
+    assert ax._legend["loc"] == "lower right"
+    fig.save(str(tmp_path / "l.png"))
+
+
+# -- the theme is the only source of style ------------------------------------
+
+@pytest.mark.parametrize("name", [
+    "_BLACK", "_SPINE", "_WHITE", "_COLOR_CYCLE", "_LEGEND_BG", "_LEGEND_BORDER",
+    "_LEGEND_SIZE", "_TICK_LABEL_SIZE", "_AXIS_LABEL_SIZE", "_TITLE_SIZE",
+    "_SUPTITLE_SIZE",
+])
+def test_style_constants_do_not_shadow_the_theme(name):
+    """`figure.py` used to carry its own copies of the theme's palette, colours
+    and type scale, which draw methods shadowed with theme-derived locals. Any
+    method that forgot to re-shadow silently drew the module default instead -
+    that is how the hardcoded legend swatch size and the white histogram edges
+    survived. The copies are gone, so forgetting now raises."""
+    from pyplotrs import figure
+
+    assert not hasattr(figure, name), (
+        f"{name} duplicates theme.py and invites the shadowing bug it caused before"
+    )
+
+
+def test_polar_rim_follows_the_theme(tmp_path):
+    """The outer spine circle read a module constant, so it ignored the theme."""
+    theme = plt.themes.default.with_(spine_color=(200, 30, 30, 255), spine_width=3.0)
+    fig, ax = plt.subplots(figsize=(240, 240), projection="polar", theme=theme)
+    ax.plot([0, 1, 2, 3], [1, 2, 1, 2])
+    out = tmp_path / "p.svg"
+    fig.save(str(out))
+    svg = out.read_text().lower()
+    assert "#c81e1e" in svg, "polar rim ignored the theme's spine colour"
+
+
+def test_colormapped_scatter_placeholder_follows_the_theme():
+    """Its per-point colours replace this, but it is still the legend swatch."""
+    theme = plt.themes.default.with_(text_color=(10, 20, 30, 255))
+    fig, ax = plt.subplots(theme=theme)
+    ax.scatter([0, 1], [0, 1], c=[0.0, 1.0])
+    assert ax._marks[0]["color"] == (10, 20, 30, 255)

@@ -68,34 +68,16 @@ def _text(scene, x, baseline, text, size, color, font: str = "body") -> None:
 # builtin without shadowing pain.
 _irange = range
 
-# Okabe-Ito colorblind-safe categorical palette (C0-C7).
-_COLOR_CYCLE: list[tuple[int, int, int, int]] = [
-    (0, 114, 178, 255),  # C0 blue
-    (230, 159, 0, 255),  # C1 orange
-    (0, 158, 115, 255),  # C2 green
-    (204, 121, 167, 255),  # C3 pink
-    (86, 180, 233, 255),  # C4 sky blue
-    (213, 94, 0, 255),  # C5 vermillion
-    (240, 228, 66, 255),  # C6 yellow
-    (0, 0, 0, 255),  # C7 black
-]
 
-_BLACK = (0, 0, 0, 255)
-_WHITE = (255, 255, 255, 255)
-_SPINE = (89, 89, 89, 255)  # mid-gray spines/ticks (softer than pure black)
-_LEGEND_BG = (255, 255, 255, 255)  # opaque: data must never bleed through the box
-_LEGEND_BORDER = (179, 179, 179, 255)
 # Gaps (points) framing a figure-level legend within its reserved right column:
 # space between the axes grid and the box, and between the box and figure edge.
 _LEGEND_COL_GAP_L = 10.0
 _LEGEND_COL_GAP_R = 2.0
 
 # Type scale (points), calibrated for journal figure sizes.
-_TICK_LABEL_SIZE = 9.0
-_AXIS_LABEL_SIZE = 10.0
-_TITLE_SIZE = 11.0
-_SUPTITLE_SIZE = 13.0
-_LEGEND_SIZE = 9.0
+#: Points sampled per mark when `legend(loc="best")` looks for a clear corner.
+#: Capped so the search stays a fixed small cost rather than scaling with data.
+_LEGEND_PROBE_POINTS = 60
 
 # Spacing (points).
 _TICK_LENGTH = 3.5
@@ -1207,7 +1189,10 @@ class Axes(_AxesBase):
             "xs": xs,
             "ys": ys,
             "label": label,
-            "color": self._mark_color(color, alpha) if c is None else _BLACK,
+            # A colormapped scatter's per-point colours replace this, but it is
+            # still the legend swatch and the fallback, so it must follow the theme.
+            "color": (self._mark_color(color, alpha) if c is None
+                      else self._theme.text_color),
             "markersize": self._marker_diameter(markersize, size),
             "marker": marker,
             "edgecolor": None if edgecolor is None else self._theme.resolve(edgecolor),
@@ -2470,7 +2455,7 @@ class Axes(_AxesBase):
 
         # Legend, drawn last so it sits above the data (and outside the clip).
         if self._legend is not None:
-            self._draw_legend(scene, px, py, pw, ph)
+            self._draw_legend(scene, px, py, pw, ph, proj)
 
     def _draw_annotations(self, scene, sx, sy) -> None:
         size_default = self._theme.axis_label_size
@@ -3067,7 +3052,8 @@ class Axes(_AxesBase):
         drawer can pick a swatch for bar/hist/fill and a rule for lines."""
         return [m for m in self._marks if m.get("label")]
 
-    def _draw_legend(self, scene, px: float, py: float, pw: float, ph: float) -> None:
+    def _draw_legend(self, scene, px: float, py: float, pw: float, ph: float,
+                     proj: "_Proj | None" = None) -> None:
         entries = self._legend_entries()
         if not entries:
             return
@@ -3081,7 +3067,6 @@ class Axes(_AxesBase):
         bottom = py + ph - inset - box_h
         hcenter = px + (pw - box_w) / 2.0
         positions = {
-            "best": (right, top),
             "upper right": (right, top),
             "upper left": (left, top),
             "lower right": (right, bottom),
@@ -3089,8 +3074,63 @@ class Axes(_AxesBase):
             "upper center": (hcenter, top),
             "lower center": (hcenter, bottom),
         }
-        bx, by = positions.get(loc, (right, top))
+        if loc == "best":
+            bx, by = self._best_legend_position(positions, box_w, box_h, proj)
+        else:
+            bx, by = positions.get(loc, (right, top))
         _draw_legend_box(scene, entries, bx, by, mt)
+
+    def _best_legend_position(self, positions: dict, box_w: float, box_h: float,
+                              proj: "_Proj | None"):
+        """The candidate corner that covers the least data.
+
+        Scores each corner by how many sampled mark points would fall inside the
+        box and takes the lowest, preferring earlier candidates on a tie so the
+        familiar upper-right stays the default on an empty or symmetric plot.
+
+        The sample is capped (:data:`_LEGEND_PROBE_POINTS` per mark), so the cost
+        is a few hundred operations per figure no matter how large the data -
+        this runs at draw time, and a legend is not worth an O(n) pass.
+        """
+        order = ["upper right", "upper left", "lower right", "lower left",
+                 "upper center", "lower center"]
+        if proj is None:
+            return positions["upper right"]
+
+        points = self._sample_device_points(proj)
+        if not points:
+            return positions["upper right"]
+
+        best = None
+        for name in order:
+            bx, by = positions[name]
+            x1, y1 = bx + box_w, by + box_h
+            covered = sum(1 for (dx, dy) in points if bx <= dx <= x1 and by <= dy <= y1)
+            if best is None or covered < best[0]:
+                best = (covered, bx, by)
+                if covered == 0:
+                    break  # nothing can beat a clear corner
+        return best[1], best[2]
+
+    def _sample_device_points(self, proj: "_Proj") -> list[tuple[float, float]]:
+        """Up to :data:`_LEGEND_PROBE_POINTS` device-space points per mark, as a
+        cheap stand-in for "where the ink is"."""
+        sx, sy = proj.sx, proj.sy
+        out: list[tuple[float, float]] = []
+        for m in self._marks:
+            xs = m.get("xs")
+            ys = m.get("ys")
+            if xs is None or ys is None:
+                continue
+            n = min(len(xs), len(ys))
+            if n == 0:
+                continue
+            step = max(1, n // _LEGEND_PROBE_POINTS)
+            for i in range(0, n, step):
+                x, y = xs[i], ys[i]
+                if math.isfinite(x) and math.isfinite(y):
+                    out.append((sx(x), sy(y)))
+        return out
 
 
 # -- legend helpers (shared by per-axes and figure-level legends) -----------
@@ -3608,7 +3648,7 @@ class Axes3D(_AxesBase):
                     pc = proj(m["xs"][cc], m["ys"][cc], m["zs"][cc])
                     zc = (m["zs"][a] + m["zs"][b] + m["zs"][cc]) / 3.0
                     add_poly([pa, pb, pc], cm((zc - zmin) / zspd),
-                             _WHITE, 0.4)
+                             t.separator_color, 0.4)
             elif k == "line":
                 pr = [proj(x, y, z) for x, y, z in zip(m["xs"], m["ys"], m["zs"])]
                 for i in range(len(pr) - 1):
@@ -3998,7 +4038,7 @@ class PolarAxes(_AxesBase):
             scene.add_path(pts, stroke_color=t.grid_color, stroke_width=t.grid_width)
         # 3. Outer spine circle at rmax.
         rim = [to_dev(2.0 * math.pi * k / 128.0, rmax) for k in range(129)]
-        scene.add_path(rim, stroke_color=_SPINE, stroke_width=1.0)
+        scene.add_path(rim, stroke_color=t.spine_color, stroke_width=t.spine_width)
 
         # 4. Theta tick labels just outside the rim, centred on their spoke.
         for deg in spokes:
