@@ -373,8 +373,24 @@ def _colorbar_ticks(cb: dict, max_ticks: int = 6) -> list[tuple[float, str]]:
     return _core.nice_ticks(cb["vmin"], cb["vmax"], max_ticks)
 
 
+#: Cache of colormap -> 1024-byte RGBA LUT. `Colormap` has no `__eq__`, so this
+#: keys on object identity while holding the colormap alive - unlike an `id()`
+#: key, which a later allocation at the same address could impersonate.
+#: Bounded so a program minting many ad-hoc colormaps cannot grow it without end.
+_LUT_CACHE: dict = {}
+_LUT_CACHE_MAX = 64
+
+
 def _colormap_lut(cmap) -> bytes:
-    """A 256-entry RGBA lookup table sampled from ``cmap`` (1024 bytes)."""
+    """A 256-entry RGBA lookup table sampled from ``cmap`` (1024 bytes).
+
+    Sampling costs 256 Python calls, and it used to run on *every* draw of every
+    image and again for each colorbar gradient. The table is the only form the
+    Rust side needs, so it is built once and reused.
+    """
+    hit = _LUT_CACHE.get(cmap)
+    if hit is not None:
+        return hit
     out = bytearray(256 * 4)
     for i in range(256):
         r, g, b, a = cmap(i / 255.0)
@@ -383,7 +399,65 @@ def _colormap_lut(cmap) -> bytes:
         out[o + 1] = g
         out[o + 2] = b
         out[o + 3] = a
-    return bytes(out)
+    lut = bytes(out)
+    if len(_LUT_CACHE) >= _LUT_CACHE_MAX:
+        _LUT_CACHE.clear()
+    _LUT_CACHE[cmap] = lut
+    return lut
+
+
+def _to_f64_grid(data) -> tuple["array", int, int]:
+    """Flatten a 2D grid to ``(values, nrows, ncols)`` in row-major order.
+
+    A contiguous 2D buffer (a NumPy array) is taken whole with a single cast -
+    no per-pixel Python. Otherwise each row is converted individually, which is
+    still one pass rather than the nested comprehension plus separate flatten
+    this replaces.
+    """
+    try:
+        view = memoryview(data)
+    except TypeError:
+        view = None
+    if view is not None and view.ndim == 2 and view.c_contiguous:
+        h, w = view.shape
+        if view.format == "d":
+            out = array("d")
+            out.frombytes(view.cast("B"))  # memcpy
+        else:
+            out = array("d", view.cast(view.format, (h * w,)))
+        return out, h, w
+
+    rows = list(data)
+    h = len(rows)
+    if h == 0:
+        return array("d"), 0, 0
+    flat = array("d")
+    w = -1
+    for row in rows:
+        converted = _to_f64(row)
+        if w < 0:
+            w = len(converted)
+        elif len(converted) != w:
+            raise ValueError(
+                f"image rows must all be the same length; got {len(converted)} after {w}"
+            )
+        flat.extend(converted)
+    return flat, h, max(w, 0)
+
+
+def _map_colors(values, cmap, norm) -> list[tuple[int, int, int, int]]:
+    """One RGBA per value, through ``norm`` then ``cmap``.
+
+    Runs in Rust whenever the norm names a transform Rust knows
+    (:attr:`pyplotrs.norms.Normalize.code`), which covers linear and log - two
+    Python calls per point otherwise, so 200k interpreter round-trips for a
+    100k-point scatter. ``TwoSlopeNorm`` and ``BoundaryNorm`` are piecewise and
+    have no such transform, so they keep the per-value Python path.
+    """
+    code = getattr(norm, "code", None)
+    if code is not None:
+        return _core.map_colors(values, _colormap_lut(cmap), norm.vmin, norm.vmax, code)
+    return [cmap(norm(v)) for v in values]
 
 
 # -- line styles ------------------------------------------------------------
@@ -1108,10 +1182,10 @@ class Axes:
             return self
         # Colormapped scatter: precompute one RGBA per point and hand back a
         # mappable so ``fig.colorbar(sc)`` matches the color scale.
-        cvals = [float(v) for v in c]
+        cvals = _to_f64(c)
         nrm = _norms.get(norm, vmin, vmax).autoscale(cvals)
         cm = _colormaps.get_cmap(cmap)
-        mark["colors"] = [cm(nrm(v)) for v in cvals]
+        mark["colors"] = _map_colors(cvals, cm, nrm)
         return _Mappable(self, cm, nrm.vmin, nrm.vmax, norm=nrm)
 
     def bar(self, x, height, *, width: float = 0.8, bottom=0.0, color=None,
@@ -1309,23 +1383,25 @@ class Axes:
         ``"upper"`` (row 0 at top) or ``"lower"``. Returns a handle for
         :meth:`Figure.colorbar`.
         """
-        rows = [[float(v) for v in row] for row in data]
-        h = len(rows)
-        w = len(rows[0]) if rows else 0
+        # Flattened once here, row-major, and handed to Rust as a buffer; the
+        # draw path used to re-flatten a nested list per pixel on every save.
+        flat, h, w = _to_f64_grid(data)
         cm = _colormaps.get_cmap(cmap)
         # Resolve the norm to fill vmin/vmax from the data (log norms use only
         # positive samples) and to pick the Rust per-pixel transform code.
         nrm = _norms.get(norm, vmin, vmax)
-        nrm.autoscale([v for row in rows for v in row])
+        nrm.autoscale(flat)
         lo, hi = nrm.vmin, nrm.vmax
-        norm_code = "log" if isinstance(nrm, _norms.LogNorm) else "linear"
+        # A norm with no Rust transform (TwoSlope, Boundary) can't drive the
+        # per-pixel path; fall back to linear there rather than mis-mapping.
+        norm_code = getattr(nrm, "code", None) or "linear"
         if extent is None:
             extent = (0.0, float(w), 0.0, float(h))
         else:
             extent = (float(extent[0]), float(extent[1]), float(extent[2]), float(extent[3]))
         self._marks.append({
             "kind": "image",
-            "rows": rows,
+            "flat": flat,
             "w": w,
             "h": h,
             "cmap": cm,
@@ -2536,11 +2612,11 @@ class Axes:
         top, bot = sy(max(y0, y1)), sy(min(y0, y1))
         ry, rh = top, bot - top
 
-        rows = m["rows"]
-        # 256-entry RGBA LUT built once from the colormap; the per-pixel lookup
-        # (the hot loop) runs in Rust via add_colormapped_image.
+        # 256-entry RGBA LUT, cached per colormap; the per-pixel lookup (the hot
+        # loop) runs in Rust via add_colormapped_image, reading `flat` - already
+        # row-major and contiguous from ingest - straight out of its buffer.
         lut = _colormap_lut(m["cmap"])
-        flat = [v for row in rows for v in row]
+        flat = m["flat"]
         scene.add_colormapped_image(flat, w, h, m["vmin"], m["vmax"], lut,
                                     m["origin"] == "upper", rx, ry, rw, rh,
                                     m.get("norm_code", "linear"))

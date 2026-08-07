@@ -368,6 +368,73 @@ fn histogram(
     (edges, counts)
 }
 
+/// A normalization plus a 256-entry RGBA lookup table: the shared machinery
+/// behind both colormapped scatter and colormapped images.
+///
+/// Normalizing happens in *transformed* space so `norm="log"` matches `LogNorm`:
+/// `t = (scale(v) - scale(vmin)) / (scale(vmax) - scale(vmin))`.
+struct ColorMapper<'a> {
+    lut: &'a [u8],
+    norm: &'a str,
+    tmin: f64,
+    span: f64,
+}
+
+impl<'a> ColorMapper<'a> {
+    fn new(lut: &'a [u8], norm: &'a str, vmin: f64, vmax: f64) -> Self {
+        let tmin = apply_scale(norm, vmin);
+        let tmax = apply_scale(norm, vmax);
+        let span = if tmax > tmin { tmax - tmin } else { 1.0 };
+        Self {
+            lut,
+            norm,
+            tmin,
+            span,
+        }
+    }
+
+    /// RGBA for one value, or `None` when it falls outside the norm's domain
+    /// (a non-positive value on a log scale, or a NaN) and should be left clear.
+    #[inline]
+    fn lookup(&self, v: f64) -> Option<(u8, u8, u8, u8)> {
+        let t = apply_scale(self.norm, v);
+        if !t.is_finite() {
+            return None;
+        }
+        let frac = ((t - self.tmin) / self.span).clamp(0.0, 1.0);
+        let i = ((frac * 255.0).round() as usize) * 4;
+        Some((
+            self.lut[i],
+            self.lut[i + 1],
+            self.lut[i + 2],
+            self.lut[i + 3],
+        ))
+    }
+}
+
+/// Map `values` to per-point RGBA through `lut`, normalized between `vmin` and
+/// `vmax` under `norm`.
+///
+/// Replaces `[cmap(norm(v)) for v in values]`, which was two Python calls per
+/// point - so a colormapped scatter of 100k points made 200k interpreter
+/// round-trips before any drawing began. Values outside the norm's domain come
+/// back fully transparent, matching the image path.
+#[pyfunction]
+fn map_colors(
+    values: F64Data,
+    lut: Vec<u8>,
+    vmin: f64,
+    vmax: f64,
+    norm: &str,
+) -> Vec<(u8, u8, u8, u8)> {
+    let mapper = ColorMapper::new(&lut, norm, vmin, vmax);
+    values
+        .as_slice()
+        .iter()
+        .map(|&v| mapper.lookup(v).unwrap_or((0, 0, 0, 0)))
+        .collect()
+}
+
 /// Symlog parameters (matplotlib defaults: linthresh=1, linscale=1, base=10).
 /// `linscale_adj = linscale / (1 - 1/base)`; `log_base = ln(base)`.
 const SYMLOG_LINTHRESH: f64 = 1.0;
@@ -869,28 +936,21 @@ impl Scene {
     ) {
         let wi = width as usize;
         let hi = height as usize;
-        // Normalize in transformed space so `norm="log"` matches LogNorm:
-        // t = (scale(v) - scale(vmin)) / (scale(vmax) - scale(vmin)).
-        let tmin = apply_scale(norm, vmin);
-        let tmax = apply_scale(norm, vmax);
-        let span = if tmax > tmin { tmax - tmin } else { 1.0 };
+        let mapper = ColorMapper::new(&lut, norm, vmin, vmax);
         let mut buf = vec![0u8; wi * hi * 4];
         for row in 0..hi {
             let drow = if origin_upper { row } else { hi - 1 - row };
             let src = drow * wi;
             let dst = row * wi * 4;
             for col in 0..wi {
-                let v = apply_scale(norm, values[src + col]);
-                if !v.is_finite() {
-                    continue; // leave RGBA = 0 (transparent)
+                // Out-of-domain samples keep RGBA = 0, i.e. transparent.
+                if let Some((r, g, b, a)) = mapper.lookup(values[src + col]) {
+                    let o = dst + col * 4;
+                    buf[o] = r;
+                    buf[o + 1] = g;
+                    buf[o + 2] = b;
+                    buf[o + 3] = a;
                 }
-                let t = ((v - tmin) / span).clamp(0.0, 1.0);
-                let li = ((t * 255.0).round() as usize) * 4;
-                let o = dst + col * 4;
-                buf[o] = lut[li];
-                buf[o + 1] = lut[li + 1];
-                buf[o + 2] = lut[li + 2];
-                buf[o + 3] = lut[li + 3];
             }
         }
         self.push_node(Node::Image(ImageNode {
@@ -1599,6 +1659,7 @@ fn _pyplotrs_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(positive_range, m)?)?;
     m.add_function(wrap_pyfunction!(offset_range, m)?)?;
     m.add_function(wrap_pyfunction!(histogram, m)?)?;
+    m.add_function(wrap_pyfunction!(map_colors, m)?)?;
     m.add_function(wrap_pyfunction!(scenes_to_gif, m)?)?;
     m.add_function(wrap_pyfunction!(scenes_to_apng, m)?)?;
     m.add_function(wrap_pyfunction!(set_sans_serif, m)?)?;

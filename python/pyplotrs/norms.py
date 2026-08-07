@@ -12,8 +12,22 @@ from __future__ import annotations
 import math
 from typing import Sequence
 
+from array import array
+
 from . import _pyplotrs_core as _core
 from . import scales as _scales
+
+
+def _as_f64(values) -> "array":
+    """Coerce to a contiguous ``array("d")`` so the Rust reductions can read it
+    as a buffer. Mirrors ``figure._to_f64``; kept local to avoid a circular
+    import between this module and ``figure``."""
+    if type(values) is array and values.typecode == "d":
+        return values
+    try:
+        return array("d", values)
+    except (TypeError, ValueError):
+        return array("d", [float(v) for v in values])
 
 _Tick = tuple[float, str]
 
@@ -22,6 +36,12 @@ class Normalize:
     """Linear normalization between ``vmin`` and ``vmax`` (clamped to ``[0, 1]``).
     ``vmin``/``vmax`` left ``None`` are filled from the data by :meth:`autoscale`."""
 
+    #: Rust ``apply_scale`` selector, mirroring :attr:`pyplotrs.scales.Scale.code`.
+    #: When set, bulk colour mapping runs in Rust via ``_core.map_colors``;
+    #: ``None`` means this norm has no Rust equivalent and each value must go
+    #: through ``__call__`` in Python. Must name a branch ``apply_scale`` handles.
+    code: str | None = "linear"
+
     def __init__(self, vmin: float | None = None, vmax: float | None = None) -> None:
         self.vmin = None if vmin is None else float(vmin)
         self.vmax = None if vmax is None else float(vmax)
@@ -29,8 +49,7 @@ class Normalize:
     def autoscale(self, values: Sequence[float]) -> "Normalize":
         """Fill any unset ``vmin``/``vmax`` from the finite members of ``values``."""
         if self.vmin is None or self.vmax is None:
-            finite = [v for v in values if math.isfinite(v)]
-            lo, hi = (min(finite), max(finite)) if finite else (0.0, 1.0)
+            lo, hi = _core.data_range(_as_f64(values)) or (0.0, 1.0)
             if self.vmin is None:
                 self.vmin = lo
             if self.vmax is None:
@@ -50,10 +69,11 @@ class Normalize:
 class LogNorm(Normalize):
     """Logarithmic normalization (positive data). Colorbar ticks fall on decades."""
 
+    code = "log"
+
     def autoscale(self, values: Sequence[float]) -> "LogNorm":
         if self.vmin is None or self.vmax is None:
-            pos = [v for v in values if v > 0 and math.isfinite(v)]
-            lo, hi = (min(pos), max(pos)) if pos else (1.0, 10.0)
+            lo, hi = _core.positive_range(_as_f64(values)) or (1.0, 10.0)
             if self.vmin is None:
                 self.vmin = lo
             if self.vmax is None:
@@ -76,6 +96,8 @@ class LogNorm(Normalize):
 class TwoSlopeNorm(Normalize):
     """Diverging normalization: ``vcenter`` maps to ``0.5`` with independent
     slopes on each side (for asymmetric data around a meaningful midpoint)."""
+
+    code = None  # piecewise: no single Rust scale transform matches it
 
     def __init__(self, vcenter: float, vmin: float | None = None,
                  vmax: float | None = None) -> None:
@@ -100,6 +122,8 @@ class TwoSlopeNorm(Normalize):
 class BoundaryNorm(Normalize):
     """Map values into discrete bins defined by ``boundaries`` (monotone), each
     bin getting an evenly-spaced color position (for stepped colorbars)."""
+
+    code = None  # discrete binning: no Rust scale transform matches it
 
     def __init__(self, boundaries: Sequence[float]) -> None:
         bnd = [float(b) for b in boundaries]

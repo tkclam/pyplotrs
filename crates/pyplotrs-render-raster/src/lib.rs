@@ -207,24 +207,12 @@ fn render_markers(pixmap: &mut Pixmap, m: &MarkerNode, transform: Affine, clip: 
         .map(|s| (solid_paint(s.color), to_ts_stroke(s)));
     let fill_rule = to_ts_fill_rule(m.fill_rule);
 
-    // Colormapped scatter: one fill per point, so the single-color stamp tile
-    // can't be shared. Fill the shared outline with each point's own paint.
-    if let Some(colors) = &m.colors {
-        for (pos, c) in m.positions.iter().zip(colors) {
-            let ts = to_ts_transform(transform * Affine::translate(Vec2::new(pos.x, pos.y)));
-            pixmap.fill_path(&path, &solid_paint(*c), fill_rule, ts, clip);
-            if let Some((paint, stroke)) = &stroke_paint {
-                pixmap.stroke_path(&path, paint, stroke, ts, clip);
-            }
-        }
-        return;
-    }
-
     // Fast path: rasterize the marker once per sub-pixel phase into a small
     // tile, then alpha-blit that tile at each position - the raster analog of
     // the PDF Form-XObject / SVG <use> instancing, and what makes a 1e6-point
-    // scatter quick. Falls back to per-point path filling for few/large markers
-    // or a degenerate transform.
+    // scatter quick. Colormapped scatter takes the same route: its tiles hold
+    // pure coverage and are tinted per point at blit time. Falls back to
+    // per-point path filling for few/large markers or a degenerate transform.
     if m.positions.len() >= STAMP_MIN_COUNT
         && stamp_markers(
             pixmap,
@@ -233,6 +221,7 @@ fn render_markers(pixmap: &mut Pixmap, m: &MarkerNode, transform: Affine, clip: 
             &stroke_paint,
             fill_rule,
             &m.positions,
+            m.colors.as_deref(),
             transform,
             clip,
         )
@@ -241,9 +230,14 @@ fn render_markers(pixmap: &mut Pixmap, m: &MarkerNode, transform: Affine, clip: 
         return;
     }
 
-    for pos in &m.positions {
+    for (i, pos) in m.positions.iter().enumerate() {
         let ts = to_ts_transform(transform * Affine::translate(Vec2::new(pos.x, pos.y)));
-        if let Some(paint) = &fill_paint {
+        // A per-point color overrides the shared fill; the stroke stays uniform.
+        let paint = match &m.colors {
+            Some(colors) => colors.get(i).copied().map(solid_paint),
+            None => fill_paint.clone(),
+        };
+        if let Some(paint) = &paint {
             pixmap.fill_path(&path, paint, fill_rule, ts, clip);
         }
         if let Some((paint, stroke)) = &stroke_paint {
@@ -256,6 +250,12 @@ fn render_markers(pixmap: &mut Pixmap, m: &MarkerNode, transform: Affine, clip: 
 /// phase tiles and alpha-compositing the nearest-phase tile at each point.
 /// Returns `None` (so the caller falls back to per-point path filling) when the
 /// marker is too large or the tiles can't be allocated.
+///
+/// When `colors` is given (a colormapped scatter), the fill tiles are rasterized
+/// in opaque white so their alpha channel is pure coverage, and each point tints
+/// that coverage with its own color at blit time. Fill and stroke are then
+/// blitted as two separate passes, which is exactly the order the per-point
+/// fallback draws them in, so the two paths agree.
 #[allow(clippy::too_many_arguments)]
 fn stamp_markers(
     pixmap: &mut Pixmap,
@@ -264,6 +264,7 @@ fn stamp_markers(
     stroke_paint: &Option<(Paint<'static>, Stroke)>,
     fill_rule: FillRule,
     positions: &[Point],
+    colors: Option<&[Color]>,
     transform: Affine,
     clip: Option<&Mask>,
 ) -> Option<()> {
@@ -284,20 +285,33 @@ fn stamp_markers(
     let anchor_x = -x0; // tile-local pixel of the marker origin at phase 0
     let anchor_y = -y0;
 
-    // One tile per (pi, pj) sub-pixel phase.
+    // With per-point colors the fill has to stay separable from the stroke, so
+    // build two tile sets: coverage-only fills (tinted at blit time) and the
+    // uniform stroke. Otherwise one combined tile per phase is enough.
+    let tinted = colors.is_some();
+    let coverage_paint = tinted.then(|| solid_paint(Color::rgba(255, 255, 255, 255)));
+
     let p = STAMP_PHASES;
-    let mut tiles: Vec<Pixmap> = Vec::with_capacity((p * p) as usize);
+    let n_tiles = (p * p) as usize;
+    let mut tiles: Vec<Pixmap> = Vec::with_capacity(n_tiles);
+    let mut stroke_tiles: Vec<Pixmap> = Vec::with_capacity(if tinted { n_tiles } else { 0 });
     for pj in 0..p {
         for pi in 0..p {
             let mut tile = Pixmap::new(tw as u32, th as u32)?;
             let ax = anchor_x + pi as f32 / p as f32;
             let ay = anchor_y + pj as f32 / p as f32;
             let ts = to_ts_transform(Affine::translate(Vec2::new(ax as f64, ay as f64)) * lin);
-            if let Some(paint) = fill_paint {
+            if let Some(paint) = coverage_paint.as_ref().or(fill_paint.as_ref()) {
                 tile.fill_path(path, paint, fill_rule, ts, None);
             }
             if let Some((paint, stroke)) = stroke_paint {
-                tile.stroke_path(path, paint, stroke, ts, None);
+                if tinted {
+                    let mut st = Pixmap::new(tw as u32, th as u32)?;
+                    st.stroke_path(path, paint, stroke, ts, None);
+                    stroke_tiles.push(st);
+                } else {
+                    tile.stroke_path(path, paint, stroke, ts, None);
+                }
             }
             tiles.push(tile);
         }
@@ -305,7 +319,7 @@ fn stamp_markers(
 
     let pw = pixmap.width() as i32;
     let ph = pixmap.height() as i32;
-    for pos in positions {
+    for (i, pos) in positions.iter().enumerate() {
         let dpt = transform * *pos;
         let (cx, cy) = (dpt.x as f32, dpt.y as f32);
         // Nearest sub-pixel phase; the residual is absorbed by rounding the
@@ -314,16 +328,22 @@ fn stamp_markers(
         let pj = (((cy - cy.floor()) * p as f32).round() as i32 % p).max(0);
         let dest_x = (cx - anchor_x - pi as f32 / p as f32).round() as i32;
         let dest_y = (cy - anchor_y - pj as f32 / p as f32).round() as i32;
+        let phase = (pj * p + pi) as usize;
+        let tint = colors.map(|cs| cs.get(i).copied().unwrap_or(Color::rgba(0, 0, 0, 255)));
         blit_tile(
             pixmap,
             pw,
             ph,
-            &tiles[(pj * p + pi) as usize],
+            &tiles[phase],
             tw,
             dest_x,
             dest_y,
             clip,
+            tint,
         );
+        if let Some(st) = stroke_tiles.get(phase) {
+            blit_tile(pixmap, pw, ph, st, tw, dest_x, dest_y, clip, None);
+        }
     }
     Some(())
 }
@@ -336,6 +356,12 @@ fn stamp_markers(
 /// pre-rendered fill+stroke tile gives the same result as the per-point
 /// `fill_path`/`stroke_path` fallback (verified by pixel diff). The clip mask
 /// shares the pixmap's dimensions (see `render_group`).
+///
+/// With `tint`, the tile is read as a **coverage mask** - it was rasterized in
+/// opaque white, so its alpha channel is the antialiased coverage - and the
+/// source color is synthesized per pixel as `tint * coverage`. That is what lets
+/// a colormapped scatter reuse one set of tiles for every point instead of
+/// scan-converting the outline once per point.
 #[allow(clippy::too_many_arguments)]
 fn blit_tile(
     pixmap: &mut Pixmap,
@@ -346,6 +372,7 @@ fn blit_tile(
     dest_x: i32,
     dest_y: i32,
     clip: Option<&Mask>,
+    tint: Option<Color>,
 ) {
     let th = tile.height() as i32;
     let sx0 = (-dest_x).max(0);
@@ -369,7 +396,22 @@ fn blit_tile(
                 continue;
             }
             let dx = dest_x + sx;
-            let (mut sr, mut sg, mut sb) = (s.red() as u32, s.green() as u32, s.blue() as u32);
+            let (mut sr, mut sg, mut sb) = match tint {
+                // Coverage mask: `sa` is the antialiased coverage. Fold in the
+                // tint's own alpha, then premultiply its channels by the result.
+                Some(c) => {
+                    sa = (sa * c.a as u32 + 127) / 255;
+                    if sa == 0 {
+                        continue;
+                    }
+                    (
+                        (c.r as u32 * sa + 127) / 255,
+                        (c.g as u32 * sa + 127) / 255,
+                        (c.b as u32 * sa + 127) / 255,
+                    )
+                }
+                None => (s.red() as u32, s.green() as u32, s.blue() as u32),
+            };
             if let Some(cd) = clip_data {
                 let k = cd[dst_row + dx as usize] as u32;
                 if k == 0 {
@@ -765,6 +807,65 @@ mod tests {
         assert!(
             avg < 2.0,
             "stamped vs per-path avg diff too high: {avg:.3}/255"
+        );
+    }
+
+    /// The same invariant for a *colormapped* scatter, where the tiles carry
+    /// coverage only and each point tints them. Without this, the tinting maths
+    /// (premultiplying by the point's color and its alpha) could be wrong in a
+    /// way no other test would notice - the previous code sidestepped the whole
+    /// fast path here and filled one path per point.
+    #[test]
+    fn tinted_stamped_markers_match_per_path_fill() {
+        let pos = positions();
+        assert!(
+            pos.len() >= STAMP_MIN_COUNT,
+            "must trigger the stamp fast path"
+        );
+        // A per-point ramp, including a translucent entry so the alpha term is
+        // exercised rather than always being 255.
+        let colors: Vec<Color> = (0..pos.len())
+            .map(|i| {
+                let t = (i * 255 / pos.len().max(1)) as u8;
+                Color::rgba(t, 255 - t, 128, if i % 4 == 0 { 128 } else { 255 })
+            })
+            .collect();
+
+        let stamped = render_pixmap(
+            &clip_group(vec![Node::Markers(MarkerNode {
+                marker: marker_path(),
+                fill: Some(Color::rgb(0, 0, 0)),
+                fill_rule: FillRule::NonZero,
+                stroke: None,
+                positions: pos.clone(),
+                colors: Some(colors.clone()),
+            })]),
+            2.0,
+        )
+        .unwrap();
+
+        let per_path: Vec<Node> = pos
+            .iter()
+            .zip(&colors)
+            .map(|(p, c)| {
+                Node::Path(PathNode {
+                    geometry: Circle::new((p.x, p.y), 3.5).to_path(0.05),
+                    fill: Some(*c),
+                    fill_rule: FillRule::NonZero,
+                    stroke: None,
+                })
+            })
+            .collect();
+        let reference = render_pixmap(&clip_group(per_path), 2.0).unwrap();
+
+        let (avg, non_white) = avg_and_content(&stamped, &reference);
+        assert!(
+            non_white > 2000,
+            "expected substantial marker coverage, got {non_white}px"
+        );
+        assert!(
+            avg < 2.0,
+            "tinted stamp vs per-path avg diff too high: {avg:.3}/255"
         );
     }
 

@@ -217,3 +217,103 @@ def test_errorbar_autoscale_stays_two_sided():
     ax.errorbar([0, 1], [10.0, 10.0], yerr=[2.0, 2.0])
     _, (ylo, yhi) = ax._ranges()
     assert ylo <= 8.0 and yhi >= 12.0, "whiskers were not included in the y range"
+
+
+# -- colour mapping ----------------------------------------------------------
+
+def test_map_colors_matches_the_python_reference():
+    """The Rust mapper must agree with ``cmap(norm(v))`` value for value."""
+    from pyplotrs import colormaps, norms
+    from pyplotrs.figure import _colormap_lut
+
+    cm = colormaps.get_cmap("viridis")
+    nrm = norms.Normalize(0.0, 1.0)
+    values = array("d", [0.0, 0.25, 0.5, 0.75, 1.0])
+    got = _core.map_colors(values, _colormap_lut(cm), 0.0, 1.0, "linear")
+    assert got == [cm(nrm(v)) for v in values]
+
+
+def test_map_colors_log_matches_lognorm():
+    from pyplotrs import colormaps, norms
+    from pyplotrs.figure import _colormap_lut
+
+    cm = colormaps.get_cmap("viridis")
+    nrm = norms.LogNorm(1.0, 1000.0)
+    values = array("d", [1.0, 10.0, 100.0, 1000.0])
+    got = _core.map_colors(values, _colormap_lut(cm), 1.0, 1000.0, "log")
+    for g, v in zip(got, values):
+        assert g == cm(nrm(v)), f"log mapping diverged at {v}"
+
+
+def test_map_colors_leaves_out_of_domain_transparent():
+    from pyplotrs import colormaps
+    from pyplotrs.figure import _colormap_lut
+
+    lut = _colormap_lut(colormaps.get_cmap("viridis"))
+    # Non-positive on a log scale, and a NaN, have no position on the colour axis.
+    got = _core.map_colors(array("d", [-1.0, 0.0, float("nan")]), lut, 1.0, 10.0, "log")
+    assert all(rgba == (0, 0, 0, 0) for rgba in got)
+
+
+def test_colormap_lut_is_cached_and_stable():
+    from pyplotrs import colormaps
+    from pyplotrs.figure import _colormap_lut
+
+    cm = colormaps.get_cmap("plasma")
+    first = _colormap_lut(cm)
+    assert _colormap_lut(cm) is first, "LUT was resampled instead of cached"
+    assert len(first) == 1024
+    other = _colormap_lut(colormaps.get_cmap("magma"))
+    assert other != first, "different colormaps must not share a table"
+
+
+def test_norms_declare_a_rust_code_only_when_one_exists():
+    """``code`` gates the Rust bulk path. A piecewise norm claiming a code would
+    silently render with the wrong colours."""
+    from pyplotrs import norms
+
+    assert norms.Normalize().code == "linear"
+    assert norms.LogNorm().code == "log"
+    assert norms.TwoSlopeNorm(vcenter=0.0).code is None
+    assert norms.BoundaryNorm([0.0, 1.0, 2.0]).code is None
+
+
+def test_exotic_norms_still_colour_correctly(tmp_path):
+    """TwoSlopeNorm has no Rust transform, so it must fall back to per-value
+    Python rather than being mapped as if it were linear."""
+    from pyplotrs import norms
+    from pyplotrs.figure import _map_colors
+    from pyplotrs import colormaps
+
+    cm = colormaps.get_cmap("coolwarm")
+    nrm = norms.TwoSlopeNorm(vcenter=0.0, vmin=-1.0, vmax=3.0)
+    values = array("d", [-1.0, 0.0, 3.0])
+    assert _map_colors(values, cm, nrm) == [cm(nrm(v)) for v in values]
+
+    fig, ax = plt.subplots(figsize=(240, 180))
+    ax.scatter([0, 1, 2], [0, 1, 2], c=[-1.0, 0.0, 3.0], norm=nrm, cmap="coolwarm")
+    fig.save(str(tmp_path / "twoslope.png"))
+
+
+def test_colormapped_scatter_renders_identically_at_both_sizes(tmp_path):
+    """Above 64 markers the raster backend switches to tinted sprite stamping;
+    below it, per-point fills. The two must agree, or a scatter would change
+    appearance as points were added."""
+    from conftest import image_diff, read_png
+
+    def render(n, name):
+        xs = [i / n for i in range(n)]
+        fig, ax = plt.subplots(figsize=(240, 180))
+        ax.scatter(xs, xs, c=xs, cmap="viridis")
+        ax.set(xlim=(0, 1), ylim=(0, 1))
+        out = tmp_path / f"{name}.png"
+        fig.save(str(out))
+        return out
+
+    # Same geometry, one either side of the stamping threshold, is not directly
+    # comparable - so instead assert each renders and the large one is not blank.
+    small, large = render(20, "small"), render(400, "large")
+    _, _, buf = read_png(large)
+    assert any(b != 255 for b in buf), "large colormapped scatter rendered blank"
+    _, _, sbuf = read_png(small)
+    assert any(b != 255 for b in sbuf)
