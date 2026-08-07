@@ -953,17 +953,119 @@ class _Mappable:
         self.norm = norm  # None => linear; else a pyplotrs.norms.Normalize
 
 
-class Axes:
+class _AxesBase:
+    """State and behaviour every axes class shares.
+
+    ``Axes``, ``Axes3D`` and ``PolarAxes`` are separate coordinate systems, but
+    they are all "a theme, a colour cycle and a stack of labelled marks". That
+    much used to be written out three times - ``_next_color`` byte-identically,
+    ``legend`` differing only in its default position, and the legend-entry
+    normalization twice over - which is how the ``barh`` legend crash and the
+    hardcoded swatch size survived: a fix applied to one copy silently missed
+    the others.
+    """
+
+    #: Where this axes class puts a legend when the caller doesn't say. 2D can
+    #: search for a clear corner; 3D and polar fill their cell too densely for
+    #: that to mean much, so they pin a corner.
+    _LEGEND_DEFAULT_LOC = "best"
+
+    #: Attribute holding the mark stack legend entries are drawn from.
+    _MARKS_ATTR = "_marks"
+
+    def _init_common(self, theme) -> None:
+        self._theme: Theme = _theme.get(theme)
+        self._cidx = 0  # next palette index for auto-colored marks
+        self._legend: dict | None = None
+        self._title: str | None = None
+
+    @staticmethod
+    def _marker_diameter(markersize, size, default: float = 6.0) -> float:
+        """Marker size in **points of diameter**, the one unit pyplotrs uses.
+
+        matplotlib spells this two ways - ``scatter(s=...)`` is an *area* in
+        pt^2 while ``plot(markersize=...)`` is a *diameter* in pt - and pyplotrs
+        inherited both. ``markersize`` is now the single spelling everywhere;
+        ``size`` is still accepted on scatter, still means area, and is
+        converted here, so ported matplotlib code keeps drawing the right size
+        instead of silently getting 36 pt blobs.
+        """
+        if markersize is not None:
+            return float(markersize)
+        if size is not None:
+            return math.sqrt(float(size))
+        return default
+
+    def _mark_color(self, color, alpha: float = 1.0):
+        """The resolved colour for a mark, with ``alpha`` folded in.
+
+        Folding opacity into the colour here is what lets every mark take an
+        ``alpha`` without each draw branch having to know about it - the IR
+        carries RGBA throughout, so there is nothing else to plumb.
+        """
+        c = self._next_color(color)
+        return c if alpha >= 1.0 else _with_alpha(c, float(alpha))
+
+    def _next_color(self, color):
+        """Resolve ``color``, or take the next palette entry when it is ``None``.
+
+        Advancing the cycle is a side effect, so this must be called exactly once
+        per mark - at construction, not at draw time.
+        """
+        if color is None:
+            palette = self._theme.palette
+            c = palette[self._cidx % len(palette)]
+            self._cidx += 1
+            return c
+        return self._theme.resolve(color)
+
+    def legend(self, *, loc: str | None = None):
+        """Enable an auto-legend over this axes' labelled marks.
+
+        ``loc`` is ``best`` / ``upper right`` / ``upper left`` / ``lower right``
+        / ``lower left`` / ``upper center`` / ``lower center``; ``None`` uses
+        this axes class's default. ``best`` picks the corner that overlaps the
+        data least.
+        """
+        self._legend = {"loc": self._LEGEND_DEFAULT_LOC if loc is None else loc}
+        return self
+
+    def _legend_entries(self) -> list[dict]:
+        """The labelled marks to draw legend keys for.
+
+        3D and polar marks carry projection-specific fields, so they are
+        normalized here into the line/scatter shapes the shared glyph drawer
+        understands; marks with no single colour (a surface) are dropped.
+        :class:`Axes` overrides this to pass its marks through untouched, since
+        its glyph drawer has real branches for bar/hist/fill swatches that this
+        normalization would flatten into plain rules.
+        """
+        out: list[dict] = []
+        for m in getattr(self, self._MARKS_ATTR):
+            if not m.get("label"):
+                continue
+            if m["kind"] == "scatter":
+                out.append({"kind": "scatter", "label": m["label"], "color": m["color"],
+                            "markersize": m["markersize"], "marker": m.get("marker", "o"),
+                            "edgecolor": m.get("edgecolor"),
+                            "edgewidth": m.get("edgewidth", 1.0)})
+            else:
+                out.append({"kind": "line", "label": m["label"], "color": m["color"],
+                            "width": m.get("width", 1.5),
+                            "linestyle": m.get("linestyle", "solid"),
+                            "marker": m.get("marker"),
+                            "markersize": m.get("markersize", 5.0)})
+        return out
+
+
+class Axes(_AxesBase):
     """A single set of axes: a coordinate system plus a stack of marks."""
 
     def __init__(self, theme: Theme | None = None) -> None:
+        self._init_common(theme)
         self._marks: list[dict] = []
         self._annotations: list[dict] = []
-        self._cidx = 0  # next palette index for auto-colored marks
-        self._theme: Theme = _theme.get(theme)
-        self._legend: dict | None = None
         self._colorbar: dict | None = None
-        self._title: str | None = None
         self._xlabel: str | None = None
         self._ylabel: str | None = None
         # View limits, populated during layout; None => auto from data.
@@ -997,14 +1099,6 @@ class Axes:
         self._is_twin: bool = False  # a twin skips its own facecolor/grid
 
     # -- styling helpers ----------------------------------------------------
-
-    def _next_color(self, color):
-        if color is None:
-            palette = self._theme.palette
-            c = palette[self._cidx % len(palette)]
-            self._cidx += 1
-            return c
-        return self._theme.resolve(color)
 
     def _coords(self, values, axis: str) -> "array":
         """Coerce plot coordinates to a contiguous ``array("d")``.
@@ -1060,7 +1154,8 @@ class Axes:
 
     # -- public API: marks --------------------------------------------------
 
-    def line(self, xs, ys, *, label: str | None = None, color=None, width: float | None = None,
+    def line(self, xs, ys, *, label: str | None = None, color=None,
+             linewidth: float | None = None, alpha: float = 1.0,
              linestyle: str = "solid", marker: str | None = None,
              markersize: float = 5.0, simplify: bool = True) -> "Axes":
         """Plot a polyline through ``(xs, ys)``.
@@ -1080,8 +1175,8 @@ class Axes:
             "xs": self._coords(xs, "x"),
             "ys": self._coords(ys, "y"),
             "label": label,
-            "color": self._next_color(color),
-            "width": self._theme.line_width if width is None else float(width),
+            "color": self._mark_color(color, alpha),
+            "width": self._theme.line_width if linewidth is None else float(linewidth),
             "linestyle": linestyle,
             "marker": marker,
             "markersize": float(markersize),
@@ -1089,12 +1184,17 @@ class Axes:
         })
         return self
 
-    def scatter(self, xs, ys, *, label: str | None = None, color=None, size: float = 36.0,
+    def scatter(self, xs, ys, *, label: str | None = None, color=None,
+                markersize: float | None = None, alpha: float = 1.0,
                 marker: str = "o", edgecolor=None, edgewidth: float = 1.0,
+                size: float | None = None,
                 c=None, cmap="viridis", norm=None, vmin: float | None = None,
                 vmax: float | None = None):
-        """Scatter markers at ``(xs, ys)``. ``size`` is marker area in pt²
-        (so the drawn diameter is ``sqrt(size)``), matching matplotlib's ``s``.
+        """Scatter markers at ``(xs, ys)``.
+
+        ``markersize`` is the marker **diameter in points**, the same unit every
+        other mark uses. ``size`` is accepted for matplotlib compatibility and
+        means *area* in pt² (so ``size=36`` and ``markersize=6`` agree).
 
         Pass ``c`` (a per-point array) to color markers by value through ``cmap``
         and ``norm`` (``vmin``/``vmax`` set the range; ``norm="log"`` or a
@@ -1107,8 +1207,8 @@ class Axes:
             "xs": xs,
             "ys": ys,
             "label": label,
-            "color": self._next_color(color) if c is None else _BLACK,
-            "size": float(size),
+            "color": self._mark_color(color, alpha) if c is None else _BLACK,
+            "markersize": self._marker_diameter(markersize, size),
             "marker": marker,
             "edgecolor": None if edgecolor is None else self._theme.resolve(edgecolor),
             "edgewidth": float(edgewidth),
@@ -1126,7 +1226,7 @@ class Axes:
         return _Mappable(self, cm, nrm.vmin, nrm.vmax, norm=nrm)
 
     def bar(self, x, height, *, width: float = 0.8, bottom=0.0, color=None,
-            label: str | None = None, edgecolor=None) -> "Axes":
+            alpha: float = 1.0, label: str | None = None, edgecolor=None) -> "Axes":
         """Draw vertical bars of the given ``height`` at positions ``x``. ``x``
         may be strings (categories), which set a categorical x-axis."""
         xs = self._coords(x, "x")
@@ -1137,14 +1237,14 @@ class Axes:
             "heights": heights,
             "bottoms": _as_seq(bottom, len(xs)),
             "width": float(width),
-            "color": self._next_color(color),
+            "color": self._mark_color(color, alpha),
             "label": label,
             "edgecolor": None if edgecolor is None else self._theme.resolve(edgecolor),
         })
         return self
 
-    def hist(self, data, *, bins: int = 10, color=None, label: str | None = None,
-             range=None, density: bool = False) -> "Axes":
+    def hist(self, data, *, bins: int = 10, color=None, alpha: float = 1.0,
+             label: str | None = None, range=None, density: bool = False) -> "Axes":
         """Bin ``data`` into ``bins`` equal-width bins and draw the histogram.
 
         The binning loop runs in Rust (``_core.histogram``), matching what
@@ -1158,7 +1258,7 @@ class Axes:
             "kind": "hist",
             "edges": edges,
             "counts": counts,
-            "color": self._next_color(color),
+            "color": self._mark_color(color, alpha),
             "label": label,
         })
         return self
@@ -1197,22 +1297,25 @@ class Axes:
         return self
 
     def hlines(self, y, xmin, xmax, *, color=None, linewidth: float | None = None,
-               linestyle: str = "solid", label: str | None = None) -> "Axes":
+               alpha: float = 1.0, linestyle: str = "solid",
+               label: str | None = None) -> "Axes":
         """Horizontal line segments at each ``y``, spanning ``xmin`` to ``xmax``
         in **data** coordinates.
 
         Unlike :meth:`axhline`, which spans a fraction of the axes and is a
         guide, these are data and participate in autoscaling. Each argument may
         be a scalar or a sequence; scalars broadcast."""
-        return self._add_lines("h", y, xmin, xmax, color, linewidth, linestyle, label)
+        return self._add_lines("h", y, xmin, xmax, color, linewidth, linestyle, label, alpha)
 
     def vlines(self, x, ymin, ymax, *, color=None, linewidth: float | None = None,
-               linestyle: str = "solid", label: str | None = None) -> "Axes":
+               alpha: float = 1.0, linestyle: str = "solid",
+               label: str | None = None) -> "Axes":
         """Vertical line segments at each ``x``, spanning ``ymin`` to ``ymax`` in
         **data** coordinates (see :meth:`hlines`)."""
-        return self._add_lines("v", x, ymin, ymax, color, linewidth, linestyle, label)
+        return self._add_lines("v", x, ymin, ymax, color, linewidth, linestyle, label, alpha)
 
-    def _add_lines(self, orient, pos, lo, hi, color, linewidth, linestyle, label) -> "Axes":
+    def _add_lines(self, orient, pos, lo, hi, color, linewidth, linestyle, label,
+                   alpha=1.0) -> "Axes":
         """Shared body of :meth:`hlines` / :meth:`vlines`."""
         pos = _to_f64(pos if hasattr(pos, "__len__") else [pos])
         n = len(pos)
@@ -1220,14 +1323,15 @@ class Axes:
         hi = _to_f64(_as_seq(hi, n))
         self._marks.append({
             "kind": "lines", "orient": orient, "pos": pos, "lo": lo, "hi": hi,
-            "color": self._next_color(color),
+            "color": self._mark_color(color, alpha),
             "width": self._theme.line_width if linewidth is None else float(linewidth),
             "linestyle": linestyle, "label": label,
         })
         return self
 
     def errorbar(self, xs, ys, *, yerr=None, xerr=None, color=None, label: str | None = None,
-                 marker: str | None = "o", markersize: float = 5.0, width: float = 1.5,
+                 marker: str | None = "o", markersize: float = 5.0,
+                 linewidth: float = 1.5, alpha: float = 1.0,
                  capsize: float = 3.0, linestyle: str = "solid") -> "Axes":
         """Plot ``(xs, ys)`` with symmetric ``yerr``/``xerr`` error bars."""
         xs = [float(x) for x in xs]
@@ -1239,11 +1343,11 @@ class Axes:
             "ys": ys,
             "yerr": _as_seq(yerr, n) if yerr is not None else None,
             "xerr": _as_seq(xerr, n) if xerr is not None else None,
-            "color": self._next_color(color),
+            "color": self._mark_color(color, alpha),
             "label": label,
             "marker": marker,
             "markersize": float(markersize),
-            "width": float(width),
+            "width": float(linewidth),
             "capsize": float(capsize),
             "linestyle": linestyle,
         })
@@ -1261,14 +1365,14 @@ class Axes:
     # -- discrete family ----------------------------------------------------
 
     def barh(self, y, width, *, height: float = 0.8, left=0.0, color=None,
-             label: str | None = None, edgecolor=None) -> "Axes":
+             alpha: float = 1.0, label: str | None = None, edgecolor=None) -> "Axes":
         """Horizontal bars of the given ``width`` at vertical positions ``y``.
         ``y`` may be strings (categories), which set a categorical y-axis."""
         ys = self._coords(y, "y")
         self._marks.append({
             "kind": "barh", "ys": ys, "widths": [float(v) for v in width],
             "lefts": _as_seq(left, len(ys)), "height": float(height),
-            "color": self._next_color(color), "label": label,
+            "color": self._mark_color(color, alpha), "label": label,
             "edgecolor": None if edgecolor is None else self._theme.resolve(edgecolor),
         })
         return self
@@ -1400,20 +1504,22 @@ class Axes:
 
     # -- step / stair family ------------------------------------------------
 
-    def step(self, xs, ys, *, where: str = "pre", color=None, width: float | None = None,
+    def step(self, xs, ys, *, where: str = "pre", color=None,
+             linewidth: float | None = None, alpha: float = 1.0,
              linestyle: str = "solid", label: str | None = None) -> "Axes":
         """Step plot through ``(xs, ys)``; ``where`` is ``pre``/``post``/``mid``."""
         px, py = _step_points(list(_to_f64(xs)), list(_to_f64(ys)), where)
         self._marks.append({
             "kind": "line", "xs": _to_f64(px), "ys": _to_f64(py), "label": label,
-            "color": self._next_color(color),
-            "width": self._theme.line_width if width is None else float(width),
+            "color": self._mark_color(color, alpha),
+            "width": self._theme.line_width if linewidth is None else float(linewidth),
             "linestyle": linestyle, "marker": None, "markersize": 5.0, "simplify": False,
         })
         return self
 
-    def stairs(self, values, edges=None, *, color=None, width: float | None = None,
-               fill: bool = False, baseline: float = 0.0, label: str | None = None) -> "Axes":
+    def stairs(self, values, edges=None, *, color=None, linewidth: float | None = None,
+               alpha: float = 1.0, fill: bool = False, baseline: float = 0.0,
+               label: str | None = None) -> "Axes":
         """Step outline of ``values`` over bin ``edges`` (``len(values)+1`` edges;
         defaults to ``0..n``). ``fill=True`` fills down to ``baseline``."""
         values = _to_f64(values)
@@ -1435,19 +1541,20 @@ class Axes:
             py = array("d", [baseline]) + top + array("d", [baseline])
             self._marks.append({
                 "kind": "line", "xs": px, "ys": py, "label": label,
-                "color": self._next_color(color),
-                "width": self._theme.line_width if width is None else float(width),
+                "color": self._mark_color(color, alpha),
+                "width": self._theme.line_width if linewidth is None else float(linewidth),
                 "linestyle": "solid", "marker": None, "markersize": 5.0, "simplify": False,
             })
         return self
 
-    def stem(self, xs, ys, *, bottom: float = 0.0, color=None, marker: str = "o",
-             markersize: float = 5.0, label: str | None = None) -> "Axes":
+    def stem(self, xs, ys, *, bottom: float = 0.0, color=None, alpha: float = 1.0,
+             marker: str = "o", markersize: float = 5.0,
+             label: str | None = None) -> "Axes":
         """Stem plot: a vertical line from ``bottom`` to each ``(x, y)`` topped by
         a marker, with a baseline."""
         self._marks.append({
             "kind": "stem", "xs": self._coords(xs, "x"), "ys": self._coords(ys, "y"),
-            "bottom": float(bottom), "color": self._next_color(color),
+            "bottom": float(bottom), "color": self._mark_color(color, alpha),
             "marker": marker, "markersize": float(markersize), "label": label,
         })
         return self
@@ -1554,7 +1661,7 @@ class Axes:
         return _Mappable(self, cm, nrm.vmin, nrm.vmax)
 
     def contour(self, *args, levels=None, colors=None, cmap=None,
-                linewidths: float = 1.0) -> "Axes":
+                linewidth: float = 1.0) -> "Axes":
         """Contour *lines* of a 2D field: ``contour(Z)`` or ``contour(X, Y, Z)``.
         Marching squares runs in Rust; lines are colored per level from
         ``colors`` (a single color / list) or ``cmap`` (default palette C0)."""
@@ -1567,7 +1674,7 @@ class Axes:
         lcolors = self._level_colors(len(lvls), colors, cmap)
         self._marks.append({
             "kind": "contour", "segs": segs, "xcoords": xc, "ycoords": yc,
-            "colors": lcolors, "width": float(linewidths),
+            "colors": lcolors, "width": float(linewidth),
             "extent": (min(xc), max(xc), min(yc), max(yc)),
         })
         return self
@@ -1807,13 +1914,6 @@ class Axes:
         return bool(self._twinx or self._twiny or self._insets or self._secondary)
 
     # -- public API: chrome -------------------------------------------------
-
-    def legend(self, *, loc: str = "best") -> "Axes":
-        """Enable an auto-legend. ``loc`` is one of ``best`` / ``upper right`` /
-        ``upper left`` / ``lower right`` / ``lower left`` / ``upper center`` /
-        ``lower center``."""
-        self._legend = {"loc": loc}
-        return self
 
     # -- annotations --------------------------------------------------------
 
@@ -2641,11 +2741,11 @@ class Axes:
             if m.get("colors") is not None:
                 scene.add_markers_xform_colored(
                     m["xs"], m["ys"], ax, bx, ay, by, m["marker"],
-                    math.sqrt(m["size"]), m["colors"], m["edgecolor"],
+                    m["markersize"], m["colors"], m["edgecolor"],
                     m["edgewidth"], proj.xcode, proj.ycode)
             else:
                 scene.add_markers_xform(m["xs"], m["ys"], ax, bx, ay, by, m["marker"],
-                                        math.sqrt(m["size"]), m["color"], m["edgecolor"],
+                                        m["markersize"], m["color"], m["edgecolor"],
                                         m["edgewidth"], proj.xcode, proj.ycode)
         elif kind == "bar":
             hw = m["width"] / 2.0
@@ -2962,8 +3062,13 @@ class Axes:
 
     # -- legend -------------------------------------------------------------
 
+    def _legend_entries(self) -> list[dict]:
+        """Labelled 2D marks, passed through with their kind intact so the glyph
+        drawer can pick a swatch for bar/hist/fill and a rule for lines."""
+        return [m for m in self._marks if m.get("label")]
+
     def _draw_legend(self, scene, px: float, py: float, pw: float, ph: float) -> None:
-        entries = _legend_entries(self._marks)
+        entries = self._legend_entries()
         if not entries:
             return
 
@@ -2989,11 +3094,6 @@ class Axes:
 
 
 # -- legend helpers (shared by per-axes and figure-level legends) -----------
-
-def _legend_entries(marks) -> list[dict]:
-    """The labeled marks eligible for a legend, in insertion order."""
-    return [m for m in marks if m.get("label")]
-
 
 def _measure_legend(scene, entries, theme=None):
     """Size a legend box for ``entries``. Returns ``(box_w, box_h, metrics)``
@@ -3062,7 +3162,7 @@ def _draw_legend_glyph(scene, m: dict, x0: float, x1: float, cy: float,
             fill_color=fill, close=True,
         )
     elif kind == "scatter":
-        _draw_marker(scene, cx, cy, math.sqrt(m["size"]), m["marker"],
+        _draw_marker(scene, cx, cy, m["markersize"], m["marker"],
                      facecolor=color, edgecolor=m["edgecolor"], edgewidth=m["edgewidth"])
     elif kind == "errorbar":
         if _draws_line(m["linestyle"]):
@@ -3112,16 +3212,18 @@ def _grid_xyz(X, Y, Z):
     return gx, gy, gz, nr, nc
 
 
-class Axes3D:
+class Axes3D(_AxesBase):
     """A 3D axes. Marks (scatter/plot/surface) are projected to 2D paths by an
     orthographic camera and depth-sorted, then drawn through the normal IR."""
 
+    # A 3D cell is filled by the projection, so there is no reliably clear
+    # corner to search for; pin one instead.
+    _LEGEND_DEFAULT_LOC = "upper right"
+    _MARKS_ATTR = "_marks3"
+
     def __init__(self, theme: Theme | None = None) -> None:
+        self._init_common(theme)
         self._marks3: list[dict] = []
-        self._cidx = 0
-        self._theme: Theme = _theme.get(theme)
-        self._legend: dict | None = None
-        self._title: str | None = None
         self._xlabel: str | None = None
         self._ylabel: str | None = None
         self._zlabel: str | None = None
@@ -3131,33 +3233,30 @@ class Axes3D:
         self._elev = 30.0
         self._azim = -60.0
 
-    def _next_color(self, color):
-        if color is None:
-            palette = self._theme.palette
-            c = palette[self._cidx % len(palette)]
-            self._cidx += 1
-            return c
-        return self._theme.resolve(color)
-
     # -- public API ---------------------------------------------------------
 
-    def scatter(self, xs, ys, zs, *, label: str | None = None, color=None, size: float = 36.0,
-                marker: str = "o", edgecolor=None) -> "Axes3D":
-        """Scatter 3D points at ``(xs, ys, zs)``."""
+    def scatter(self, xs, ys, zs, *, label: str | None = None, color=None,
+                markersize: float | None = None, alpha: float = 1.0,
+                marker: str = "o", edgecolor=None, size: float | None = None) -> "Axes3D":
+        """Scatter 3D points at ``(xs, ys, zs)``.
+
+        ``markersize`` is a diameter in points; ``size`` is the matplotlib-style
+        area in pt² (see :meth:`Axes.scatter`)."""
         self._marks3.append({
             "kind": "scatter",
             "xs": [float(x) for x in xs],
             "ys": [float(y) for y in ys],
             "zs": [float(z) for z in zs],
             "label": label,
-            "color": self._next_color(color),
-            "size": float(size),
+            "color": self._mark_color(color, alpha),
+            "markersize": self._marker_diameter(markersize, size),
             "marker": marker,
             "edgecolor": None if edgecolor is None else self._theme.resolve(edgecolor),
         })
         return self
 
-    def plot(self, xs, ys, zs, *, label: str | None = None, color=None, width: float = 1.5,
+    def plot(self, xs, ys, zs, *, label: str | None = None, color=None,
+             linewidth: float = 1.5, alpha: float = 1.0,
              linestyle: str = "solid") -> "Axes3D":
         """Draw a 3D polyline through ``(xs, ys, zs)``."""
         self._marks3.append({
@@ -3167,7 +3266,7 @@ class Axes3D:
             "zs": [float(z) for z in zs],
             "label": label,
             "color": self._next_color(color),
-            "width": float(width),
+            "width": float(linewidth),
             "linestyle": linestyle,
         })
         return self
@@ -3205,7 +3304,7 @@ class Axes3D:
         })
         return self
 
-    def plot_wireframe(self, X, Y, Z, *, color=None, width: float = 0.8) -> "Axes3D":
+    def plot_wireframe(self, X, Y, Z, *, color=None, linewidth: float = 0.8) -> "Axes3D":
         """Draw the grid ``(X, Y, Z)`` as a wireframe (row + column lines)."""
         gx, gy, gz, nr, nc = _grid_xyz(X, Y, Z)
         self._marks3.append({
@@ -3213,12 +3312,12 @@ class Axes3D:
             "xflat": [v for row in gx for v in row],
             "yflat": [v for row in gy for v in row],
             "zflat": [v for row in gz for v in row],
-            "color": self._next_color(color), "width": float(width),
+            "color": self._next_color(color), "width": float(linewidth),
         })
         return self
 
     def contour3d(self, X, Y, Z, *, levels=None, cmap="viridis",
-                  width: float = 1.5) -> "Axes3D":
+                  linewidth: float = 1.5) -> "Axes3D":
         """Draw contour lines of the grid ``(X, Y, Z)`` at their z-heights
         (marching squares in Rust); each level colored from ``cmap``."""
         gx, gy, gz, nr, nc = _grid_xyz(X, Y, Z)
@@ -3231,7 +3330,7 @@ class Axes3D:
         colors = [cm((lv - lo) / span) for lv in lvls]
         self._marks3.append({
             "kind": "contour3d", "segs": segs, "gx": gx, "gy": gy, "levels": lvls,
-            "colors": colors, "width": float(width),
+            "colors": colors, "width": float(linewidth),
             "xflat": [v for row in gx for v in row],
             "yflat": [v for row in gy for v in row], "zflat": flat,
         })
@@ -3255,14 +3354,14 @@ class Axes3D:
         return self
 
     def quiver3d(self, x, y, z, u, v, w, *, length: float = 1.0, color=None,
-                 width: float = 1.5) -> "Axes3D":
+                 linewidth: float = 1.5) -> "Axes3D":
         """Draw 3D arrows ``(u, v, w)`` rooted at ``(x, y, z)``, scaled by
         ``length``."""
         self._marks3.append({
             "kind": "quiver3d", "xs": [float(v) for v in x], "ys": [float(v) for v in y],
             "zs": [float(v) for v in z], "us": [float(v) for v in u],
             "vs": [float(v) for v in v], "ws": [float(v) for v in w],
-            "length": float(length), "color": self._next_color(color), "width": float(width),
+            "length": float(length), "color": self._next_color(color), "width": float(linewidth),
         })
         # Autoscale should include arrow tips.
         self._marks3[-1]["xflat"] = [px + length * uu for px, uu in
@@ -3294,12 +3393,6 @@ class Axes3D:
     # matplotlib-style aliases.
     scatter3d = scatter
     plot3d = plot
-
-    def legend(self, *, loc: str = "upper right") -> "Axes3D":
-        """Enable an auto-legend for labelled line/scatter marks. ``loc`` is one
-        of ``upper right`` / ``upper left`` / ``lower right`` / ``lower left``."""
-        self._legend = {"loc": loc}
-        return self
 
     def set(self, *, title=None, xlabel=None, ylabel=None, zlabel=None,
             xlim=None, ylim=None, zlim=None, elev=None, azim=None) -> "Axes3D":
@@ -3557,7 +3650,7 @@ class Axes3D:
                     add_seg(base, tip, m["color"], m["width"])
                     add_point(tip, 3.0, "o", m["color"], None)
             elif k == "scatter":
-                d = math.sqrt(m["size"])
+                d = m["markersize"]
                 for x, y, z in zip(m["xs"], m["ys"], m["zs"]):
                     add_point(proj(x, y, z), d, m["marker"], m["color"], m["edgecolor"])
 
@@ -3607,7 +3700,7 @@ class Axes3D:
 
         # Auto-legend for labelled line/scatter marks, inset in the plot rect.
         if self._legend is not None:
-            entries = self._legend3_entries()
+            entries = self._legend_entries()
             if entries:
                 box_w, box_h, mt = _measure_legend(scene, entries, self._theme)
                 inset = 6.0
@@ -3620,25 +3713,6 @@ class Axes3D:
                 }
                 bx, by = corners.get(self._legend["loc"], corners["upper right"])
                 _draw_legend_box(scene, entries, bx, by, mt)
-
-    def _legend3_entries(self) -> list[dict]:
-        """Normalize labelled 3D marks into 2D-style legend entries so the shared
-        legend box/glyph code can draw them. Surfaces (no single colour) are
-        skipped."""
-        out: list[dict] = []
-        for m in self._marks3:
-            if not m.get("label"):
-                continue
-            if m["kind"] == "scatter":
-                out.append({"kind": "scatter", "label": m["label"], "color": m["color"],
-                            "size": m["size"], "marker": m.get("marker", "o"),
-                            "edgecolor": m.get("edgecolor"), "edgewidth": 1.0})
-            elif m["kind"] == "line":
-                out.append({"kind": "line", "label": m["label"], "color": m["color"],
-                            "width": m.get("width", 1.5),
-                            "linestyle": m.get("linestyle", "solid"),
-                            "marker": None, "markersize": 5.0})
-        return out
 
     def _draw_surface(self, scene, m: dict, proj) -> None:
         gx, gy, gz = m["gx"], m["gy"], m["gz"]
@@ -3690,7 +3764,7 @@ class Axes3D:
                     "pts": [nrm(x, y, z) for x, y, z in zip(m["xs"], m["ys"], m["zs"])],
                     "color": list(m["color"]),
                     "edgecolor": list(m["edgecolor"]) if m["edgecolor"] else None,
-                    "d": math.sqrt(m["size"]),
+                    "d": m["markersize"],
                     "marker": m["marker"],
                 })
             elif m["kind"] == "line":
@@ -3717,7 +3791,7 @@ class Axes3D:
 
         legend = None
         if self._legend is not None:
-            entries = self._legend3_entries()
+            entries = self._legend_entries()
             if entries:
                 legend = {
                     "loc": self._legend.get("loc", "upper right"),
@@ -3752,7 +3826,7 @@ def _theta_zero(loc) -> float:
         str(loc).upper(), 0.0)
 
 
-class PolarAxes:
+class PolarAxes(_AxesBase):
     """A polar axes: ``plot(theta, r)`` and ``scatter(theta, r)``.
 
     Angles are in **radians**, measured counter-clockwise from the positive
@@ -3762,12 +3836,12 @@ class PolarAxes:
     projection="polar")``.
     """
 
+    # A polar plot fills its cell; no corner search is meaningful.
+    _LEGEND_DEFAULT_LOC = "upper right"
+
     def __init__(self, theme: Theme | None = None) -> None:
+        self._init_common(theme)
         self._marks: list[dict] = []
-        self._cidx = 0
-        self._theme: Theme = _theme.get(theme)
-        self._legend: dict | None = None
-        self._title: str | None = None
         self._xlabel: str | None = None  # kept for _accessible_text() compatibility
         self._ylabel: str | None = None
         self._rmin = 0.0
@@ -3778,18 +3852,11 @@ class PolarAxes:
         self._theta_dir = 1  # +1 counter-clockwise (default), -1 clockwise
         self._rlabel_deg = 22.5  # angle (deg) along which radial labels sit
 
-    def _next_color(self, color):
-        if color is None:
-            palette = self._theme.palette
-            c = palette[self._cidx % len(palette)]
-            self._cidx += 1
-            return c
-        return self._theme.resolve(color)
-
     # -- public API ---------------------------------------------------------
 
     def plot(self, theta, r, *, label: str | None = None, color=None,
-             width: float | None = None, linestyle: str = "solid",
+             linewidth: float | None = None, alpha: float = 1.0,
+             linestyle: str = "solid",
              marker: str | None = None, markersize: float = 5.0) -> "PolarAxes":
         """Line through polar points ``(theta, r)`` (``theta`` in radians)."""
         self._marks.append({
@@ -3797,8 +3864,8 @@ class PolarAxes:
             "theta": [float(t) for t in theta],
             "r": [float(v) for v in r],
             "label": label,
-            "color": self._next_color(color),
-            "width": self._theme.line_width if width is None else float(width),
+            "color": self._mark_color(color, alpha),
+            "width": self._theme.line_width if linewidth is None else float(linewidth),
             "linestyle": linestyle,
             "marker": marker,
             "markersize": float(markersize),
@@ -3806,15 +3873,20 @@ class PolarAxes:
         return self
 
     def scatter(self, theta, r, *, label: str | None = None, color=None,
-                size: float = 36.0, marker: str = "o", edgecolor=None) -> "PolarAxes":
-        """Scatter polar points ``(theta, r)`` (``theta`` in radians)."""
+                markersize: float | None = None, alpha: float = 1.0,
+                marker: str = "o", edgecolor=None,
+                size: float | None = None) -> "PolarAxes":
+        """Scatter polar points ``(theta, r)`` (``theta`` in radians).
+
+        ``markersize`` is a diameter in points; ``size`` is the matplotlib-style
+        area in pt² (see :meth:`Axes.scatter`)."""
         self._marks.append({
             "kind": "scatter",
             "theta": [float(t) for t in theta],
             "r": [float(v) for v in r],
             "label": label,
-            "color": self._next_color(color),
-            "size": float(size),
+            "color": self._mark_color(color, alpha),
+            "markersize": self._marker_diameter(markersize, size),
             "marker": marker,
             "edgecolor": None if edgecolor is None else self._theme.resolve(edgecolor),
         })
@@ -3868,11 +3940,6 @@ class PolarAxes:
     def set_theta_direction(self, direction) -> "PolarAxes":
         return self.set(theta_direction=direction)
 
-    def legend(self, *, loc: str = "upper right") -> "PolarAxes":
-        """Draw a legend for labelled ``plot``/``scatter`` marks."""
-        self._legend = {"loc": loc}
-        return self
-
     # -- drawing contract (mirrors Axes / Axes3D) ---------------------------
 
     def _rlimits(self) -> tuple[float, float]:
@@ -3893,24 +3960,6 @@ class PolarAxes:
             a, d = _th(scene, self._title, self._theme.title_size)
             title_h = a + d + _TITLE_GAP
         return (title_h, 0.0, 0.0, 0.0, 0.0, 0.0), [], []
-
-    def _legend_entries(self) -> list[dict]:
-        """Normalize labelled polar marks into 2D-style legend entries so the
-        shared legend box/glyph code can draw them."""
-        out: list[dict] = []
-        for m in self._marks:
-            if not m.get("label"):
-                continue
-            if m["kind"] == "scatter":
-                out.append({"kind": "scatter", "label": m["label"], "color": m["color"],
-                            "size": m["size"], "marker": m.get("marker", "o"),
-                            "edgecolor": m.get("edgecolor"), "edgewidth": 1.0})
-            else:
-                out.append({"kind": "line", "label": m["label"], "color": m["color"],
-                            "width": m.get("width", 1.5),
-                            "linestyle": m.get("linestyle", "solid"),
-                            "marker": m.get("marker"), "markersize": m.get("markersize", 5.0)})
-        return out
 
     def _draw(self, scene, layout, xr, yr, xticks, yticks) -> None:
         t = self._theme
@@ -3980,7 +4029,7 @@ class PolarAxes:
                     for x, y in dev:
                         _draw_marker(scene, x, y, m["markersize"], m["marker"], m["color"])
             else:  # scatter
-                d = m["size"] ** 0.5
+                d = m["markersize"]
                 for x, y in dev:
                     _draw_marker(scene, x, y, d, m["marker"], m["color"],
                                  edgecolor=m["edgecolor"])
@@ -4100,12 +4149,16 @@ class Figure:
         return self
 
     def _figure_legend_entries(self) -> list[dict]:
-        """Labeled marks across all (2D) axes, de-duplicated by label so a
-        series shared between panels appears once in the figure legend."""
+        """Labelled marks across every axes, de-duplicated by label so a series
+        shared between panels appears once in the figure legend.
+
+        Routed through each axes' own ``_legend_entries``, so 3D and polar
+        panels contribute too - they used to be skipped because this read
+        ``_marks`` directly and 3D keeps its marks in ``_marks3``."""
         entries: list[dict] = []
         seen: set[str] = set()
         for ax in self.axes:
-            for m in _legend_entries(getattr(ax, "_marks", [])):
+            for m in ax._legend_entries():
                 if m["label"] not in seen:
                     seen.add(m["label"])
                     entries.append(m)

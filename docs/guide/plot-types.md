@@ -27,9 +27,12 @@ conventions:
 
 ## Scatter
 
-[`scatter`][pyplotrs.figure.Axes.scatter] places markers. `size` is the marker
-**area** in pt² (matching matplotlib's `s`), so the drawn diameter is
-`sqrt(size)`. Marker shapes: `o` `s` `^` `v` `D` (filled) and `+` `x` (stroked).
+[`scatter`][pyplotrs.figure.Axes.scatter] places markers. `markersize` is the
+marker **diameter in points** — the same unit `line(marker=..., markersize=...)`
+uses, so the same number means the same size everywhere. `size` is also accepted
+and means the **area** in pt², matching matplotlib's `s`, so `size=36` and
+`markersize=6` agree. Marker shapes: `o` `s` `^` `v` `D` (filled) and `+` `x`
+(stroked).
 
 ```python
 --8<-- "examples/scatter.py"

@@ -35,6 +35,23 @@ All notable changes to pyplotrs are documented here. The format is based on
 - Exact CC0 perceptually-uniform colormaps; custom `Colormap` support.
 - Cross-machine font embedding in every saved format.
 
+### Changed
+
+- **One name per concept.** A stroke width is `linewidth` on every method that
+  draws one; `width` now only ever means an extent in data units (a bar's
+  thickness, a rectangle's span). `line`, `errorbar`, `step`, `stairs`,
+  `Axes3D.plot`/`plot_wireframe`/`contour3d`/`quiver3d` and `PolarAxes.plot`
+  took `width` for a stroke and now take `linewidth`; `contour` took
+  `linewidths`.
+- **One unit per quantity.** Marker size is a **diameter in points**, spelled
+  `markersize`, on `line`, `errorbar` and now `scatter` too - previously
+  `scatter(size=)` was an *area* in pt². `size` is still accepted and still
+  means area, so ported matplotlib code keeps drawing the right size.
+- **`alpha` on every mark** (`line`, `scatter`, `bar`, `barh`, `hist`,
+  `errorbar`, `step`, `stairs`, `stem`, `hlines`, `vlines`), not just the three
+  that had it.
+- Figure legends now include 3D and polar panels, which were silently skipped.
+
 ### Fixed
 
 - Non-finite (`NaN`/`inf`) data no longer corrupts axis autoscaling; lines break
