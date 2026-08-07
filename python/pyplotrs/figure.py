@@ -604,6 +604,40 @@ def _bilerp(field: list[list[float]], xc: list[float], yc: list[float],
     return top + (bot - top) * ty
 
 
+def _bilinear_grid(grid: list[list[float]], row: float, col: float) -> float:
+    """Sample ``grid[row][col]`` at *fractional* indices by bilinear interpolation.
+
+    The Rust marching-squares kernel (``_core.contour_lines``) reports crossing
+    points in grid-index space - a point on the edge between columns 2 and 3 of
+    row 4 comes back as ``(2.4, 4.0)``. Mapping those back onto the caller's
+    ``X``/``Y`` coordinate grids is what this does.
+    """
+    nr = len(grid)
+    nc = len(grid[0]) if nr else 0
+    if nr == 0 or nc == 0:
+        return 0.0
+    r0 = min(max(int(row), 0), nr - 1)
+    c0 = min(max(int(col), 0), nc - 1)
+    r1 = min(r0 + 1, nr - 1)
+    c1 = min(c0 + 1, nc - 1)
+    tr = row - r0
+    tc = col - c0
+    top = grid[r0][c0] + (grid[r0][c1] - grid[r0][c0]) * tc
+    bot = grid[r1][c0] + (grid[r1][c1] - grid[r1][c0]) * tc
+    return top + (bot - top) * tr
+
+
+def _darker(color: tuple[int, int, int, int], factor: float = 0.65) -> tuple[int, int, int, int]:
+    """A darkened shade of ``color``, preserving alpha.
+
+    Used for the edges of 3D boxes (``bar3d``, ``voxels``), where an outline
+    derived from the fill reads as shading and keeps a solid full of adjacent
+    boxes legible without introducing a second theme colour.
+    """
+    r, g, b, a = color
+    return (int(r * factor), int(g * factor), int(b * factor), a)
+
+
 def _streamlines(xc, yc, u, v, density: float) -> list[list[tuple[float, float]]]:
     """Trace streamlines of the field ``(u, v)`` (RK4, forward + backward) from a
     seed lattice sized by ``density``."""
@@ -2183,7 +2217,8 @@ class Axes:
                 y1 = sy(c)
                 scene.add_path([(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
                                fill_color=m["color"], close=True,
-                               stroke_color=_WHITE, stroke_width=0.75)
+                               stroke_color=self._theme.separator_color,
+                               stroke_width=0.75)
         elif kind == "fill":
             top = [(sx(x), sy(a)) for x, a in zip(m["xs"], m["y1"])]
             bot = [(sx(x), sy(b)) for x, b in zip(reversed(m["xs"]), reversed(m["y2"]))]
@@ -2191,7 +2226,7 @@ class Axes:
             if len(poly) >= 3:
                 scene.add_path(poly, fill_color=_with_alpha(m["color"], m["alpha"]), close=True)
         elif kind == "errorbar":
-            self._draw_errorbar(scene, m, sx, sy)
+            self._draw_errorbar(scene, m, proj)
         elif kind == "image":
             self._draw_image(scene, m, sx, sy)
         elif kind == "barh":
@@ -2321,7 +2356,7 @@ class Axes:
                 a = a0 + (a1 - a0) * i / n
                 pts.append((sx(r * math.cos(a)), sy(r * math.sin(a))))
             scene.add_path(pts, fill_color=wd["color"], close=True,
-                           stroke_color=_WHITE, stroke_width=1.0)
+                           stroke_color=self._theme.separator_color, stroke_width=1.0)
         # Slice labels just outside each wedge, at its mid-angle. The pie sets
         # its view limits to +/-1.3r, so labels at 1.12r sit clear of the rim.
         lab_size = self._theme.tick_label_size
@@ -2357,12 +2392,25 @@ class Axes:
                                     m["origin"] == "upper", rx, ry, rw, rh,
                                     m.get("norm_code", "linear"))
 
-    def _draw_errorbar(self, scene, m: dict, sx, sy) -> None:
+    def _draw_errorbar(self, scene, m: dict, proj: "_Proj") -> None:
+        """Draw one errorbar mark.
+
+        Takes the whole :class:`_Proj` rather than bare ``sx``/``sy`` closures:
+        the connecting line and the markers go through the Rust fast paths,
+        which need the affine coefficients *and* the scale codes. Deriving the
+        coefficients here by sampling ``sx(0.0)``/``sx(1.0)`` (as this used to)
+        is only valid on a linear axis - under a log scale ``sx(0.0)`` is
+        ``-inf``, which poisoned the coefficients and made the line and markers
+        vanish, leaving bare whiskers.
+        """
+        sx, sy = proj.sx, proj.sy
         color, w, cap = m["color"], m["width"], m["capsize"]
-        ax, bx, ay, by = _xform_coeffs(sx, sy)
+        ax, bx, ay, by = proj.coeffs
+        xc, yc = proj.xcode, proj.ycode
         if _draws_line(m["linestyle"]) and len(m["xs"]) >= 2:
             scene.add_line_xform(m["xs"], m["ys"], ax, bx, ay, by, color, w,
-                                 _dash_for(m["linestyle"]), "round", "round")
+                                 _dash_for(m["linestyle"]), "round", "round",
+                                 True, 0.1, xc, yc)
         for i, (x, y) in enumerate(zip(m["xs"], m["ys"])):
             X, Y = sx(x), sy(y)
             if m["yerr"]:
@@ -2381,7 +2429,7 @@ class Axes:
                     scene.add_path([(xright, Y - cap), (xright, Y + cap)], stroke_color=color, stroke_width=w)
         if m["marker"]:
             scene.add_markers_xform(m["xs"], m["ys"], ax, bx, ay, by, m["marker"],
-                                    m["markersize"], color, None, 1.0)
+                                    m["markersize"], color, None, 1.0, xc, yc)
 
     # -- colorbar -----------------------------------------------------------
 
@@ -2524,18 +2572,27 @@ def _draw_legend_box(scene, entries, bx: float, by: float, mt: dict) -> None:
         gx0 = bx + pad
         gx1 = gx0 + mt["glyph_w"]
         gcy = y + mt["row_h"] / 2.0
-        _draw_legend_glyph(scene, m, gx0, gx1, gcy)
+        _draw_legend_glyph(scene, m, gx0, gx1, gcy, mt["size"])
         _text(scene, gx1 + mt["glyph_gap"], y + mt["ascent"], m["label"], mt["size"],
               mt["text_color"])
         y += mt["row_h"] + mt["row_gap"]
 
 
-def _draw_legend_glyph(scene, m: dict, x0: float, x1: float, cy: float) -> None:
+#: Legend kinds drawn as a filled swatch rather than a line or marker.
+_LEGEND_SWATCH_KINDS = ("bar", "barh", "hist", "fill")
+
+
+def _draw_legend_glyph(scene, m: dict, x0: float, x1: float, cy: float,
+                       size: float) -> None:
+    """Draw one legend key. ``size`` is the theme's legend type size, so the
+    swatch scales with the box the caller measured (they used to disagree: the
+    box was measured at ``theme.legend_size`` and the swatch drawn at a fixed
+    9 pt, which showed up under ``themes.presentation``)."""
     kind = m["kind"]
     color = m["color"]
     cx = (x0 + x1) / 2.0
-    if kind in ("bar", "hist", "fill"):
-        h = _LEGEND_SIZE * 0.85
+    if kind in _LEGEND_SWATCH_KINDS:
+        h = size * 0.85
         fill = _with_alpha(color, m["alpha"]) if kind == "fill" else color
         scene.add_path(
             [(x0 + 2.0, cy - h / 2.0), (x1 - 2.0, cy - h / 2.0),
@@ -2552,12 +2609,18 @@ def _draw_legend_glyph(scene, m: dict, x0: float, x1: float, cy: float) -> None:
         scene.add_path([(cx, cy - 3.0), (cx, cy + 3.0)], stroke_color=color, stroke_width=m["width"])
         if m["marker"]:
             _draw_marker(scene, cx, cy, m["markersize"], m["marker"], facecolor=color)
-    else:  # line
-        if _draws_line(m["linestyle"]):
+    else:  # line, and any future kind that carries a stroke
+        # ``.get`` rather than ``[]``: an unknown kind should degrade to a plain
+        # rule, never raise mid-render. ``barh`` used to land here and die on
+        # the missing "linestyle" key.
+        linestyle = m.get("linestyle", "solid")
+        if _draws_line(linestyle):
             scene.add_path([(x0 + 1.0, cy), (x1 - 1.0, cy)], stroke_color=color,
-                           stroke_width=m["width"], cap="round", dash=_dash_for(m["linestyle"]))
-        if m["marker"]:
-            _draw_marker(scene, cx, cy, m["markersize"], m["marker"], facecolor=color)
+                           stroke_width=m.get("width", 1.5), cap="round",
+                           dash=_dash_for(linestyle))
+        if m.get("marker"):
+            _draw_marker(scene, cx, cy, m.get("markersize", 5.0), m["marker"],
+                         facecolor=color)
 
 
 def _grid_xyz(X, Y, Z):
