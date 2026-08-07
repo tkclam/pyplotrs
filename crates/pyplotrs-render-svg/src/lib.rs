@@ -100,8 +100,7 @@ fn collect_fonts(nodes: &[Node], table: &mut FontTable, css: &mut String) {
                     let key = run.font.key();
                     if !table.iter().any(|(k, _)| *k == key) {
                         let name = format!("PyplotrsFont{}", table.len());
-                        let b64 =
-                            base64::engine::general_purpose::STANDARD.encode(&*run.font.data);
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&*run.font.data);
                         writeln!(
                             css,
                             "@font-face{{font-family:'{name}';src:url(data:font/ttf;base64,{b64}) format('truetype');}}"
@@ -210,7 +209,12 @@ impl SvgWriter<'_> {
         // editable shape (not flattened pixels).
         let id = format!("m{}", self.marker_counter);
         self.marker_counter += 1;
-        writeln!(self.defs, r#"<path id="{id}" d="{}"/>"#, path_data(&m.marker)).unwrap();
+        writeln!(
+            self.defs,
+            r#"<path id="{id}" d="{}"/>"#,
+            path_data(&m.marker)
+        )
+        .unwrap();
 
         // A wrapping <g> carries the shared paint; the <use> children inherit
         // it, so the fill/stroke is described once for the whole scatter.

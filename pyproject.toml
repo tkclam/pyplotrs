@@ -42,7 +42,18 @@ Issues = "https://github.com/tkclam/pyplotrs/issues"
 
 [project.optional-dependencies]
 # Documentation build: `mkdocs build` renders the site under docs/.
-docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
+# mkdocstrings renders the API pages from docstrings (mkdocs.yml declares the
+# plugin, so the build aborts without it); black formats the signatures it emits.
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.26",
+    "black>=24",
+]
+# Test suite: `pytest` from the repo root. The suite itself depends only on the
+# standard library (it decodes PNGs with `zlib`), matching pyplotrs' own
+# zero-runtime-dependency stance.
+test = ["pytest>=8"]
 # Benchmark-only: `benchmarks/benchmark.py` times pyplotrs head-to-head against matplotlib.
 # Not a runtime dependency of pyplotrs itself. Install with `pip install -e .[bench]`.
 bench = ["matplotlib>=3.8", "numpy>=1.24"]

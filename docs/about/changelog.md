@@ -16,7 +16,6 @@ All notable changes to pyplotrs are documented here. The format is based on
   user-derivable `Theme`.
 - LaTeX `$...$` math (MathJax-grade engine) that stays selectable text.
 - Text and callout-arrow annotations.
-- `pyplotrs.gg` declarative grammar-of-graphics layer with faceting.
 - Animation export to GIF and APNG.
 - Output to PDF (editable/selectable/taggable text), SVG, PNG (with DPI) and
   self-contained HTML.
@@ -29,3 +28,16 @@ All notable changes to pyplotrs are documented here. The format is based on
   into a gap at non-finite points and markers there are skipped, matching
   matplotlib.
 - `Figure.save` matches the file extension case-insensitively (`.PNG`, `.PDF`, …).
+- Float RGB colours in 0-1 (matplotlib's convention, e.g. `(0.2, 0.4, 0.6)`) are
+  scaled correctly instead of being truncated to black. Hex (`"#ff0000"`) and CSS
+  colour names (`"steelblue"`) are now accepted anywhere a colour is.
+- `barh(label=...)` followed by `legend()` no longer raises `KeyError`.
+- `errorbar` on a log/symlog/logit axis draws its connecting line and markers;
+  previously only the whiskers survived.
+- `bar3d`, `voxels` and `contour3d` no longer raise `NameError`.
+- Histogram bin separators and pie wedge edges follow the theme's plot
+  background instead of being hardcoded white.
+- Legend swatches are drawn at the theme's legend type size, matching the box
+  measured around them (visible under `themes.presentation`).
+- A degenerate figure size, or a raster too large to allocate, raises
+  `ValueError` instead of unwinding out of Rust as a `PanicException`.

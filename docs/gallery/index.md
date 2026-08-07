@@ -21,8 +21,6 @@ PNG into the current directory.)
 - [![subplots](images/subplots.png)](#subplots) **Subplots**
 - [![math](images/math_labels.png)](#latex-math) **LaTeX math**
 - [![annotations](images/annotations.png)](#annotations) **Annotations**
-- [![gg](images/gg_scatter.png)](#grammar-of-graphics) **Grammar of graphics**
-- [![facet](images/gg_facet.png)](#faceting) **Faceting**
 - [![anim](images/animation_wave.gif)](#animation) **Animation**
 
 </div>
@@ -170,26 +168,6 @@ PNG into the current directory.)
 
 ```python
 --8<-- "examples/annotations.py"
-```
-
----
-
-## Grammar of graphics
-
-### Grammar of graphics
-
-![gg](images/gg_scatter.png){ width="560" }
-
-```python
---8<-- "examples/gg_scatter.py"
-```
-
-### Faceting
-
-![facet](images/gg_facet.png){ width="640" }
-
-```python
---8<-- "examples/gg_facet.py"
 ```
 
 ---

@@ -82,8 +82,7 @@ mkdocs serve
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
-[MIT license](LICENSE-MIT) at your option.
+Licensed under the [MIT license](LICENSE).
 
 The bundled fonts (Liberation Sans, STIX Two Math) are under the SIL Open Font
 License 1.1 and the colormap data is CC0; see
