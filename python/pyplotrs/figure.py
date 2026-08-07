@@ -173,13 +173,6 @@ def _svg_to_html(svg: str, title: str, alt: str) -> str:
     )
 
 
-def _resolve_color(color) -> tuple[int, int, int, int]:
-    """Resolve a colour against the *default* palette (used where no theme is in
-    scope). Theme-aware sites use ``self._theme.resolve`` so ``"C0"`` follows the
-    active palette."""
-    return _theme.parse_color(color, _COLOR_CYCLE)
-
-
 def _with_alpha(color: tuple[int, int, int, int], alpha: float) -> tuple[int, int, int, int]:
     """Scale ``color``'s alpha channel by ``alpha`` in [0, 1]."""
     r, g, b, a = color
@@ -460,7 +453,7 @@ def _to_f64_grid(data) -> tuple["array", int, int]:
     return flat, h, max(w, 0)
 
 
-def _map_colors(values, cmap, norm) -> list[tuple[int, int, int, int]]:
+def _rgba_values(values, cmap, norm) -> list[tuple[int, int, int, int]]:
     """One RGBA per value, through ``norm`` then ``cmap``.
 
     Runs in Rust whenever the norm names a transform Rust knows
@@ -809,27 +802,6 @@ def _edges_from_centers(c: list[float]) -> list[float]:
     return edges
 
 
-def _bilerp(field: list[list[float]], xc: list[float], yc: list[float],
-            x: float, y: float) -> tuple[float, float] | None:
-    """Sample ``field`` (indexed ``[iy][ix]``, may be a 2-tuple of components)
-    at data point ``(x, y)`` by bilinear interpolation; ``None`` if out of range."""
-    nx, ny = len(xc), len(yc)
-    if x < xc[0] or x > xc[-1] or y < yc[0] or y > yc[-1]:
-        return None
-    # Locate the cell (uniform-ish assumption via search).
-    ix = min(max(int((x - xc[0]) / (xc[-1] - xc[0]) * (nx - 1)) if xc[-1] > xc[0] else 0, 0), nx - 2)
-    iy = min(max(int((y - yc[0]) / (yc[-1] - yc[0]) * (ny - 1)) if yc[-1] > yc[0] else 0, 0), ny - 2)
-    tx = (x - xc[ix]) / (xc[ix + 1] - xc[ix]) if xc[ix + 1] != xc[ix] else 0.0
-    ty = (y - yc[iy]) / (yc[iy + 1] - yc[iy]) if yc[iy + 1] != yc[iy] else 0.0
-    a = field[iy][ix]
-    b = field[iy][ix + 1]
-    c = field[iy + 1][ix]
-    d = field[iy + 1][ix + 1]
-    top = a + (b - a) * tx
-    bot = c + (d - c) * tx
-    return top + (bot - top) * ty
-
-
 def _bilinear_grid(grid: list[list[float]], row: float, col: float) -> float:
     """Sample ``grid[row][col]`` at *fractional* indices by bilinear interpolation.
 
@@ -862,57 +834,6 @@ def _darker(color: tuple[int, int, int, int], factor: float = 0.65) -> tuple[int
     """
     r, g, b, a = color
     return (int(r * factor), int(g * factor), int(b * factor), a)
-
-
-def _streamlines(xc, yc, u, v, density: float) -> list[list[tuple[float, float]]]:
-    """Trace streamlines of the field ``(u, v)`` (RK4, forward + backward) from a
-    seed lattice sized by ``density``."""
-    nseed = max(int(6 * density), 2)
-    xspan = xc[-1] - xc[0]
-    yspan = yc[-1] - yc[0]
-    step = 0.5 * min(xspan / (len(xc) - 1) if len(xc) > 1 else xspan,
-                     yspan / (len(yc) - 1) if len(yc) > 1 else yspan)
-    max_steps = 2 * (len(xc) + len(yc))
-
-    def sample(x, y):
-        su = _bilerp(u, xc, yc, x, y)
-        sv = _bilerp(v, xc, yc, x, y)
-        if su is None or sv is None:
-            return None
-        return su, sv
-
-    def integrate(x0, y0, sign):
-        pts = [(x0, y0)]
-        x, y = x0, y0
-        for _ in range(max_steps):
-            k1 = sample(x, y)
-            if k1 is None:
-                break
-            n1 = math.hypot(*k1) or 1.0
-            k1 = (sign * k1[0] / n1, sign * k1[1] / n1)
-            k2 = sample(x + 0.5 * step * k1[0], y + 0.5 * step * k1[1])
-            if k2 is None:
-                break
-            n2 = math.hypot(*k2) or 1.0
-            k2 = (sign * k2[0] / n2, sign * k2[1] / n2)
-            x += step * k2[0]
-            y += step * k2[1]
-            if x < xc[0] or x > xc[-1] or y < yc[0] or y > yc[-1]:
-                break
-            pts.append((x, y))
-        return pts
-
-    lines = []
-    for i in range(nseed):
-        for j in range(nseed):
-            sx0 = xc[0] + xspan * (i + 0.5) / nseed
-            sy0 = yc[0] + yspan * (j + 0.5) / nseed
-            fwd = integrate(sx0, sy0, 1.0)
-            bwd = integrate(sx0, sy0, -1.0)
-            pts = list(reversed(bwd)) + fwd[1:]
-            if len(pts) >= 2:
-                lines.append(pts)
-    return lines
 
 
 def _patch_bbox(p: dict) -> tuple[list[float], list[float]]:
@@ -1201,7 +1122,7 @@ class Axes:
         cvals = _to_f64(c)
         nrm = _norms.get(norm, vmin, vmax).autoscale(cvals)
         cm = _colormaps.get_cmap(cmap)
-        mark["colors"] = _map_colors(cvals, cm, nrm)
+        mark["colors"] = _rgba_values(cvals, cm, nrm)
         return _Mappable(self, cm, nrm.vmin, nrm.vmax, norm=nrm)
 
     def bar(self, x, height, *, width: float = 0.8, bottom=0.0, color=None,
@@ -1245,16 +1166,63 @@ class Axes:
     def fill_between(self, xs, y1, y2=0.0, *, color=None, alpha: float = 0.3,
                      label: str | None = None) -> "Axes":
         """Fill the band between ``y1`` and ``y2`` across ``xs``."""
-        xs = [float(x) for x in xs]
-        y1 = [float(y) for y in y1]
+        xs = self._coords(xs, "x")
         self._marks.append({
             "kind": "fill",
+            "orient": "y",
             "xs": xs,
-            "y1": y1,
-            "y2": _as_seq(y2, len(xs)),
+            "y1": _to_f64(y1),
+            "y2": _to_f64(_as_seq(y2, len(xs))),
             "color": self._next_color(color),
             "alpha": float(alpha),
             "label": label,
+        })
+        return self
+
+    def fill_betweenx(self, ys, x1, x2=0.0, *, color=None, alpha: float = 0.3,
+                      label: str | None = None) -> "Axes":
+        """Fill the band between ``x1`` and ``x2`` across ``ys`` - the transpose
+        of :meth:`fill_between`, for bands around a horizontal profile."""
+        ys = self._coords(ys, "y")
+        self._marks.append({
+            "kind": "fill",
+            "orient": "x",
+            "ys": ys,
+            "y1": _to_f64(x1),
+            "y2": _to_f64(_as_seq(x2, len(ys))),
+            "color": self._next_color(color),
+            "alpha": float(alpha),
+            "label": label,
+        })
+        return self
+
+    def hlines(self, y, xmin, xmax, *, color=None, linewidth: float | None = None,
+               linestyle: str = "solid", label: str | None = None) -> "Axes":
+        """Horizontal line segments at each ``y``, spanning ``xmin`` to ``xmax``
+        in **data** coordinates.
+
+        Unlike :meth:`axhline`, which spans a fraction of the axes and is a
+        guide, these are data and participate in autoscaling. Each argument may
+        be a scalar or a sequence; scalars broadcast."""
+        return self._add_lines("h", y, xmin, xmax, color, linewidth, linestyle, label)
+
+    def vlines(self, x, ymin, ymax, *, color=None, linewidth: float | None = None,
+               linestyle: str = "solid", label: str | None = None) -> "Axes":
+        """Vertical line segments at each ``x``, spanning ``ymin`` to ``ymax`` in
+        **data** coordinates (see :meth:`hlines`)."""
+        return self._add_lines("v", x, ymin, ymax, color, linewidth, linestyle, label)
+
+    def _add_lines(self, orient, pos, lo, hi, color, linewidth, linestyle, label) -> "Axes":
+        """Shared body of :meth:`hlines` / :meth:`vlines`."""
+        pos = _to_f64(pos if hasattr(pos, "__len__") else [pos])
+        n = len(pos)
+        lo = _to_f64(_as_seq(lo, n))
+        hi = _to_f64(_as_seq(hi, n))
+        self._marks.append({
+            "kind": "lines", "orient": orient, "pos": pos, "lo": lo, "hi": hi,
+            "color": self._next_color(color),
+            "width": self._theme.line_width if linewidth is None else float(linewidth),
+            "linestyle": linestyle, "label": label,
         })
         return self
 
@@ -1282,12 +1250,13 @@ class Axes:
         return self
 
     def _map_colors(self, values, cmap, norm, vmin, vmax):
-        """Precompute one RGBA per value plus a mappable (shared by the
-        per-element colored types: hexbin/pcolormesh)."""
-        vals = [float(v) for v in values]
+        """``(colormap, norm, rgba_per_value)`` for the per-element coloured
+        types (hexbin, pcolormesh). The mapping itself runs in Rust - see
+        :func:`_rgba_values`."""
+        vals = _to_f64(values)
         cm = _colormaps.get_cmap(cmap)
         nrm = _norms.get(norm, vmin, vmax).autoscale(vals)
-        return cm, nrm, [cm(nrm(v)) for v in vals]
+        return cm, nrm, _rgba_values(vals, cm, nrm)
 
     # -- discrete family ----------------------------------------------------
 
@@ -1428,6 +1397,212 @@ class Axes:
             "origin": origin,
         })
         return _Mappable(self, cm, lo, hi, norm=(nrm if norm_code != "linear" else None))
+
+    # -- step / stair family ------------------------------------------------
+
+    def step(self, xs, ys, *, where: str = "pre", color=None, width: float | None = None,
+             linestyle: str = "solid", label: str | None = None) -> "Axes":
+        """Step plot through ``(xs, ys)``; ``where`` is ``pre``/``post``/``mid``."""
+        px, py = _step_points(list(_to_f64(xs)), list(_to_f64(ys)), where)
+        self._marks.append({
+            "kind": "line", "xs": _to_f64(px), "ys": _to_f64(py), "label": label,
+            "color": self._next_color(color),
+            "width": self._theme.line_width if width is None else float(width),
+            "linestyle": linestyle, "marker": None, "markersize": 5.0, "simplify": False,
+        })
+        return self
+
+    def stairs(self, values, edges=None, *, color=None, width: float | None = None,
+               fill: bool = False, baseline: float = 0.0, label: str | None = None) -> "Axes":
+        """Step outline of ``values`` over bin ``edges`` (``len(values)+1`` edges;
+        defaults to ``0..n``). ``fill=True`` fills down to ``baseline``."""
+        values = _to_f64(values)
+        edges = (_to_f64(edges) if edges is not None
+                 else _to_f64(range(len(values) + 1)))
+        xs = array("d")
+        top = array("d")
+        for i, v in enumerate(values):
+            xs.extend((edges[i], edges[i + 1]))
+            top.extend((v, v))
+        if fill:
+            self._marks.append({
+                "kind": "fill", "xs": xs, "y1": top,
+                "y2": _to_f64(_as_seq(baseline, len(xs))),
+                "color": self._next_color(color), "alpha": 0.3, "label": label,
+            })
+        else:
+            px = array("d", [edges[0]]) + xs + array("d", [edges[-1]])
+            py = array("d", [baseline]) + top + array("d", [baseline])
+            self._marks.append({
+                "kind": "line", "xs": px, "ys": py, "label": label,
+                "color": self._next_color(color),
+                "width": self._theme.line_width if width is None else float(width),
+                "linestyle": "solid", "marker": None, "markersize": 5.0, "simplify": False,
+            })
+        return self
+
+    def stem(self, xs, ys, *, bottom: float = 0.0, color=None, marker: str = "o",
+             markersize: float = 5.0, label: str | None = None) -> "Axes":
+        """Stem plot: a vertical line from ``bottom`` to each ``(x, y)`` topped by
+        a marker, with a baseline."""
+        self._marks.append({
+            "kind": "stem", "xs": self._coords(xs, "x"), "ys": self._coords(ys, "y"),
+            "bottom": float(bottom), "color": self._next_color(color),
+            "marker": marker, "markersize": float(markersize), "label": label,
+        })
+        return self
+
+    def broken_barh(self, xranges, yrange, *, color=None, edgecolor=None,
+                    alpha: float = 1.0, label: str | None = None) -> "Axes":
+        """Horizontal bars from ``(xstart, width)`` pairs, all spanning the
+        vertical ``yrange = (ymin, height)`` (e.g. Gantt / interval plots)."""
+        self._marks.append({
+            "kind": "broken_barh",
+            "bars": [(float(x0), float(w)) for x0, w in xranges],
+            "y0": float(yrange[0]), "h": float(yrange[1]),
+            "color": self._next_color(color), "alpha": float(alpha),
+            "edgecolor": None if edgecolor is None else self._theme.resolve(edgecolor),
+            "label": label,
+        })
+        return self
+
+    def eventplot(self, positions, *, orientation: str = "horizontal",
+                  lineoffsets: float = 1.0, linelengths: float = 0.8,
+                  color=None, linewidth: float = 1.0) -> "Axes":
+        """Raster of event marks. ``positions`` is a 1D array or a list of rows;
+        each row is offset by ``lineoffsets`` and drawn ``linelengths`` long
+        (perpendicular to ``orientation``)."""
+        rows = positions if len(positions) and _is_2d(positions) else [positions]
+        rows = [_to_f64(r) for r in rows]
+        self._marks.append({
+            "kind": "eventplot", "rows": rows, "orientation": orientation,
+            "offset": float(lineoffsets), "length": float(linelengths),
+            "color": self._next_color(color), "width": float(linewidth),
+        })
+        return self
+
+    # -- 2D binning ---------------------------------------------------------
+
+    def hist2d(self, xs, ys, *, bins=10, range=None, cmap="viridis", norm=None,
+               vmin: float | None = None, vmax: float | None = None) -> "_Mappable":
+        """2D histogram of ``(xs, ys)`` rendered as a colormapped image. ``bins``
+        is an int or ``(nx, ny)``; the count grid is built in Rust."""
+        xs = _to_f64(xs)
+        ys = _to_f64(ys)
+        nx, ny = (bins, bins) if isinstance(bins, int) else (int(bins[0]), int(bins[1]))
+        if range is not None:
+            (xlo, xhi), (ylo, yhi) = range
+        else:
+            xlo, xhi = _core.data_range(xs) or (0.0, 1.0)
+            ylo, yhi = _core.data_range(ys) or (0.0, 1.0)
+        counts = _core.hist2d(xs, ys, nx, ny, xlo, xhi, ylo, yhi)
+        rows = [counts[iy * nx:(iy + 1) * nx] for iy in _irange(ny)]
+        return self.imshow(rows, cmap=cmap, norm=norm, vmin=vmin, vmax=vmax,
+                           extent=(xlo, xhi, ylo, yhi), origin="lower")
+
+    def hexbin(self, xs, ys, *, gridsize: int = 30, cmap="viridis", norm=None,
+               vmin: float | None = None, vmax: float | None = None) -> "_Mappable":
+        """Hexagonal binning of ``(xs, ys)`` colored by count (binning in Rust)."""
+        xs = _to_f64(xs)
+        ys = _to_f64(ys)
+        xlo, xhi = _core.data_range(xs) or (0.0, 1.0)
+        ylo, yhi = _core.data_range(ys) or (0.0, 1.0)
+        hexes = _core.hexbin(xs, ys, gridsize, xlo, xhi, ylo, yhi)
+        counts = _to_f64([c for _, _, c in hexes])
+        cm, nrm, colors = self._map_colors(counts, cmap, norm, vmin, vmax)
+        sx = (xhi - xlo) / max(gridsize, 1)
+        sy = sx  # data-space cell; hexagon offsets below tile the two grids
+        # Pointy-top hexagon offsets (width ~ sx, height ~ 1.33 sy).
+        offs = [(0.0, sy * 0.66), (sx / 2.0, sy * 0.33), (sx / 2.0, -sy * 0.33),
+                (0.0, -sy * 0.66), (-sx / 2.0, -sy * 0.33), (-sx / 2.0, sy * 0.33)]
+        self._marks.append({
+            "kind": "hexbin", "centers": [(cx, cy) for cx, cy, _ in hexes],
+            "colors": colors, "offsets": offs,
+        })
+        return _Mappable(self, cm, nrm.vmin, nrm.vmax,
+                         norm=(nrm if type(nrm) is not _norms.Normalize else None))
+
+    # -- field / grid -------------------------------------------------------
+
+    def pcolormesh(self, *args, cmap="viridis", norm=None, vmin: float | None = None,
+                   vmax: float | None = None) -> "_Mappable":
+        """Pseudocolor plot of a 2D grid: ``pcolormesh(C)`` or
+        ``pcolormesh(X, Y, C)``. Regular grids route to the fast Rust image path;
+        irregular grids draw one colored quad per cell."""
+        xc, yc, Z = _field_args(args)
+        h = len(Z)
+        w = len(Z[0]) if Z else 0
+        if _is_uniform(xc) and _is_uniform(yc):
+            # Cell-centered image: extent spans half a cell beyond edge centers.
+            dx = (xc[-1] - xc[0]) / (w - 1) if w > 1 else 1.0
+            dy = (yc[-1] - yc[0]) / (h - 1) if h > 1 else 1.0
+            extent = (xc[0] - dx / 2, xc[-1] + dx / 2, yc[0] - dy / 2, yc[-1] + dy / 2)
+            return self.imshow(Z, cmap=cmap, norm=norm, vmin=vmin, vmax=vmax,
+                               extent=extent, origin="lower")
+        cm, nrm, colors = self._map_colors(
+            [v for row in Z for v in row], cmap, norm, vmin, vmax)
+        # Cell edges from coordinate midpoints (irregular quad mesh).
+        xe = _edges_from_centers(xc)
+        ye = _edges_from_centers(yc)
+        quads = []
+        for iy in _irange(h):
+            for ix in _irange(w):
+                quads.append((xe[ix], xe[ix + 1], ye[iy], ye[iy + 1],
+                              colors[iy * w + ix]))
+        self._marks.append({"kind": "quadmesh", "quads": quads,
+                            "extent": (xe[0], xe[-1], ye[0], ye[-1])})
+        return _Mappable(self, cm, nrm.vmin, nrm.vmax)
+
+    def contour(self, *args, levels=None, colors=None, cmap=None,
+                linewidths: float = 1.0) -> "Axes":
+        """Contour *lines* of a 2D field: ``contour(Z)`` or ``contour(X, Y, Z)``.
+        Marching squares runs in Rust; lines are colored per level from
+        ``colors`` (a single color / list) or ``cmap`` (default palette C0)."""
+        xc, yc, Z = _field_args(args)
+        h = len(Z)
+        w = len(Z[0]) if Z else 0
+        flat = _to_f64([v for row in Z for v in row])
+        lvls = _auto_levels(list(flat), levels)
+        segs = _core.contour_lines(flat, w, h, lvls)
+        lcolors = self._level_colors(len(lvls), colors, cmap)
+        self._marks.append({
+            "kind": "contour", "segs": segs, "xcoords": xc, "ycoords": yc,
+            "colors": lcolors, "width": float(linewidths),
+            "extent": (min(xc), max(xc), min(yc), max(yc)),
+        })
+        return self
+
+    def contourf(self, *args, levels=None, cmap="viridis", norm=None,
+                 vmin: float | None = None, vmax: float | None = None,
+                 upsample: int = 6) -> "_Mappable":
+        """Filled contour bands of a 2D field. The field is bilinearly upsampled
+        and band-colored in Rust (a raster fill, like ``imshow``)."""
+        xc, yc, Z = _field_args(args)
+        h = len(Z)
+        w = len(Z[0]) if Z else 0
+        flat = _to_f64([v for row in Z for v in row])
+        # Filled bands must span the full data range (unlike contour *lines*,
+        # whose levels are interior), so the extrema aren't left transparent.
+        if levels is not None and not isinstance(levels, int):
+            edges = sorted(set(float(v) for v in levels))
+        else:
+            lo, hi = _core.data_range(flat) or (0.0, 1.0)
+            if hi <= lo:
+                hi = lo + 1.0
+            n = levels if isinstance(levels, int) else 9
+            edges = [lo + (hi - lo) * i / n for i in _irange(n + 1)]
+        nbands = len(edges) - 1
+        cm = _colormaps.get_cmap(cmap)
+        nrm = _norms.get(norm, edges[0], edges[-1])
+        nrm.vmin, nrm.vmax = edges[0], edges[-1]
+        band_lut = bytes(b for k in _irange(nbands)
+                         for b in cm(nrm(0.5 * (edges[k] + edges[k + 1]))))
+        img, uw, uh = _core.contourf_image(flat, w, h, edges, band_lut, upsample)
+        self._marks.append({
+            "kind": "contourf", "img": bytes(img), "uw": uw, "uh": uh,
+            "extent": (min(xc), max(xc), min(yc), max(yc)),
+        })
+        return _Mappable(self, cm, edges[0], edges[-1], norm=nrm)
 
     # -- public API: reference lines & patches ------------------------------
 
@@ -1780,9 +1955,20 @@ class Axes:
                 ys.add_array(m["counts"])
                 ys.add(0.0)
             elif k == "fill":
-                xs.add_array(m["xs"])
-                ys.add_array(m["y1"])
-                ys.add_array(m["y2"])
+                if m.get("orient", "y") == "x":
+                    # fill_betweenx: the band runs along y, bounded in x.
+                    ys.add_array(m["ys"])
+                    xs.add_array(m["y1"])
+                    xs.add_array(m["y2"])
+                else:
+                    xs.add_array(m["xs"])
+                    ys.add_array(m["y1"])
+                    ys.add_array(m["y2"])
+            elif k == "lines":
+                along, across = (ys, xs) if m["orient"] == "h" else (xs, ys)
+                along.add_array(m["pos"])
+                across.add_array(m["lo"])
+                across.add_array(m["hi"])
             elif k == "errorbar":
                 xs.add_array(m["xs"])
                 ys.add_array(m["ys"])
@@ -2480,11 +2666,27 @@ class Axes:
                                stroke_color=self._theme.separator_color,
                                stroke_width=0.75)
         elif kind == "fill":
-            top = [(sx(x), sy(a)) for x, a in zip(m["xs"], m["y1"])]
-            bot = [(sx(x), sy(b)) for x, b in zip(reversed(m["xs"]), reversed(m["y2"]))]
+            if m.get("orient", "y") == "x":
+                seq = m["ys"]
+                top = [(sx(a), sy(y)) for y, a in zip(seq, m["y1"])]
+                bot = [(sx(b), sy(y)) for y, b in zip(reversed(seq), reversed(m["y2"]))]
+            else:
+                seq = m["xs"]
+                top = [(sx(x), sy(a)) for x, a in zip(seq, m["y1"])]
+                bot = [(sx(x), sy(b)) for x, b in zip(reversed(seq), reversed(m["y2"]))]
             poly = top + bot
             if len(poly) >= 3:
                 scene.add_path(poly, fill_color=_with_alpha(m["color"], m["alpha"]), close=True)
+        elif kind == "lines":
+            dash = _dash_for(m["linestyle"])
+            horizontal = m["orient"] == "h"
+            for p, a, b in zip(m["pos"], m["lo"], m["hi"]):
+                if horizontal:
+                    pts = [(sx(a), sy(p)), (sx(b), sy(p))]
+                else:
+                    pts = [(sx(p), sy(a)), (sx(p), sy(b))]
+                scene.add_path(pts, stroke_color=m["color"], stroke_width=m["width"],
+                               dash=dash, cap="butt")
         elif kind == "errorbar":
             self._draw_errorbar(scene, m, proj)
         elif kind == "image":

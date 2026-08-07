@@ -282,13 +282,13 @@ def test_exotic_norms_still_colour_correctly(tmp_path):
     """TwoSlopeNorm has no Rust transform, so it must fall back to per-value
     Python rather than being mapped as if it were linear."""
     from pyplotrs import norms
-    from pyplotrs.figure import _map_colors
+    from pyplotrs.figure import _rgba_values
     from pyplotrs import colormaps
 
     cm = colormaps.get_cmap("coolwarm")
     nrm = norms.TwoSlopeNorm(vcenter=0.0, vmin=-1.0, vmax=3.0)
     values = array("d", [-1.0, 0.0, 3.0])
-    assert _map_colors(values, cm, nrm) == [cm(nrm(v)) for v in values]
+    assert _rgba_values(values, cm, nrm) == [cm(nrm(v)) for v in values]
 
     fig, ax = plt.subplots(figsize=(240, 180))
     ax.scatter([0, 1, 2], [0, 1, 2], c=[-1.0, 0.0, 3.0], norm=nrm, cmap="coolwarm")

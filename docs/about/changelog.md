@@ -23,6 +23,10 @@ All notable changes to pyplotrs are documented here. The format is based on
   `resolved_font_variants()` reports which face each selector resolved to.
   All four Liberation Sans faces are bundled, so emphasis works on a machine
   with no fonts installed.
+- More 2D plot types: `step`, `stairs`, `stem`, `broken_barh`, `eventplot`,
+  `hist2d`, `hexbin`, `pcolormesh`, `contour`, `contourf`.
+- `hlines` / `vlines` (data-coordinate segments that autoscale, unlike the
+  `axhline` / `axvline` guides) and `fill_betweenx`.
 - Animation export to GIF and APNG.
 - Output to PDF (editable/selectable/taggable text), SVG, PNG (with DPI) and
   self-contained HTML.

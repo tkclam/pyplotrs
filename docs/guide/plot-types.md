@@ -95,3 +95,30 @@ image and returns a handle you can pass to
 ```
 
 ![heatmap](../gallery/images/heatmap.png){ width="520" }
+
+## More plot types
+
+Beyond the marks above, `Axes` also has:
+
+| Method | What it draws |
+|---|---|
+| `step(xs, ys, where=...)` | Step plot; `where` is `"pre"`/`"post"`/`"mid"` |
+| `stairs(values, edges=None, fill=False)` | Step outline over bin edges |
+| `stem(xs, ys, bottom=0)` | Stems from a baseline, topped with markers |
+| `broken_barh(xranges, yrange)` | Interval / Gantt bars |
+| `eventplot(positions)` | Raster of event marks |
+| `hist2d(xs, ys, bins=...)` | 2D histogram as a colormapped image |
+| `hexbin(xs, ys, gridsize=...)` | Hexagonal binning coloured by count |
+| `pcolormesh(C)` or `pcolormesh(X, Y, C)` | Pseudocolour grid |
+| `contour(Z)` / `contourf(Z)` | Contour lines / filled bands |
+| `hlines(y, xmin, xmax)` / `vlines(x, ymin, ymax)` | Data-coordinate segments |
+| `fill_betweenx(ys, x1, x2)` | The transpose of `fill_between` |
+
+The binning, marching-squares and band-fill kernels all run in Rust. `hist2d`,
+`hexbin`, `pcolormesh` and `contourf` return a handle for
+[`Figure.colorbar`](../api/figure.md).
+
+!!! tip "`hlines` vs `axhline`"
+    `hlines` takes **data** coordinates and participates in autoscaling;
+    `axhline` spans a fraction of the axes and is a guide that never moves the
+    view. Reach for `axhline` to mark a threshold, `hlines` to plot data.
