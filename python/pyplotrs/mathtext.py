@@ -28,11 +28,21 @@ shaped as a single body-font run.
 from __future__ import annotations
 
 
-def measure(scene, s: str, size: float) -> tuple[float, float, float]:
-    """Return ``(width, ascent, depth)`` of ``s`` (math-aware), in points."""
-    return scene.measure_math(s, size)
+def measure(scene, s: str, size: float, font: str = "body") -> tuple[float, float, float]:
+    """Return ``(width, ascent, depth)`` of ``s`` (math-aware), in points.
+
+    ``font`` selects the upright body face - ``"body"``, ``"body-bold"``,
+    ``"body-italic"``, ``"body-bolditalic"``. It must match what :func:`draw`
+    will use, since the layout engine sizes its bands from this measurement.
+    """
+    return scene.measure_math(s, size, font)
 
 
-def draw(scene, x: float, baseline: float, s: str, size: float, color) -> None:
-    """Render ``s`` with its left edge at ``x`` and baseline at ``baseline``."""
-    scene.add_math(x, baseline, s, size, color)
+def draw(scene, x: float, baseline: float, s: str, size: float, color,
+         font: str = "body") -> None:
+    """Render ``s`` with its left edge at ``x`` and baseline at ``baseline``.
+
+    ``font`` selects the upright body face (see :func:`measure`). Math spans are
+    unaffected: their italics come from the math font's own alphanumeric blocks.
+    """
+    scene.add_math(x, baseline, s, size, color, font)

@@ -53,7 +53,8 @@ fig, ax = plt.subplots(theme=mine)
 Useful knobs include `palette`, `text_color`, `spine_color`, `spines` (which of
 `"left"/"right"/"top"/"bottom"` to draw), `spine_width`, the type-scale sizes
 (`tick_label_size`, `axis_label_size`, `title_size`, `suptitle_size`,
-`legend_size`), `line_width`, `grid` / `grid_color` / `grid_width`,
+`legend_size`), the chrome weights (`title_weight`, `suptitle_weight`,
+`axis_label_weight`), `line_width`, `grid` / `grid_color` / `grid_width`,
 `axes_facecolor`, and the legend colours. See the
 [Theme API](../api/themes.md) for the full list.
 
@@ -94,3 +95,35 @@ the 3D-HTML viewer), so a file saved on one machine looks identical when opened
 on another — the font choice only affects how that one rendering looks, never its
 portability. Arial and Helvetica are proprietary and are *never* bundled; they
 are only used when already installed on the machine.
+
+### Bold and italic
+
+Free text takes `weight` (`"normal"`/`"bold"`) and `style`
+(`"normal"`/`"italic"`), which select a **real face** of the family rather than
+synthetically slanting or smearing the regular one:
+
+```python
+ax.text(0.1, 0.9, "emphasis", weight="bold", style="italic")
+ax.annotate("callout", (1, 1), xytext=(1.2, 2), weight="bold")
+```
+
+The figure's own chrome is a theme choice, since bold panel titles are a
+document-wide decision rather than a per-call one:
+
+```python
+journal = plt.themes.nature.with_(title_weight="bold")
+fig, ax = plt.subplots(theme=journal)
+```
+
+Each face is embedded as its own subset, so a figure using all four carries four
+subsetted fonts and every one stays selectable, editable text.
+
+Font matching is approximate: a family with no italic face resolves to its
+regular one, so text stays legible but is not slanted. `resolved_font_variants()`
+reports what each face landed on — two selectors reporting the same PostScript
+name means the host has no distinct face for one of them.
+
+!!! note "Only the regular face is bundled"
+    pyplotrs ships Liberation Sans Regular, so bold and italic come from the
+    host's installed fonts. Desktop and CI machines essentially always have
+    them; a minimal container may not, and there text falls back to regular.

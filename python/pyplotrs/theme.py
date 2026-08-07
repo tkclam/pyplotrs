@@ -210,6 +210,14 @@ class Theme:
     suptitle_size: float = 13.0
     legend_size: float = 9.0
 
+    # Weight of the figure's chrome text: "normal" or "bold". Bold panel titles
+    # are near-universal in multi-panel journal figures, and are a theme choice
+    # rather than a per-call one - the same reason sizes live here. Free text
+    # (`Axes.text`, `Axes.annotate`) takes weight/style arguments of its own.
+    title_weight: str = "normal"
+    suptitle_weight: str = "normal"
+    axis_label_weight: str = "normal"
+
     line_width: float = 1.5  # default width of a `line` mark
 
     grid: bool = False

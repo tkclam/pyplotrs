@@ -16,6 +16,11 @@ All notable changes to pyplotrs are documented here. The format is based on
   user-derivable `Theme`.
 - LaTeX `$...$` math (MathJax-grade engine) that stays selectable text.
 - Text and callout-arrow annotations.
+- **Bold and italic text.** `Axes.text` / `Axes.annotate` take `weight` and
+  `style`; `Theme` gains `title_weight`, `suptitle_weight` and
+  `axis_label_weight`. Each selects a real face of the body family and is
+  embedded as its own subset, so emphasis stays selectable, editable text.
+  `resolved_font_variants()` reports which face each selector resolved to.
 - Animation export to GIF and APNG.
 - Output to PDF (editable/selectable/taggable text), SVG, PNG (with DPI) and
   self-contained HTML.

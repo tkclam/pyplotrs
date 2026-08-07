@@ -78,15 +78,16 @@ class _MathCapture:
         self._xf.pop()
         self._real.end_group()
 
-    def add_math(self, x, y, text, size, color=(0, 0, 0, 255)):
+    def add_math(self, x, y, text, size, color=(0, 0, 0, 255), font="body"):
         if "$" in text:
-            w, a, d = self._real.measure_math(text, size)
+            w, a, d = self._real.measure_math(text, size, font)
             self._sink.append({
                 "tex": text, "x": x, "baseline": y, "w": w, "a": a, "d": d,
                 "size": size, "color": tuple(color), "xf": self._xf[-1],
+                "font": font,
             })
             return  # suppress the baked glyphs; MathJax draws this run
-        self._real.add_math(x, y, text, size, color)
+        self._real.add_math(x, y, text, size, color, font)
 
 
 def _mathjax_bundle() -> str:

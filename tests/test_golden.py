@@ -94,8 +94,43 @@ def _log_case():
 CASES["log"] = _log_case
 
 
+def _emphasis_case():
+    """Bold chrome plus bold/italic free text - the Phase 4 font work. Pins that
+    emphasis renders *and* that the layout reserves the right bands for it."""
+    theme = plt.themes.default.with_(title_weight="bold", axis_label_weight="bold")
+    fig, ax = plt.subplots(figsize=(360, 260), theme=theme)
+    ax.line([0, 1, 2], [0, 1, 4], label="series")
+    ax.set(title="Bold title", xlabel="bold x label", ylabel="bold y label")
+    ax.text(0.1, 3.2, "bold", weight="bold")
+    ax.text(0.1, 2.6, "italic", style="italic")
+    ax.text(0.1, 2.0, "bold italic", weight="bold", style="italic")
+    ax.text(0.1, 1.4, "regular")
+    ax.legend()
+    return fig
+
+
+CASES["emphasis"] = _emphasis_case
+
+
+#: Goldens whose appearance depends on a font face the host may not have.
+#: Only the regular face is bundled with pyplotrs, so bold and italic are
+#: resolved from the system; a bare container (a manylinux wheel builder, say)
+#: has no bold Liberation Sans and would silently render these upright. That is
+#: a legitimate fallback, not a regression, so skip rather than fail.
+_NEEDS_REAL_BOLD = {"emphasis"}
+
+
+def _host_has_distinct_bold() -> bool:
+    from pyplotrs import _pyplotrs_core as _core
+
+    variants = dict(_core.resolved_font_variants())
+    return variants["body-bold"] != variants["body"]
+
+
 @pytest.mark.parametrize("name", sorted(CASES))
 def test_golden(name, tmp_path):
+    if name in _NEEDS_REAL_BOLD and not _host_has_distinct_bold():
+        pytest.skip("host has no distinct bold face; emphasis would render upright")
     fig = CASES[name]()
     out = tmp_path / f"{name}.png"
     fig.save(str(out))

@@ -34,20 +34,35 @@ from . import threed as _threed
 from .theme import Theme
 
 
-def _tw(scene, text, size) -> float:
+def _font(weight: str = "normal", style: str = "normal") -> str:
+    """The Rust face selector for a weight/slant pair.
+
+    ``"normal"``/``"bold"`` and ``"normal"``/``"italic"`` compose into
+    ``"body"``, ``"body-bold"``, ``"body-italic"``, ``"body-bolditalic"``.
+    Unknown values fall back to normal rather than raising: a typo should not
+    lose a whole figure at save time.
+    """
+    bold = str(weight).lower() in ("bold", "semibold", "heavy", "black")
+    italic = str(style).lower() in ("italic", "oblique")
+    if not bold and not italic:
+        return "body"
+    return "body-" + ("bold" if bold else "") + ("italic" if italic else "")
+
+
+def _tw(scene, text, size, font: str = "body") -> float:
     """Math-aware text width (drop-in for ``scene.measure_text``)."""
-    return _mathtext.measure(scene, text, size)[0]
+    return _mathtext.measure(scene, text, size, font)[0]
 
 
-def _th(scene, text, size) -> tuple[float, float]:
+def _th(scene, text, size, font: str = "body") -> tuple[float, float]:
     """Math-aware ``(ascent, depth)`` for a string at ``size``."""
-    _w, a, d = _mathtext.measure(scene, text, size)
+    _w, a, d = _mathtext.measure(scene, text, size, font)
     return a, d
 
 
-def _text(scene, x, baseline, text, size, color) -> None:
+def _text(scene, x, baseline, text, size, color, font: str = "body") -> None:
     """Math-aware text draw (drop-in for ``scene.add_text``)."""
-    _mathtext.draw(scene, x, baseline, text, size, color)
+    _mathtext.draw(scene, x, baseline, text, size, color, font)
 
 # Module-level alias so methods taking a ``range=`` keyword can still reach the
 # builtin without shadowing pain.
@@ -968,11 +983,12 @@ def _draw_marker(scene, cx: float, cy: float, d: float, shape: str,
 
 
 def _place_text(scene, dx: float, dy: float, s: str, size: float, color,
-                ha: str = "left", va: str = "baseline") -> None:
+                ha: str = "left", va: str = "baseline", font: str = "body") -> None:
     """Draw ``s`` (math-aware) anchored at device ``(dx, dy)`` with the given
-    horizontal/vertical alignment. Coordinates are y-down device points."""
-    tw = _tw(scene, s, size)
-    a, d = _th(scene, s, size)
+    horizontal/vertical alignment. Coordinates are y-down device points.
+    ``font`` must match between measuring and drawing or the anchor drifts."""
+    tw = _tw(scene, s, size, font)
+    a, d = _th(scene, s, size, font)
     if ha == "center":
         dx -= tw / 2.0
     elif ha == "right":
@@ -985,7 +1001,7 @@ def _place_text(scene, dx: float, dy: float, s: str, size: float, color,
         baseline = dy + (a - d) / 2.0
     else:  # baseline
         baseline = dy
-    _text(scene, dx, baseline, s, size, color)
+    _text(scene, dx, baseline, s, size, color, font)
 
 
 def _draw_arrow(scene, x0: float, y0: float, x1: float, y1: float, color,
@@ -1627,30 +1643,38 @@ class Axes:
     # -- annotations --------------------------------------------------------
 
     def text(self, x, y, s, *, color=None, fontsize: float | None = None,
+             weight: str = "normal", style: str = "normal",
              ha: str = "left", va: str = "baseline") -> "Axes":
         """Draw ``s`` at data coordinates ``(x, y)``.
 
         ``ha`` is ``left``/``center``/``right``; ``va`` is
         ``baseline``/``bottom``/``center``/``top``. ``s`` may contain ``$...$``
-        math. ``color`` defaults to the theme text colour."""
+        math. ``color`` defaults to the theme text colour. ``weight`` is
+        ``normal`` or ``bold`` and ``style`` is ``normal`` or ``italic``; both
+        select a real face of the body family, so the glyphs are genuinely bold
+        or italic rather than synthetically slanted."""
         self._annotations.append({
             "kind": "text", "x": float(x), "y": float(y), "s": str(s),
             "color": self._theme.text_color if color is None else self._theme.resolve(color),
-            "size": None if fontsize is None else float(fontsize), "ha": ha, "va": va,
+            "size": None if fontsize is None else float(fontsize),
+            "font": _font(weight, style), "ha": ha, "va": va,
         })
         return self
 
     def annotate(self, text, xy, *, xytext=None, color=None, fontsize: float | None = None,
+                 weight: str = "normal", style: str = "normal",
                  arrow: bool = True, ha: str = "left", va: str = "bottom") -> "Axes":
         """Annotate the data point ``xy`` with ``text`` placed at ``xytext``
         (defaults to ``xy``), optionally drawing a callout arrow from the text to
-        the point. All coordinates are in data space."""
+        the point. All coordinates are in data space. ``weight``/``style`` select
+        a bold and/or italic face (see :meth:`text`)."""
         xy = (float(xy[0]), float(xy[1]))
         self._annotations.append({
             "kind": "annotate", "s": str(text), "xy": xy,
             "xytext": xy if xytext is None else (float(xytext[0]), float(xytext[1])),
             "color": self._theme.text_color if color is None else self._theme.resolve(color),
             "size": None if fontsize is None else float(fontsize),
+            "font": _font(weight, style),
             "arrow": bool(arrow), "ha": ha, "va": va,
         })
         return self
@@ -1908,16 +1932,18 @@ class Axes:
         y_tick_w = _TICK_LENGTH + _TICK_LABEL_GAP + y_label_w
 
         title_h = 0.0
+        title_font = _font(t.title_weight)
+        label_font = _font(t.axis_label_weight)
         if self._title:
-            a, d = _th(scene, self._title, _TITLE_SIZE)
+            a, d = _th(scene, self._title, _TITLE_SIZE, title_font)
             title_h = a + d + _TITLE_GAP
         xlabel_h = 0.0
         if self._xlabel:
-            a, d = _th(scene, self._xlabel, _AXIS_LABEL_SIZE)
+            a, d = _th(scene, self._xlabel, _AXIS_LABEL_SIZE, label_font)
             xlabel_h = a + d + _AXIS_LABEL_GAP
         ylabel_w = 0.0
         if self._ylabel:
-            a, d = _th(scene, self._ylabel, _AXIS_LABEL_SIZE)
+            a, d = _th(scene, self._ylabel, _AXIS_LABEL_SIZE, label_font)
             ylabel_w = a + d + _AXIS_LABEL_GAP
 
         cbar_w = 0.0
@@ -2119,29 +2145,33 @@ class Axes:
                            stroke_color=_SPINE, stroke_width=sw)
 
         # Title, centered over the plot area.
+        title_font = _font(t.title_weight)
+        label_font = _font(t.axis_label_weight)
         if self._title:
-            a, _d = _th(scene, self._title, _TITLE_SIZE)
-            tw = _tw(scene, self._title, _TITLE_SIZE)
+            a, _d = _th(scene, self._title, _TITLE_SIZE, title_font)
+            tw = _tw(scene, self._title, _TITLE_SIZE, title_font)
             baseline = layout.title.y + a
-            _text(scene, px + (pw - tw) / 2.0, baseline, self._title, _TITLE_SIZE, _BLACK)
+            _text(scene, px + (pw - tw) / 2.0, baseline, self._title, _TITLE_SIZE,
+                  _BLACK, title_font)
 
         # X-axis label, centered over the plot area.
         if self._xlabel:
-            a, _d = _th(scene, self._xlabel, _AXIS_LABEL_SIZE)
-            tw = _tw(scene, self._xlabel, _AXIS_LABEL_SIZE)
+            a, _d = _th(scene, self._xlabel, _AXIS_LABEL_SIZE, label_font)
+            tw = _tw(scene, self._xlabel, _AXIS_LABEL_SIZE, label_font)
             baseline = layout.xlabel.y + a
-            _text(scene, px + (pw - tw) / 2.0, baseline, self._xlabel, _AXIS_LABEL_SIZE, _BLACK)
+            _text(scene, px + (pw - tw) / 2.0, baseline, self._xlabel, _AXIS_LABEL_SIZE,
+                  _BLACK, label_font)
 
         # Y-axis label, rotated 90deg CCW, centered on the plot area's height.
         if self._ylabel:
             a, d, _ = scene.font_vmetrics(_AXIS_LABEL_SIZE)
-            tw = _tw(scene, self._ylabel, _AXIS_LABEL_SIZE)
+            tw = _tw(scene, self._ylabel, _AXIS_LABEL_SIZE, label_font)
             band = layout.ylabel
             pivot_x = band.x + band.w / 2.0 - (d - a) / 2.0
             pivot_y = py + ph / 2.0
             # Affine = translate(pivot) * rotate(-90deg): (x,y) -> (y+px, -x+py).
             scene.begin_group(0.0, -1.0, 1.0, 0.0, pivot_x, pivot_y)
-            _text(scene, -tw / 2.0, 0.0, self._ylabel, _AXIS_LABEL_SIZE, _BLACK)
+            _text(scene, -tw / 2.0, 0.0, self._ylabel, _AXIS_LABEL_SIZE, _BLACK, label_font)
             scene.end_group()
 
         # Annotations (text + callout arrows), on top of the data.
@@ -2167,10 +2197,11 @@ class Axes:
                 if an["arrow"]:
                     _draw_arrow(scene, sx(tx), sy(ty), sx(hx), sy(hy),
                                 self._theme.spine_color, max(self._theme.spine_width, 1.0))
-                _place_text(scene, sx(tx), sy(ty), an["s"], size, color, an["ha"], an["va"])
+                _place_text(scene, sx(tx), sy(ty), an["s"], size, color,
+                            an["ha"], an["va"], an.get("font", "body"))
             else:  # plain text
                 _place_text(scene, sx(an["x"]), sy(an["y"]), an["s"], size, color,
-                            an["ha"], an["va"])
+                            an["ha"], an["va"], an.get("font", "body"))
 
     # -- twin / secondary / inset drawing -----------------------------------
 
@@ -3364,11 +3395,13 @@ class Axes3D:
             place((z_edge[0], z_edge[1], 0.0), self._zlabel, _AXIS_LABEL_SIZE, 30.0)
 
         # Title in its reserved band.
+        title_font = _font(t.title_weight)
+        label_font = _font(t.axis_label_weight)
         if self._title:
-            a, _d = _th(scene, self._title, _TITLE_SIZE)
-            tw = _tw(scene, self._title, _TITLE_SIZE)
+            a, _d = _th(scene, self._title, _TITLE_SIZE, title_font)
+            tw = _tw(scene, self._title, _TITLE_SIZE, title_font)
             _text(scene, plot.x + (plot.w - tw) / 2.0, layout.title.y + a, self._title,
-                           _TITLE_SIZE, _BLACK)
+                  _TITLE_SIZE, _BLACK, title_font)
 
         # Auto-legend for labelled line/scatter marks, inset in the plot rect.
         if self._legend is not None:
@@ -3906,8 +3939,9 @@ class Figure:
 
         _SUPTITLE_SIZE = self.theme.suptitle_size
         suptitle_h = 0.0
+        suptitle_font = _font(self.theme.suptitle_weight)
         if self.suptitle:
-            a, d = _th(scene, self.suptitle, _SUPTITLE_SIZE)
+            a, d = _th(scene, self.suptitle, _SUPTITLE_SIZE, suptitle_font)
             suptitle_h = a + d + _TITLE_GAP * 1.5
 
         # Figure-level legend: measure its box up front so the layout can reserve
@@ -3938,11 +3972,11 @@ class Figure:
                 ax._draw_extras(scene, axl, xr, yr)
 
         if self.suptitle:
-            a, _d = _th(scene, self.suptitle, _SUPTITLE_SIZE)
-            tw = _tw(scene, self.suptitle, _SUPTITLE_SIZE)
+            a, _d = _th(scene, self.suptitle, _SUPTITLE_SIZE, suptitle_font)
+            tw = _tw(scene, self.suptitle, _SUPTITLE_SIZE, suptitle_font)
             st = layout.suptitle
             _text(scene, st.x + (st.w - tw) / 2.0, st.y + a, self.suptitle,
-                           _SUPTITLE_SIZE, self.theme.text_color)
+                  _SUPTITLE_SIZE, self.theme.text_color, suptitle_font)
 
         if legend_mt is not None:
             lr = layout.legend

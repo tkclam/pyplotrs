@@ -9,6 +9,7 @@
 //!   figure layout (both in `pyplotrs-layout`) are the one source of truth,
 //!   shared by the Python API rather than reimplemented there.
 
+use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use fontdb::{Database, Family, Query, Stretch, Style, Weight};
@@ -45,12 +46,25 @@ fn font_db() -> &'static Database {
     })
 }
 
+/// One resolved font face: how to name it and the bytes to shape and embed.
+#[derive(Clone)]
+struct ResolvedFace {
+    /// Family as the font names itself (a Helvetica query may land on
+    /// "Nimbus Sans"). Identical across the four faces of a family.
+    family: String,
+    /// PostScript name, e.g. `ArialMT` vs `Arial-BoldMT`. This is what tells the
+    /// faces apart, and so whether a bold request actually found a bold face.
+    postscript: String,
+    data: FontData,
+}
+
 /// The bundled body font, used directly from `BUNDLED_SANS` (no host lookup).
-fn bundled_body() -> (String, FontData) {
-    (
-        "Liberation Sans".to_string(),
-        FontData::from_bytes(BUNDLED_SANS.to_vec(), 0),
-    )
+fn bundled_body() -> ResolvedFace {
+    ResolvedFace {
+        family: "Liberation Sans".to_string(),
+        postscript: "LiberationSans-Regular".to_string(),
+        data: FontData::from_bytes(BUNDLED_SANS.to_vec(), 0),
+    }
 }
 
 /// The default preferred sans-serif families: the host's Arial, then
@@ -70,35 +84,89 @@ fn default_sans_serif() -> Vec<String> {
 /// installed fonts; the bundled Liberation Sans is always the final fallback.
 static SANS_SERIF: Mutex<Option<Vec<String>>> = Mutex::new(None);
 
-/// Memoised resolution of the body font: the resolved family name plus its
-/// bytes. Cleared whenever the preferred families change.
-static BODY_CACHE: Mutex<Option<(String, FontData)>> = Mutex::new(None);
+/// One face of the body family. Text is drawn in exactly one of these four, so
+/// they are resolved and cached independently: a host may have Arial Regular and
+/// Arial Bold but no Arial Italic, and each should land on the best face for
+/// *that* combination rather than all sharing one lookup.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+struct FaceStyle {
+    bold: bool,
+    italic: bool,
+}
+
+impl FaceStyle {
+    /// Parse the selector the Python layer sends: `"body"`, `"body-bold"`,
+    /// `"body-italic"`, `"body-bolditalic"` (order-insensitive, so
+    /// `"body-italic-bold"` works too).
+    fn from_selector(kind: &str) -> Self {
+        Self {
+            bold: kind.contains("bold"),
+            italic: kind.contains("italic") || kind.contains("oblique"),
+        }
+    }
+
+    fn weight(self) -> Weight {
+        if self.bold {
+            Weight::BOLD
+        } else {
+            Weight::NORMAL
+        }
+    }
+
+    fn style(self) -> Style {
+        if self.italic {
+            Style::Italic
+        } else {
+            Style::Normal
+        }
+    }
+}
+
+/// Memoised resolution of each body face: the resolved family name plus its
+/// bytes, keyed by [`FaceStyle`]. Cleared whenever the preferred families change.
+static BODY_CACHE: Mutex<Option<HashMap<FaceStyle, ResolvedFace>>> = Mutex::new(None);
 
 /// Walk a preferred-family list against the host font database, returning the
 /// first family that exists (and the name it reports), or the bundled
 /// Liberation Sans if none match.
-fn resolve_from_host(families: &[String]) -> (String, FontData) {
+///
+/// `face` selects weight and slant. fontdb matches approximately, per the CSS
+/// font-matching rules, so a family with no bold face resolves to its regular
+/// one rather than failing - text stays legible, it just isn't emboldened.
+/// [`resolved_font_variants`] reports what each face actually landed on so that
+/// degradation is visible instead of silent.
+fn resolve_from_host(families: &[String], face: FaceStyle) -> ResolvedFace {
     let db = font_db();
     families
         .iter()
         .find_map(|fam| {
             let query = Query {
                 families: &[Family::Name(fam)],
-                weight: Weight::NORMAL,
+                weight: face.weight(),
                 stretch: Stretch::Normal,
-                style: Style::Normal,
+                style: face.style(),
             };
             let id = db.query(&query)?;
             let data = db.with_face_data(id, |bytes, index| {
                 FontData::from_bytes(bytes.to_vec(), index)
             })?;
+            let info = db.face(id);
             // Report the family as the font itself names it, not the query
             // string (e.g. a Helvetica query may resolve to "Nimbus Sans").
-            let name = db
-                .face(id)
+            let name = info
                 .and_then(|f| f.families.first().map(|(n, _)| n.clone()))
                 .unwrap_or_else(|| fam.clone());
-            Some((name, data))
+            // The PostScript name is what distinguishes the *faces* of one
+            // family (ArialMT vs Arial-BoldMT); the family name is identical
+            // across all four, so it cannot show whether bold actually resolved.
+            let postscript = info
+                .map(|f| f.post_script_name.clone())
+                .unwrap_or_else(|| name.clone());
+            Some(ResolvedFace {
+                family: name,
+                postscript,
+                data,
+            })
         })
         .unwrap_or_else(bundled_body)
 }
@@ -108,23 +176,25 @@ fn resolve_from_host(families: &[String]) -> (String, FontData) {
 /// the host's installed fonts, falling back to the bundled font when none
 /// match. The resolved font is embedded into saved figures, so the choice
 /// never affects how a saved file views on another machine.
-fn resolve_body() -> (String, FontData) {
-    if let Some(cached) = BODY_CACHE.lock().unwrap().clone() {
-        return cached;
+fn resolve_body(face: FaceStyle) -> ResolvedFace {
+    let mut guard = BODY_CACHE.lock().unwrap();
+    let cache = guard.get_or_insert_with(HashMap::new);
+    if let Some(hit) = cache.get(&face) {
+        return hit.clone();
     }
     let families = SANS_SERIF
         .lock()
         .unwrap()
         .clone()
         .unwrap_or_else(default_sans_serif);
-    let resolved = resolve_from_host(&families);
-    *BODY_CACHE.lock().unwrap() = Some(resolved.clone());
+    let resolved = resolve_from_host(&families, face);
+    cache.insert(face, resolved.clone());
     resolved
 }
 
-/// The resolved body font (see [`resolve_body`]).
+/// The resolved regular body font (see [`resolve_body`]).
 fn body_font() -> FontData {
-    resolve_body().1
+    resolve_body(FaceStyle::default()).data
 }
 
 /// The bundled math font (STIX Two Math, SIL OFL): full coverage of Greek,
@@ -144,7 +214,8 @@ fn math_font() -> &'static FontData {
 fn font_for_kind(kind: &str) -> FontData {
     match kind {
         "math" => math_font().clone(),
-        _ => body_font(),
+        "body" => body_font(),
+        other => resolve_body(FaceStyle::from_selector(other)).data,
     }
 }
 
@@ -985,9 +1056,20 @@ impl Scene {
     /// body-font run; `$...$` spans are typeset by `pyplotrs-math` using the
     /// math font's OpenType MATH table (real editable glyphs + vector rules),
     /// then appended to the current group/scene.
-    #[pyo3(signature = (x, y, text, size, color=(0, 0, 0, 255)))]
-    fn add_math(&mut self, x: f64, y: f64, text: &str, size: f64, color: (u8, u8, u8, u8)) {
-        let body = body_font();
+    #[pyo3(signature = (x, y, text, size, color=(0, 0, 0, 255), font="body"))]
+    fn add_math(
+        &mut self,
+        x: f64,
+        y: f64,
+        text: &str,
+        size: f64,
+        color: (u8, u8, u8, u8),
+        font: &str,
+    ) {
+        // `font` selects the *upright body* face used for non-math runs and for
+        // \text{...} spans. Math italics come from the math font's alphanumeric
+        // blocks and are unaffected by it.
+        let body = font_for_kind(font);
         let (nodes, _m) = pyplotrs_math::render(
             math_font(),
             &body,
@@ -1003,9 +1085,11 @@ impl Scene {
     }
 
     /// Measure a math/text string: `(width, ascent, depth)` in points.
-    #[pyo3(signature = (text, size))]
-    fn measure_math(&self, text: &str, size: f64) -> (f64, f64, f64) {
-        let body = body_font();
+    #[pyo3(signature = (text, size, font="body"))]
+    fn measure_math(&self, text: &str, size: f64, font: &str) -> (f64, f64, f64) {
+        // Must use the same face `add_math` will draw with, or the layout
+        // solver reserves the wrong band and bold labels clip or float.
+        let body = font_for_kind(font);
         let (w, a, d) = pyplotrs_math::measure(math_font(), &body, text, size as f32);
         (w as f64, a as f64, d as f64)
     }
@@ -1348,7 +1432,46 @@ fn get_sans_serif() -> Vec<String> {
 /// confirming which physical font a figure was rendered with.
 #[pyfunction]
 fn resolved_font_name() -> String {
-    resolve_body().0
+    resolve_body(FaceStyle::default()).family
+}
+
+/// What each of the four body faces resolves to on this host, as
+/// `[(selector, family_name), ...]` for `body`, `body-bold`, `body-italic`,
+/// `body-bolditalic`.
+///
+/// Font matching is approximate: a family with no italic face resolves to its
+/// regular one, so asking for italic can quietly give you upright text. This
+/// makes that visible - if two selectors report the same family, the host has no
+/// distinct face for one of them.
+#[pyfunction]
+fn resolved_font_variants() -> Vec<(String, String)> {
+    [
+        ("body", FaceStyle::default()),
+        (
+            "body-bold",
+            FaceStyle {
+                bold: true,
+                italic: false,
+            },
+        ),
+        (
+            "body-italic",
+            FaceStyle {
+                bold: false,
+                italic: true,
+            },
+        ),
+        (
+            "body-bolditalic",
+            FaceStyle {
+                bold: true,
+                italic: true,
+            },
+        ),
+    ]
+    .into_iter()
+    .map(|(name, face)| (name.to_string(), resolve_body(face).postscript))
+    .collect()
 }
 
 /// The raw bytes of the currently resolved body font. Lets the HTML backends
@@ -1356,7 +1479,7 @@ fn resolved_font_name() -> String {
 /// (canvas-drawn) text views identically across machines.
 #[pyfunction]
 fn body_font_bytes(py: Python<'_>) -> Bound<'_, PyBytes> {
-    PyBytes::new(py, &resolve_body().1.data)
+    PyBytes::new(py, &resolve_body(FaceStyle::default()).data.data)
 }
 
 // ---------------------------------------------------------------------------
@@ -1665,6 +1788,7 @@ fn _pyplotrs_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_sans_serif, m)?)?;
     m.add_function(wrap_pyfunction!(get_sans_serif, m)?)?;
     m.add_function(wrap_pyfunction!(resolved_font_name, m)?)?;
+    m.add_function(wrap_pyfunction!(resolved_font_variants, m)?)?;
     m.add_function(wrap_pyfunction!(body_font_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(contour_lines, m)?)?;
     m.add_function(wrap_pyfunction!(contourf_image, m)?)?;
