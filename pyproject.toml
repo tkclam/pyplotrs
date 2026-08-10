@@ -65,6 +65,18 @@ bench = ["matplotlib>=3.8", "numpy>=1.24"]
 # matplotlib is used only as a side-by-side visual reference in the verify notebooks.
 dev = ["ipykernel>=6", "matplotlib>=3.8"]
 
+[tool.pytest.ini_options]
+markers = [
+    # `test_sdist_resolves` builds a source distribution and resolves it with
+    # cargo. That needs maturin and a populated cargo registry and takes far
+    # longer than the rest of the suite combined, so it is deselected by
+    # default and CI runs it as its own step. The static half of the same
+    # check (`test_patch_paths_are_included_in_sdist`) is unmarked and always
+    # runs.
+    "packaging: builds and resolves the sdist; slow, needs maturin + cargo",
+]
+addopts = "-m 'not packaging'"
+
 [tool.maturin]
 module-name = "pyplotrs._pyplotrs_core"
 manifest-path = "crates/pyplotrs-py/Cargo.toml"
@@ -74,7 +86,14 @@ python-source = "python"
 # The vendored MathJax bundle ships as package data (inlined into math `.html`
 # output); it lives under the python-source tree so the wheel picks it up, and
 # is listed here so the source distribution carries it too.
+# `vendor/krilla-0.8.2` is a path target of `[patch.crates-io]` in the root
+# Cargo.toml, so cargo cannot even resolve the dependency graph without it.
+# maturin does not follow patch paths when collecting an sdist, so omitting
+# this makes the sdist look fine and fail at `cargo metadata` - which is how it
+# shipped broken. `tests/test_packaging.py` builds a wheel from the sdist to
+# keep that from recurring.
 include = [
     { path = "assets/fonts/*.ttf", format = "sdist" },
     { path = "python/pyplotrs/_vendor/*.js", format = "sdist" },
+    { path = "vendor/krilla-0.8.2/**/*", format = "sdist" },
 ]

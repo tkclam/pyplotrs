@@ -57,6 +57,14 @@ jobs:
           # look like a failure while asserting nothing.
           pytest -q --strict-markers
 
+      - name: Source distribution builds
+        # Deselected from the run above (see the `packaging` marker in
+        # pyproject.toml) because it builds an sdist and resolves it with
+        # cargo. It is the gate the `sdist` job below cannot be: that job
+        # *builds* a tarball but never builds *from* one, so it shipped an
+        # sdist whose `[patch.crates-io]` path had been left out of it.
+        run: pytest -q --strict-markers -m packaging
+
       - name: Benchmark regression gate
         run: |
           python -m pip install ".[bench]"
