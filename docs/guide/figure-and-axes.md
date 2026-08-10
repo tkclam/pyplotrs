@@ -33,10 +33,12 @@ its axes through `fig.axes` (a flat, row-major list).
 
 `figsize` is `(width, height)` in **points** by default (1 pt = 1/72 inch).
 Sizing in points lets you reason about a figure directly against its font scale —
-a 420×315 pt figure with a 10 pt font. Other units are available via `units`:
+the default 250×200 pt figure with a 10 pt font. That default is a single
+journal column wide (~3.5 in), so a figure comes out at publication size rather
+than needing to be scaled down to one. Other units are available via `units`:
 
 ```python
-plt.subplots(figsize=(420, 315))               # points (default)
+plt.subplots(figsize=(250, 200))               # points (the default)
 plt.subplots(figsize=(4, 3), units="in")       # inches
 plt.subplots(figsize=(89, 60), units="mm")     # a Nature single column
 plt.subplots(figsize=(12, 8), units="cm")

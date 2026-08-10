@@ -25,6 +25,7 @@ from . import theme as _theme
 from .theme import Theme
 
 from ._const import (
+    DEFAULT_FIGSIZE,
     _HSPACE,
     _INLINE_DPI,
     _LEGEND_COL_GAP_L,
@@ -100,12 +101,14 @@ class Figure:
 
     ``figsize`` is the ``(width, height)`` of the canvas in **points** by default
     (``units="pt"``). Sizing in points lets you reason about a plot directly
-    against its font scale — e.g. a 480x360 pt figure with a 10 pt font. Pass
-    ``units="in"``, ``"cm"`` or ``"mm"`` to give the size in another unit (a
-    single journal column is ~252 pt; Nature's widths are 89 mm / 183 mm).
+    against its font scale — e.g. the default 250x200 pt figure with a 10 pt
+    font. That default is a single journal column wide (~3.5 in), so a figure
+    comes out at publication size instead of needing to be scaled down to one.
+    Pass ``units="in"``, ``"cm"`` or ``"mm"`` to give the size in another unit
+    (Nature's widths are 89 mm / 183 mm).
     """
 
-    def __init__(self, figsize: tuple[float, float] = (420, 315), nrows: int = 1,
+    def __init__(self, figsize: tuple[float, float] = DEFAULT_FIGSIZE, nrows: int = 1,
                  ncols: int = 1, sharex: bool = False, sharey: bool = False,
                  projection: str | None = None, theme=None, units: str = "pt",
                  width_ratios=None, height_ratios=None) -> None:
@@ -419,7 +422,7 @@ class Figure:
             )
 
 
-def subplots(nrows: int = 1, ncols: int = 1, *, figsize: tuple[float, float] = (420, 315),
+def subplots(nrows: int = 1, ncols: int = 1, *, figsize: tuple[float, float] = DEFAULT_FIGSIZE,
              sharex: bool = False, sharey: bool = False, projection: str | None = None,
              theme=None, units: str = "pt", width_ratios=None, height_ratios=None):
     """Create a [`Figure`] with an ``nrows`` x ``ncols`` grid of axes.
@@ -449,7 +452,7 @@ def subplots(nrows: int = 1, ncols: int = 1, *, figsize: tuple[float, float] = (
     return fig, grid
 
 
-def subplot_mosaic(mosaic, *, figsize: tuple[float, float] = (420, 315),
+def subplot_mosaic(mosaic, *, figsize: tuple[float, float] = DEFAULT_FIGSIZE,
                    theme=None, units: str = "pt"):
     """Build a figure of spanning axes from an ASCII ``mosaic`` layout.
 

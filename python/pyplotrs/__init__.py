@@ -7,12 +7,13 @@ from . import scales
 from . import ticker
 from . import theme as themes
 from .animation import Animation, animate
+from ._const import DEFAULT_FIGSIZE
 from .colormaps import Colormap, get_cmap
 from .figure import Axes, Axes3D, Figure, GridSpec, PolarAxes, subplots, subplot_mosaic
 from .theme import Theme
 
 
-def figure(figsize: tuple[float, float] = (420, 315), *, theme=None,
+def figure(figsize: tuple[float, float] = DEFAULT_FIGSIZE, *, theme=None,
            units: str = "pt") -> Figure:
     """Create an empty :class:`Figure` (no axes). Use
     :meth:`Figure.add_gridspec` + :meth:`Figure.add_subplot` to place spanning

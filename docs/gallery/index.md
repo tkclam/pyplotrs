@@ -31,7 +31,7 @@ PNG into the current directory.)
 
 ### Line plot
 
-![line](images/line.png){ width="560" }
+![line](images/line.png){ width="340" }
 
 ```python
 --8<-- "examples/line.py"
@@ -39,7 +39,7 @@ PNG into the current directory.)
 
 ### Scatter
 
-![scatter](images/scatter.png){ width="560" }
+![scatter](images/scatter.png){ width="340" }
 
 ```python
 --8<-- "examples/scatter.py"
@@ -47,7 +47,7 @@ PNG into the current directory.)
 
 ### Bar chart
 
-![bar](images/bar.png){ width="500" }
+![bar](images/bar.png){ width="340" }
 
 ```python
 --8<-- "examples/bar.py"
@@ -55,7 +55,7 @@ PNG into the current directory.)
 
 ### Histogram
 
-![histogram](images/histogram.png){ width="500" }
+![histogram](images/histogram.png){ width="340" }
 
 ```python
 --8<-- "examples/histogram.py"
@@ -63,7 +63,7 @@ PNG into the current directory.)
 
 ### Fill between
 
-![fill between](images/fill_between.png){ width="560" }
+![fill between](images/fill_between.png){ width="340" }
 
 ```python
 --8<-- "examples/fill_between.py"
@@ -71,7 +71,7 @@ PNG into the current directory.)
 
 ### Error bars
 
-![error bars](images/errorbar.png){ width="560" }
+![error bars](images/errorbar.png){ width="340" }
 
 ```python
 --8<-- "examples/errorbar.py"
@@ -83,7 +83,7 @@ PNG into the current directory.)
 
 ### Heatmap
 
-![heatmap](images/heatmap.png){ width="560" }
+![heatmap](images/heatmap.png){ width="340" }
 
 ```python
 --8<-- "examples/heatmap.py"
@@ -156,7 +156,7 @@ PNG into the current directory.)
 
 ### LaTeX math
 
-![math](images/math_labels.png){ width="560" }
+![math](images/math_labels.png){ width="340" }
 
 ```python
 --8<-- "examples/math_labels.py"
@@ -164,7 +164,7 @@ PNG into the current directory.)
 
 ### Annotations
 
-![annotations](images/annotations.png){ width="540" }
+![annotations](images/annotations.png){ width="340" }
 
 ```python
 --8<-- "examples/annotations.py"

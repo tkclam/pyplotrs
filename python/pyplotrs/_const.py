@@ -17,6 +17,13 @@ _LEGEND_COL_GAP_R = 2.0
 #: Capped so the search stays a fixed small cost rather than scaling with data.
 _LEGEND_PROBE_POINTS = 60
 
+#: Default canvas size (points) for every figure entry point: `subplots`,
+#: `subplot_mosaic`, `figure` and `Figure` itself. 250 pt is a single journal
+#: column (~3.5 in), so the default lands at publication size rather than
+#: needing to be shrunk down to one. Defined here, once, because four separate
+#: copies of a default is the drift this module exists to prevent.
+DEFAULT_FIGSIZE = (250.0, 200.0)
+
 # Spacing (points).
 _TICK_LENGTH = 3.5
 _TICK_LABEL_GAP = 2.5

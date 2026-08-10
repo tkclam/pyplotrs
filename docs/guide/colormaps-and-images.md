@@ -9,7 +9,7 @@ colormapped image. `data` is a sequence of equal-length rows.
 --8<-- "examples/heatmap.py"
 ```
 
-![heatmap](../gallery/images/heatmap.png){ width="520" }
+![heatmap](../gallery/images/heatmap.png){ width="340" }
 
 Key options:
 

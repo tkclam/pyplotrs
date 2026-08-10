@@ -18,7 +18,7 @@ conventions:
 --8<-- "examples/line.py"
 ```
 
-![line plot](../gallery/images/line.png){ width="520" }
+![line plot](../gallery/images/line.png){ width="340" }
 
 !!! tip "Dense data"
     `line` collapses runs of near-collinear vertices in device space by default
@@ -38,7 +38,7 @@ and means the **area** in pt², matching matplotlib's `s`, so `size=36` and
 --8<-- "examples/scatter.py"
 ```
 
-![scatter plot](../gallery/images/scatter.png){ width="520" }
+![scatter plot](../gallery/images/scatter.png){ width="340" }
 
 ## Bar
 
@@ -49,7 +49,7 @@ include the 0 baseline when all heights are non-negative.
 --8<-- "examples/bar.py"
 ```
 
-![bar chart](../gallery/images/bar.png){ width="460" }
+![bar chart](../gallery/images/bar.png){ width="340" }
 
 ## Histogram
 
@@ -61,7 +61,7 @@ the binning extent.
 --8<-- "examples/histogram.py"
 ```
 
-![histogram](../gallery/images/histogram.png){ width="460" }
+![histogram](../gallery/images/histogram.png){ width="340" }
 
 ## Fill between
 
@@ -73,7 +73,7 @@ controls transparency.
 --8<-- "examples/fill_between.py"
 ```
 
-![fill between](../gallery/images/fill_between.png){ width="520" }
+![fill between](../gallery/images/fill_between.png){ width="340" }
 
 ## Error bars
 
@@ -84,7 +84,7 @@ with caps, optionally connected by a line and decorated with markers.
 --8<-- "examples/errorbar.py"
 ```
 
-![error bars](../gallery/images/errorbar.png){ width="520" }
+![error bars](../gallery/images/errorbar.png){ width="340" }
 
 ## Images & heatmaps
 
@@ -97,7 +97,7 @@ image and returns a handle you can pass to
 --8<-- "examples/heatmap.py"
 ```
 
-![heatmap](../gallery/images/heatmap.png){ width="520" }
+![heatmap](../gallery/images/heatmap.png){ width="340" }
 
 ## More plot types
 

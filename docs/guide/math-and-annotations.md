@@ -11,7 +11,7 @@ PDF/SVG output (copy-paste yields the Unicode math).
 --8<-- "examples/math_labels.py"
 ```
 
-![math labels](../gallery/images/math_labels.png){ width="560" }
+![math labels](../gallery/images/math_labels.png){ width="340" }
 
 Supported syntax includes:
 
@@ -53,7 +53,7 @@ optionally with an arrow from the text to the point:
 --8<-- "examples/annotations.py"
 ```
 
-![annotations](../gallery/images/annotations.png){ width="540" }
+![annotations](../gallery/images/annotations.png){ width="340" }
 
 `xy` is the point being annotated and `xytext` is where the label sits (defaults
 to `xy`). Set `arrow=False` for a plain floating label. Both coordinates are in

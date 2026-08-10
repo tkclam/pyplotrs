@@ -76,8 +76,9 @@ fig.save("panels.png")
 ## Sizing in points
 
 `figsize` is the canvas `(width, height)` in **points** by default (1 pt =
-1/72 inch), so you can reason about a plot directly against its font scale. Pass
-`units="in"`, `"cm"` or `"mm"` for another unit:
+1/72 inch), so you can reason about a plot directly against its font scale. The
+default is 250×200 pt — a single journal column wide, i.e. publication size out
+of the box. Pass `units="in"`, `"cm"` or `"mm"` for another unit:
 
 ```python
 plt.subplots(figsize=(89, 60), units="mm")   # a single Nature column
