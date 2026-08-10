@@ -440,10 +440,15 @@ class Axes(_AxesBase):
         mark["colors"] = _rgba_values(cvals, cm, nrm)
         return _Mappable(self, cm, nrm.vmin, nrm.vmax, norm=nrm)
 
-    def bar(self, x, height, *, width: float = 0.8, bottom=0.0, color=None,
+    def bar(self, x, height, *, width: float = 0.5, bottom=0.0, color=None,
             alpha: float = 1.0, label: str | None = None, edgecolor=None, zorder: float = 0.0) -> "Axes":
         """Draw vertical bars of the given ``height`` at positions ``x``. ``x``
-        may be strings (categories), which set a categorical x-axis."""
+        may be strings (categories), which set a categorical x-axis.
+
+        ``width`` is a **data extent** in x units, not a stroke width: at the
+        default 0.5 a bar fills half the gap to its neighbour. This is narrower
+        than matplotlib's 0.8 on purpose - the gap is what makes bars read as
+        discrete categories at the default single-column figure size."""
         xs = self._coords(x, "x")
         heights = [float(v) for v in height]
         self._marks.append({

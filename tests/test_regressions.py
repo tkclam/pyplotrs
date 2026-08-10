@@ -325,7 +325,7 @@ def test_hexbin_output_is_reproducible(tmp_path):
     assert len(digests) == 1, f"hexbin differed across processes: {digests}"
 
 
-def test_data_extent_defaults_match_matplotlib():
+def test_data_extent_defaults_are_pinned():
     """`bar(width=)`, `barh(height=)` and `boxplot(widths=)` are *data extents*
     in axis units, not stroke widths.
 
@@ -333,28 +333,43 @@ def test_data_extent_defaults_match_matplotlib():
     that collision, and in the sweep these three signature defaults drifted down
     with the stroke ones - 0.8/0.8/0.5 became 0.6/0.6/0.35. Nothing caught it:
     the values are legal, every plot still rendered, and the golden reference
-    was regenerated over the top. Pin them to matplotlib's, which is what a
-    ported script expects a bar chart to look like.
+    was regenerated over the top. Hence this test: whatever the chosen value is,
+    it is chosen, and a rename cannot move it.
+
+    The values themselves split two ways, and the split is the point - a
+    divergence from matplotlib should be a decision on the record, not a drift
+    nobody noticed.
     """
     import inspect
 
     from pyplotrs.axes import Axes
 
-    expected = {("bar", "width"): 0.8, ("barh", "height"): 0.8,
-                ("boxplot", "widths"): 0.5, ("violinplot", "widths"): 0.5}
-    for (method, arg), want in expected.items():
+    # Deliberate pyplotrs defaults, differing from matplotlib's.
+    chosen = {
+        # matplotlib uses 0.8. pyplotrs leaves more air between bars: at the
+        # default 250 pt (single-column) canvas, 0.8 runs the bars together
+        # into a solid block, and the gap is what makes them read as discrete.
+        ("bar", "width"): 0.5,
+    }
+    # Matching matplotlib, so a ported script looks the same.
+    like_matplotlib = {
+        ("barh", "height"): 0.8,
+        ("boxplot", "widths"): 0.5,
+        ("violinplot", "widths"): 0.5,
+    }
+    for (method, arg), want in {**chosen, **like_matplotlib}.items():
         got = inspect.signature(getattr(Axes, method)).parameters[arg].default
         assert got == want, f"Axes.{method}({arg}=) is {got}, expected {want}"
 
 
-def test_bar_occupies_most_of_its_category_slot():
+def test_bar_leaves_a_gap_between_category_slots():
     """The default above, checked where it is visible rather than in a
-    signature: three categories one unit apart, so a bar spans 0.8 of the gap
-    between neighbours."""
+    signature: three categories one unit apart, so a bar spans half the gap
+    between neighbours and half the slot stays empty."""
     fig, ax = plt.subplots(figsize=(300, 200))
     ax.bar(["a", "b", "c"], [1.0, 2.0, 3.0])
     mark = ax._marks[0]
-    assert mark["width"] == 0.8
+    assert mark["width"] == 0.5
     assert list(mark["xs"]) == [0.0, 1.0, 2.0]
 
 
