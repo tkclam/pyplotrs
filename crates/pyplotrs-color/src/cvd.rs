@@ -130,7 +130,11 @@ mod tests {
     fn grayscale_is_unaffected_by_cvd() {
         // Achromatic colors carry no hue information, so every dichromacy
         // model should leave them (near) unchanged.
-        for kind in [CvdKind::Protanopia, CvdKind::Deuteranopia, CvdKind::Tritanopia] {
+        for kind in [
+            CvdKind::Protanopia,
+            CvdKind::Deuteranopia,
+            CvdKind::Tritanopia,
+        ] {
             for g in [0u8, 64, 128, 200, 255] {
                 let sim = simulate([g, g, g], kind);
                 for c in sim {

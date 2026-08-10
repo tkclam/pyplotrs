@@ -105,8 +105,10 @@ struct RawVMetrics {
 /// unrelated font's buffer reusing the same address. Holding the `Arc` pins
 /// that address for as long as the cache entry lives, so the key stays
 /// unambiguous.
-fn raw_vmetrics_cache() -> &'static Mutex<HashMap<usize, (Arc<Vec<u8>>, RawVMetrics)>> {
-    static CACHE: OnceLock<Mutex<HashMap<usize, (Arc<Vec<u8>>, RawVMetrics)>>> = OnceLock::new();
+type RawVMetricsCache = Mutex<HashMap<usize, (Arc<Vec<u8>>, RawVMetrics)>>;
+
+fn raw_vmetrics_cache() -> &'static RawVMetricsCache {
+    static CACHE: OnceLock<RawVMetricsCache> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 

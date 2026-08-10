@@ -1824,6 +1824,7 @@ static PAL_TAB20C: &[[u8; 3]] = &[
     [217, 217, 217],
 ];
 
+#[rustfmt::skip]
 pub static CATEGORICAL: &[CategoricalEntry] = &[
     CategoricalEntry { name: "Accent", colors: PAL_ACCENT, source: Source::Matplotlib },
     CategoricalEntry { name: "Dark2", colors: PAL_DARK2, source: Source::Matplotlib },

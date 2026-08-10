@@ -121,7 +121,11 @@ pub fn srgb_to_cam16ucs(rgb: [u8; 3]) -> [f64; 3] {
     let xyz: Xyz<D65, f64> = to_srgb(rgb).into_color();
     let cam = Cam16Jmh::from_xyz(xyz, cam16_parameters());
     let ucs = Cam16UcsJmh::from_color(cam);
-    [ucs.lightness, ucs.colorfulness, ucs.hue.into_positive_degrees()]
+    [
+        ucs.lightness,
+        ucs.colorfulness,
+        ucs.hue.into_positive_degrees(),
+    ]
 }
 
 /// CAM16-UCS (Jmh form) -> sRGB.
@@ -201,7 +205,11 @@ mod tests {
 
     #[test]
     fn cam16ucs_distance_zero_for_identical_colors() {
-        assert_relative_eq!(cam16ucs_distance([100, 150, 200], [100, 150, 200]), 0.0, epsilon = 1e-6);
+        assert_relative_eq!(
+            cam16ucs_distance([100, 150, 200], [100, 150, 200]),
+            0.0,
+            epsilon = 1e-6
+        );
     }
 
     #[test]

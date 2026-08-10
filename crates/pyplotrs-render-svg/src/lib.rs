@@ -40,12 +40,9 @@ fn path_data(path: &pyplotrs_core::kurbo::BezPath) -> String {
         match *el {
             PathEl::MoveTo(p) => write!(d, "M{:.3} {:.3} ", p.x, p.y).unwrap(),
             PathEl::LineTo(p) => write!(d, "L{:.3} {:.3} ", p.x, p.y).unwrap(),
-            PathEl::QuadTo(p1, p2) => write!(
-                d,
-                "Q{:.3} {:.3} {:.3} {:.3} ",
-                p1.x, p1.y, p2.x, p2.y
-            )
-            .unwrap(),
+            PathEl::QuadTo(p1, p2) => {
+                write!(d, "Q{:.3} {:.3} {:.3} {:.3} ", p1.x, p1.y, p2.x, p2.y).unwrap()
+            }
             PathEl::CurveTo(p1, p2, p3) => write!(
                 d,
                 "C{:.3} {:.3} {:.3} {:.3} {:.3} {:.3} ",

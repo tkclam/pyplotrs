@@ -587,7 +587,10 @@ fn colormap_table(name: &str) -> Option<Vec<(u8, u8, u8)>> {
 /// `"srgb"`). Mirrors `Colormap(name, stops=...)`'s construction path.
 #[pyfunction]
 fn colormap_table_from_stops(stops: Vec<(f64, (u8, u8, u8))>, space: &str) -> Vec<(u8, u8, u8)> {
-    let stops: Vec<(f64, [u8; 3])> = stops.into_iter().map(|(p, (r, g, b))| (p, [r, g, b])).collect();
+    let stops: Vec<(f64, [u8; 3])> = stops
+        .into_iter()
+        .map(|(p, (r, g, b))| (p, [r, g, b]))
+        .collect();
     pyplotrs_color::colormap_table_from_stops(&stops, space)
         .into_iter()
         .map(|[r, g, b]| (r, g, b))
@@ -598,7 +601,8 @@ fn colormap_table_from_stops(stops: Vec<(f64, (u8, u8, u8))>, space: &str) -> Ve
 /// unregistered).
 #[pyfunction]
 fn categorical_palette(name: &str) -> Option<Vec<(u8, u8, u8)>> {
-    pyplotrs_color::categorical_palette(name).map(|colors| colors.iter().map(|&[r, g, b]| (r, g, b)).collect())
+    pyplotrs_color::categorical_palette(name)
+        .map(|colors| colors.iter().map(|&[r, g, b]| (r, g, b)).collect())
 }
 
 /// Names of built-in continuous colormaps, optionally filtered to one
@@ -607,13 +611,19 @@ fn categorical_palette(name: &str) -> Option<Vec<(u8, u8, u8)>> {
 #[pyfunction]
 #[pyo3(signature = (category=None))]
 fn list_colormaps(category: Option<&str>) -> Vec<String> {
-    pyplotrs_color::list_colormaps(category).into_iter().map(String::from).collect()
+    pyplotrs_color::list_colormaps(category)
+        .into_iter()
+        .map(String::from)
+        .collect()
 }
 
 /// Names of built-in categorical/qualitative palettes.
 #[pyfunction]
 fn list_palettes() -> Vec<String> {
-    pyplotrs_color::list_palettes().into_iter().map(String::from).collect()
+    pyplotrs_color::list_palettes()
+        .into_iter()
+        .map(String::from)
+        .collect()
 }
 
 /// Alpha-scale a 256-entry RGB table into a draw-ready 1024-byte RGBA LUT

@@ -93,7 +93,10 @@ fn sample_at(stops: &[(f64, [f64; 3])], t: f64) -> [f64; 3] {
 /// Build a 256-entry RGB table from `stops` (at least one required;
 /// duplicated/unsorted positions are handled by sorting first).
 pub fn table_from_stops(stops: &[(f64, [u8; 3])], space: InterpSpace) -> [[u8; 3]; 256] {
-    assert!(!stops.is_empty(), "table_from_stops needs at least one stop");
+    assert!(
+        !stops.is_empty(),
+        "table_from_stops needs at least one stop"
+    );
     let mut sorted: Vec<(f64, [u8; 3])> = stops.to_vec();
     sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
     let converted: Vec<(f64, [f64; 3])> = sorted
@@ -147,7 +150,11 @@ mod tests {
 
     #[test]
     fn three_stops_interpolate_piecewise() {
-        let stops = [(0.0, [0u8, 0, 0]), (0.5, [255u8, 0, 0]), (1.0, [255u8, 255, 255])];
+        let stops = [
+            (0.0, [0u8, 0, 0]),
+            (0.5, [255u8, 0, 0]),
+            (1.0, [255u8, 255, 255]),
+        ];
         let table = table_from_stops(&stops, InterpSpace::Srgb);
         assert_eq!(table[0], [0, 0, 0]);
         assert_eq!(table[128], [255, 1, 1]); // t=128/255 ~= 0.502, just past the red stop

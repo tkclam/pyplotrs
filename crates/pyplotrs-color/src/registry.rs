@@ -109,7 +109,10 @@ pub fn list_continuous(category: Option<&str>) -> Vec<&'static str> {
 
 /// A categorical/qualitative palette's colors by name.
 pub fn categorical_palette(name: &str) -> Option<&'static [[u8; 3]]> {
-    CATEGORICAL.iter().find(|e| e.name == name).map(|e| e.colors)
+    CATEGORICAL
+        .iter()
+        .find(|e| e.name == name)
+        .map(|e| e.colors)
 }
 
 /// Names of every built-in categorical/qualitative palette.
