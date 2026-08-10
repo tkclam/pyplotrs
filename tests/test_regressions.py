@@ -356,3 +356,171 @@ def test_bar_occupies_most_of_its_category_slot():
     mark = ax._marks[0]
     assert mark["width"] == 0.8
     assert list(mark["xs"]) == [0.0, 1.0, 2.0]
+
+
+# -- secondary axes ----------------------------------------------------------
+
+_SEC_FN = (lambda v: v * 100.0, lambda v: v / 100.0)
+
+#: `(method, location)` for every place a secondary axis can be attached.
+_SEC_SIDES = [("secondary_xaxis", "top"), ("secondary_xaxis", "bottom"),
+              ("secondary_yaxis", "left"), ("secondary_yaxis", "right")]
+
+
+def _page_texts(fig, tmp_path, name):
+    """Every `<text>` in the rendered SVG as `(x, y, string)`.
+
+    Coordinates are page coordinates *except* inside a `<g transform=...>`
+    group, where they are group-local - which is how rotated axis labels are
+    drawn - so callers checking bounds must skip the grouped ones.
+    """
+    out = tmp_path / f"{name}.svg"
+    fig.save(str(out))
+    svg = out.read_text()
+    body = re.sub(r"<g transform[^>]*>.*?</g>", "", svg, flags=re.S)
+    found = re.findall(
+        r'<text[^>]*x="([-\d.]+)"[^>]*y="([-\d.]+)"[^>]*>([^<]*)</text>', body)
+    return [(float(x), float(y), s) for x, y, s in found], svg
+
+
+@pytest.mark.parametrize("method,loc", _SEC_SIDES)
+def test_secondary_axis_ticks_stay_on_the_canvas(method, loc, tmp_path):
+    """A secondary axis drew at the plot's own edge with no space reserved for
+    it, so its ticks ran off whatever was beyond that edge.
+
+    On `right` the plot edge *was* the canvas edge, so the tick labels were
+    emitted at x == the figure width and simply never appeared - the notebook
+    verify pass read that as "draws a bare spine, no ticks at all". On `top`
+    they landed under the title instead. `_bands` now reserves a band on the
+    side the axis sits on, the same way a twinx and a colorbar already do.
+    """
+    from pyplotrs import _pyplotrs_core as _core
+    from pyplotrs._draw import _tw
+
+    w, h = 400.0, 300.0
+    fig, ax = plt.subplots(figsize=(w, h))
+    ax.line([0, 1, 2, 3], [0, 1, 4, 9])
+    getattr(ax, method)(loc, functions=_SEC_FN)
+
+    texts, _ = _page_texts(fig, tmp_path, f"sec_{loc}")
+    # The secondary reads 100x the primary, so its labels are the round
+    # hundreds - values no primary tick on this data produces.
+    secondary = [t for t in texts if t[2] in ("100", "200", "300", "400",
+                                              "600", "800", "900")]
+    assert secondary, f"no secondary tick labels drawn on {loc!r}"
+
+    # The whole glyph run has to fit, not just its origin: the `right` bug put
+    # the origin at exactly x == the figure width, so an origin-only bounds
+    # check passed while nothing was visible.
+    size = ax._theme.tick_label_size
+    scene = _core.Scene(w, h)
+    for x, y, s in secondary:
+        assert x >= 0.0 and x + _tw(scene, s, size) <= w, (
+            f"tick {s!r} spans x={x}..{x + _tw(scene, s, size)} "
+            f"on a {w}pt-wide canvas"
+        )
+        assert 0.0 <= y <= h, f"tick {s!r} at y={y} is off a {h}pt-tall canvas"
+
+
+@pytest.mark.parametrize("method,loc", _SEC_SIDES)
+def test_secondary_axis_label_is_drawn(method, loc, tmp_path):
+    """`label=` was accepted, stored in the spec dict, and then never read by
+    `_draw_secondary` - so it rendered nothing at all, on any of the four
+    locations. The same class as `Axes3D.plot(alpha=)`: a kwarg taken and
+    dropped, which a signature check cannot see."""
+    fig, ax = plt.subplots(figsize=(400, 300))
+    ax.line([0, 1, 2, 3], [0, 1, 4, 9])
+    getattr(ax, method)(loc, functions=_SEC_FN, label="SENTINEL")
+
+    _, svg = _page_texts(fig, tmp_path, f"seclbl_{loc}")
+    drawn = re.findall(r"<text[^>]*>([^<]*)</text>", svg)
+    assert "SENTINEL" in drawn, f"label= never rendered on {loc!r}"
+
+
+@pytest.mark.parametrize("method,loc", _SEC_SIDES)
+def test_secondary_axis_reserves_a_band(method, loc, tmp_path):
+    """The band is real: adding a secondary axis has to grow the reserved band
+    on the side it sits on, which is what costs it plot area. Without this,
+    "the ticks are on the canvas" could be satisfied by an axis that draws over
+    its neighbours and still renders.
+
+    `loc` maps to the band it shares: top -> title, bottom -> x ticks,
+    left -> y ticks, right -> the colorbar/twin column.
+    """
+    from pyplotrs import _pyplotrs_core as _core
+
+    band_index = {"top": 0, "bottom": 3, "left": 4, "right": 5}[loc]
+
+    def band(with_secondary):
+        fig, ax = plt.subplots(figsize=(400, 300))
+        ax.line([0, 1, 2, 3], [0, 1, 4, 9])
+        if with_secondary:
+            getattr(ax, method)(loc, functions=_SEC_FN, label="lbl")
+        bands, _, _ = ax._bands(_core.Scene(400, 300), (0.0, 3.0), (0.0, 9.0))
+        return bands[band_index]
+
+    bare, with_sec = band(False), band(True)
+    assert with_sec > bare, (
+        f"{loc!r} secondary reserved nothing: band {band_index} is "
+        f"{with_sec} with it and {bare} without"
+    )
+
+
+def test_secondary_axis_rejects_a_location_for_the_wrong_axis():
+    """`secondary_xaxis("left")` used to be accepted and then silently drawn as
+    if it said "bottom" - `_draw_secondary` only ever tested for the one
+    location and treated everything else as the other."""
+    fig, ax = plt.subplots(figsize=(200, 150))
+    with pytest.raises(ValueError, match="top.*bottom"):
+        ax.secondary_xaxis("left")
+    with pytest.raises(ValueError, match="left.*right"):
+        ax.secondary_yaxis("top")
+
+
+def test_two_secondary_axes_on_one_side_stack(tmp_path):
+    """Each secondary is placed outside everything already reserved on its
+    side, so a second one on the same side sits beyond the first rather than
+    drawing over it."""
+    fig, ax = plt.subplots(figsize=(400, 300))
+    ax.line([0, 1, 2, 3], [0, 1, 4, 9])
+    ax.secondary_yaxis("right", functions=_SEC_FN)
+    ax.secondary_yaxis("right", functions=(lambda v: v * 3.0, lambda v: v / 3.0))
+    fig._build_scene()
+    offsets = [s["_offset"] for s in ax._secondary]
+    assert offsets[0] < offsets[1], f"second axis did not stack outside: {offsets}"
+
+
+def test_secondary_y_does_not_displace_a_colorbar_label(tmp_path):
+    """A secondary y on the right takes its space out of the same band the
+    colorbar uses. Inflating that band pushed the colorbar's own label out to
+    the band's *new* outer edge - beyond the secondary axis and on top of the
+    secondary's own label - so the colorbar now measures against its own share
+    of the band instead of the whole of it.
+    """
+    fig, ax = plt.subplots(figsize=(320, 240))
+    m = ax.scatter([0, 1, 2, 3], [0, 1, 4, 9], c=[1, 2, 3, 4], cmap="viridis")
+    fig.colorbar(m, label="c")
+    ax.secondary_yaxis("right", functions=_SEC_FN, label="percent")
+    out = tmp_path / "cbar_secondary.svg"
+    fig.save(str(out))
+    svg = out.read_text()
+
+    # The rotated colorbar label: the group whose text is exactly "c". Its
+    # x translation is the 5th matrix component.
+    grp = re.search(r'<g transform="matrix\((?:[-\d.]+[,\s]+){4}([-\d.]+)[,\s]'
+                    r'+[-\d.]+\)">\s*<text[^>]*>c</text>', svg)
+    assert grp, "colorbar label 'c' not found in the SVG"
+    cbar_label_x = float(grp.group(1))
+
+    # The secondary's tick labels are the round hundreds, drawn ungrouped.
+    body = re.sub(r"<g transform[^>]*>.*?</g>", "", svg, flags=re.S)
+    ticks = [float(x) for x, _, s in
+             re.findall(r'<text[^>]*x="([-\d.]+)"[^>]*y="([-\d.]+)"[^>]*>([^<]*)</text>',
+                        body)
+             if s in ("200", "400", "600", "800")]
+    assert ticks, "secondary tick labels not drawn"
+
+    assert cbar_label_x < min(ticks), (
+        f"colorbar label at x={cbar_label_x} was pushed past the secondary "
+        f"axis (tick labels start at x={min(ticks)})"
+    )

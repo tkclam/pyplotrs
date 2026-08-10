@@ -285,6 +285,9 @@ class Axes(_AxesBase):
         self._twiny: "Axes | None" = None
         self._insets: list[tuple["Axes", tuple]] = []
         self._secondary: list[dict] = []
+        # Width a secondary y axis on the right claimed out of the shared cbar
+        # band, recomputed by `_bands` on every render.
+        self._sec_right_w: float = 0.0
         self._is_twin: bool = False  # a twin skips its own facecolor/grid
 
     # -- styling helpers ----------------------------------------------------
@@ -1331,6 +1334,10 @@ class Axes(_AxesBase):
         """A functional secondary x-axis at ``location`` (``"top"``/``"bottom"``).
         ``functions=(forward, inverse)`` maps primary→secondary data (e.g.
         Celsius↔Fahrenheit); omit for a plain duplicate axis. Returns ``self``."""
+        if location not in ("top", "bottom"):
+            raise ValueError(
+                f"secondary_xaxis location must be 'top' or 'bottom', got {location!r}"
+            )
         self._secondary.append({"axis": "x", "loc": location, "functions": functions,
                                 "label": label})
         return self
@@ -1338,6 +1345,10 @@ class Axes(_AxesBase):
     def secondary_yaxis(self, location: str, *, functions=None,
                         label: str | None = None) -> "Axes":
         """A functional secondary y-axis at ``location`` (``"left"``/``"right"``)."""
+        if location not in ("left", "right"):
+            raise ValueError(
+                f"secondary_yaxis location must be 'left' or 'right', got {location!r}"
+            )
         self._secondary.append({"axis": "y", "loc": location, "functions": functions,
                                 "label": label})
         return self
@@ -1843,6 +1854,49 @@ class Axes(_AxesBase):
             t_asc2, t_desc2, _ = scene.font_vmetrics(_TICK_LABEL_SIZE)
             title_h += _TICK_LENGTH + _TICK_LABEL_GAP + t_asc2 + t_desc2
 
+        # Each secondary axis reserves its own space, in the band the primary
+        # chrome on that side already uses. Without this the ticks were drawn
+        # at the plot edge with nothing reserved beyond it: on `top` they
+        # landed under the title, and on `right` they landed *past the canvas*
+        # and vanished. `_offset` is how far outside the plot edge the spine
+        # sits - everything already reserved on that side - so a second
+        # secondary on the same side stacks outside the first rather than over
+        # it, and a secondary y clears a colorbar or twinx.
+        tick_band = _TICK_LENGTH + _TICK_LABEL_GAP + tick_label_h
+        outward = {
+            # The title is drawn at the *top* of its band, so only a twiny sits
+            # between the plot's top edge and free space.
+            "top": tick_band if self._twiny is not None else 0.0,
+            "bottom": x_tick_h, "left": y_tick_w, "right": cbar_w,
+        }
+        added = {"top": 0.0, "bottom": 0.0, "left": 0.0, "right": 0.0}
+        for spec in self._secondary:
+            side = spec["loc"]
+            if spec["axis"] == "y":
+                # A y axis is measured across its widest tick label, not the
+                # line height an x axis needs.
+                sticks = self._secondary_ticks(spec, xr, yr)
+                widest = max((_tw(scene, lbl, _TICK_LABEL_SIZE) for _, lbl in sticks),
+                             default=0.0)
+                thick = _TICK_LENGTH + _TICK_LABEL_GAP + widest
+            else:
+                thick = tick_band
+            if spec["label"]:
+                # A gap on each side of the label box: one to the tick labels
+                # it sits beyond, one to the primary's own axis label beyond
+                # it. Without the outer gap the two collide, because the
+                # primary label's glyph box overhangs its band.
+                a, d, _ = scene.font_vmetrics(_AXIS_LABEL_SIZE)
+                thick += _AXIS_LABEL_GAP + (a + d) + _AXIS_LABEL_GAP
+            spec["_offset"] = outward[side]
+            outward[side] += thick
+            added[side] += thick
+        title_h += added["top"]
+        x_tick_h += added["bottom"]
+        y_tick_w += added["left"]
+        cbar_w += added["right"]
+        self._sec_right_w = added["right"]
+
         bands = (title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w, cbar_h)
         return bands, xticks, yticks
 
@@ -2143,7 +2197,8 @@ class Axes(_AxesBase):
                 _text(scene, plot.x1 + _TICK_LENGTH + _TICK_LABEL_GAP,
                       y + (t_asc - t_desc) / 2.0, label, _TL, _BLACK)
             if tw._ylabel:
-                self._draw_side_label(scene, axl.cbar, plot, tw._ylabel, right=True)
+                self._draw_side_label(scene, self._cbar_band(axl.cbar), plot,
+                                      tw._ylabel, right=True)
 
         if self._twiny is not None:
             tw = self._twiny
@@ -2175,31 +2230,61 @@ class Axes(_AxesBase):
             child._draw(scene, _layout_cell(cell, bands), cxr, cyr, cxt, cyt)
 
     def _draw_side_label(self, scene, band, plot, text, right: bool) -> None:
+        """A rotated axis label centred in ``band``, reading top-to-bottom on the
+        right (matching a twinx's y label) and bottom-to-top on the left
+        (matching the primary y label)."""
         t = self._theme
         size = t.axis_label_size
         a, d, _ = scene.font_vmetrics(size)
         tw = _tw(scene, text, size)
         pivot_x = band.x + band.w - (a + d) / 2.0 if right else band.x + (a + d) / 2.0
         pivot_y = plot.y + plot.h / 2.0
-        # Rotate +90deg (reads bottom-to-top on the right side).
-        scene.begin_group(0.0, 1.0, -1.0, 0.0, pivot_x, pivot_y)
+        if right:
+            scene.begin_group(0.0, 1.0, -1.0, 0.0, pivot_x, pivot_y)   # +90deg
+        else:
+            scene.begin_group(0.0, -1.0, 1.0, 0.0, pivot_x, pivot_y)   # -90deg
         _text(scene, -tw / 2.0, 0.0, text, size, t.text_color)
         scene.end_group()
+
+    def _cbar_band(self, band):
+        """``layout.cbar`` narrowed to exclude the slice a secondary y axis on
+        the right reserved out of it. Both share that band, and the colorbar's
+        (or twinx's) own label has to stay within its own share instead of
+        being pushed out on top of the secondary axis."""
+        if not self._sec_right_w:
+            return band
+        return _Rect(band.x, band.y, max(band.w - self._sec_right_w, 0.0), band.h)
+
+    def _secondary_ticks(self, spec, xr, yr):
+        """Tick ``(value, label)`` pairs for a secondary axis, in *its* units.
+
+        Shared by `_bands` and `_draw_secondary` so the space reserved for an
+        axis is measured from the same ticks that get drawn into it."""
+        fns = spec["functions"]
+        fwd = fns[0] if fns else (lambda v: v)
+        is_x = spec["axis"] == "x"
+        r = xr if is_x else yr
+        s0, s1 = fwd(r[0]), fwd(r[1])
+        return _scales.nice_ticks(min(s0, s1), max(s0, s1), 7 if is_x else 6)
 
     def _draw_secondary(self, scene, plot, xr, yr, spec) -> None:
         t = self._theme
         _SPINE, sw, _BLACK = t.spine_color, t.spine_width, t.text_color
         _TL = t.tick_label_size
         t_asc, t_desc, _ = scene.font_vmetrics(_TL)
+        _AL = t.axis_label_size
+        l_asc, l_desc, _ = scene.font_vmetrics(_AL)
         fns = spec["functions"]
-        fwd = fns[0] if fns else (lambda v: v)
         inv = fns[1] if fns else (lambda v: v)
+        ticks = self._secondary_ticks(spec, xr, yr)
+        # How far outside the plot edge the spine sits: everything `_bands`
+        # already reserved on this side. 0 puts it on the plot's own spine.
+        off = spec.get("_offset", 0.0)
+        axis_label = spec["label"]
         hproj = self._proj_for(plot, xr, yr, self._xscale, self._yscale)
         if spec["axis"] == "x":
-            s0, s1 = fwd(xr[0]), fwd(xr[1])
-            ticks = _scales.nice_ticks(min(s0, s1), max(s0, s1), 7)
             top = spec["loc"] == "top"
-            edge_y = plot.y if top else plot.y1
+            edge_y = plot.y - off if top else plot.y1 + off
             direction = -1.0 if top else 1.0
             scene.add_path([(plot.x, edge_y), (plot.x1, edge_y)],
                            stroke_color=_SPINE, stroke_width=sw, cap="butt")
@@ -2213,14 +2298,22 @@ class Axes(_AxesBase):
                 by = (edge_y - _TICK_LENGTH - _TICK_LABEL_GAP - t_desc if top
                       else edge_y + _TICK_LENGTH + _TICK_LABEL_GAP + t_asc)
                 _text(scene, x - lw / 2.0, by, label, _TL, _BLACK)
+            if axis_label:
+                # Just outside the far edge of the tick labels.
+                far = (edge_y - _TICK_LENGTH - _TICK_LABEL_GAP - t_desc - t_asc if top
+                       else edge_y + _TICK_LENGTH + _TICK_LABEL_GAP + t_asc + t_desc)
+                baseline = (far - _AXIS_LABEL_GAP - l_desc if top
+                            else far + _AXIS_LABEL_GAP + l_asc)
+                lw = _tw(scene, axis_label, _AL)
+                _text(scene, plot.x + (plot.w - lw) / 2.0, baseline, axis_label,
+                      _AL, _BLACK)
         else:  # secondary y
-            s0, s1 = fwd(yr[0]), fwd(yr[1])
-            ticks = _scales.nice_ticks(min(s0, s1), max(s0, s1), 6)
             right = spec["loc"] == "right"
-            edge_x = plot.x1 if right else plot.x
+            edge_x = plot.x1 + off if right else plot.x - off
             direction = 1.0 if right else -1.0
             scene.add_path([(edge_x, plot.y), (edge_x, plot.y1)],
                            stroke_color=_SPINE, stroke_width=sw, cap="butt")
+            widest = 0.0
             for sval, label in ticks:
                 y = hproj.sy(inv(sval))
                 if y < plot.y - 0.5 or y > plot.y1 + 0.5:
@@ -2228,9 +2321,16 @@ class Axes(_AxesBase):
                 scene.add_path([(edge_x, y), (edge_x + direction * _TICK_LENGTH, y)],
                                stroke_color=_SPINE, stroke_width=sw)
                 lw = _tw(scene, label, _TL)
+                widest = max(widest, lw)
                 bx = (edge_x + _TICK_LENGTH + _TICK_LABEL_GAP if right
                       else edge_x - _TICK_LENGTH - _TICK_LABEL_GAP - lw)
                 _text(scene, bx, y + (t_asc - t_desc) / 2.0, label, _TL, _BLACK)
+            if axis_label:
+                strip = _TICK_LENGTH + _TICK_LABEL_GAP + widest + _AXIS_LABEL_GAP
+                thick = l_asc + l_desc
+                x0 = edge_x + strip if right else edge_x - strip - thick
+                self._draw_side_label(scene, _Rect(x0, plot.y, thick, plot.h),
+                                      plot, axis_label, right=right)
 
     # -- reference lines & patches drawing ----------------------------------
 
@@ -2609,7 +2709,7 @@ class Axes(_AxesBase):
         cmap = cb["cmap"]
         vmin, vmax = cb["vmin"], cb["vmax"]
         plot = layout.plot
-        band = layout.cbar
+        band = self._cbar_band(layout.cbar)
         horizontal = cb.get("orientation", "vertical") == "horizontal"
         shrink = max(0.0, min(1.0, cb.get("shrink", 1.0)))
 
