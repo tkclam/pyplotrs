@@ -53,6 +53,10 @@ pub struct AxesBands {
     pub y_tick_w: f64,
     /// Width reserved at the right for this axes' colorbar (0 if none).
     pub cbar_w: f64,
+    /// Height reserved at the bottom for a *horizontal* colorbar (0 if none).
+    /// Exactly one of `cbar_w`/`cbar_h` is non-zero: a colorbar is either
+    /// beside the plot or beneath it, never both.
+    pub cbar_h: f64,
 }
 
 /// A complete description of a figure to lay out.
@@ -228,22 +232,35 @@ fn layout_cell(cell: Rect, b: &AxesBands) -> AxesLayout {
     let ylabel = Rect::new(left, cell.y, b.ylabel_w, cell.h);
     let y_tick_x = left + b.ylabel_w;
 
-    // Right reservation: colorbar.
-    let cbar = Rect::new(cell.x1() - b.cbar_w, cell.y, b.cbar_w, cell.h);
-
-    // Top reservation: title. Bottom: x-axis label then x tick labels.
+    // Top reservation: title. Bottom: x tick labels, x-axis label, then a
+    // horizontal colorbar underneath both (it is the outermost bottom band, so
+    // its own tick labels never collide with the axis's).
     let title = Rect::new(cell.x, cell.y, cell.w, b.title_h);
 
     // Plot area is what remains after all bands.
     let plot_x = y_tick_x + b.y_tick_w;
     let plot_y = cell.y + b.title_h;
     let plot_w = (cell.x1() - b.cbar_w - plot_x).max(0.0);
-    let plot_h = (cell.y1() - b.xlabel_h - b.x_tick_h - plot_y).max(0.0);
+    let plot_h = (cell.y1() - b.xlabel_h - b.x_tick_h - b.cbar_h - plot_y).max(0.0);
     let plot = Rect::new(plot_x, plot_y, plot_w, plot_h);
 
     let y_tick = Rect::new(y_tick_x, plot_y, b.y_tick_w, plot_h);
     let x_tick = Rect::new(plot_x, plot.y1(), plot_w, b.x_tick_h);
     let xlabel = Rect::new(plot_x, plot.y1() + b.x_tick_h, plot_w, b.xlabel_h);
+
+    // The colorbar band: beside the plot when vertical, beneath it when
+    // horizontal. Spanning the plot's extent (not the cell's) keeps the strip
+    // aligned with the data it describes.
+    let cbar = if b.cbar_h > 0.0 {
+        Rect::new(
+            plot_x,
+            plot.y1() + b.x_tick_h + b.xlabel_h,
+            plot_w,
+            b.cbar_h,
+        )
+    } else {
+        Rect::new(cell.x1() - b.cbar_w, cell.y, b.cbar_w, cell.h)
+    };
 
     AxesLayout {
         cell,
@@ -284,6 +301,7 @@ mod tests {
                 x_tick_h: 14.0,
                 y_tick_w: 24.0,
                 cbar_w: 0.0,
+                cbar_h: 0.0,
             }],
             spans: None,
             width_ratios: None,

@@ -37,7 +37,7 @@ right-click → *Show Math As* to copy the LaTeX/MathML — fully offline.
 
 ## Text annotations
 
-[`text`][pyplotrs.figure.Axes.text] draws a string at data coordinates, with
+[`text`][pyplotrs.axes.Axes.text] draws a string at data coordinates, with
 horizontal (`ha`) and vertical (`va`) alignment:
 
 ```python
@@ -46,7 +46,7 @@ ax.text(2.5, 0.8, r"region of interest", ha="center", color="C1")
 
 ## Callout arrows
 
-[`annotate`][pyplotrs.figure.Axes.annotate] points text at a data location,
+[`annotate`][pyplotrs.axes.Axes.annotate] points text at a data location,
 optionally with an arrow from the text to the point:
 
 ```python

@@ -68,6 +68,22 @@ def _fill_between(ax):
     ax.fill_between(xs, [x * x for x in xs], 0.0, label="fill")
 
 
+def _fill(ax):
+    ax.fill([0.1, 0.4, 0.4, 0.1], [0.1, 0.1, 0.4, 0.4], alpha=0.5)
+
+
+def _loglog(ax):
+    ax.loglog([1, 10, 100], [1, 100, 10000], label="loglog")
+
+
+def _semilogx(ax):
+    ax.semilogx([1, 10, 100], [1, 2, 3], label="semilogx")
+
+
+def _semilogy(ax):
+    ax.semilogy([1, 2, 3], [1, 10, 100], label="semilogy")
+
+
 def _errorbar(ax):
     ax.errorbar([0, 1, 2], [1, 2, 3], yerr=[0.1, 0.2, 0.3], label="err")
 
@@ -128,6 +144,10 @@ MARKS_2D = {
     "barh": _barh,
     "hist": _hist,
     "fill_between": _fill_between,
+    "fill": _fill,
+    "loglog": _loglog,
+    "semilogx": _semilogx,
+    "semilogy": _semilogy,
     "errorbar": _errorbar,
     "boxplot": _boxplot,
     "violinplot": _violinplot,
@@ -156,6 +176,35 @@ def test_2d_mark_renders_with_legend(name, tmp_path, figure_factory):
     MARKS_2D[name](ax)
     ax.legend()
     _save_all(fig, tmp_path, f"{name}_legend")
+
+
+def test_transparent_png_drops_the_white_page_fill(tmp_path, figure_factory):
+    """``save(path, transparent=True)`` should leave the page background at
+    alpha 0 rather than opaque white, while an opaque save keeps it white -
+    and colours drawn over either must come out identical (the transparent
+    path demultiplies tiny-skia's premultiplied buffer before PNG-encoding)."""
+    from conftest import read_png
+
+    fig, ax = figure_factory()
+    ax.set(xlim=(0, 1), ylim=(0, 1))
+    ax.axis("off")
+    ax.fill([0.3, 0.7, 0.7, 0.3], [0.3, 0.3, 0.7, 0.7], facecolor=(200, 30, 30, 255))
+
+    opaque = tmp_path / "opaque.png"
+    transparent = tmp_path / "transparent.png"
+    fig.save(str(opaque))
+    fig.save(str(transparent), transparent=True)
+
+    ow, oh, obuf = read_png(opaque)
+    tw, th, tbuf = read_png(transparent)
+    assert (ow, oh) == (tw, th)
+
+    corner = 0  # top-left pixel, outside the filled square
+    assert tuple(obuf[corner:corner + 4]) == (255, 255, 255, 255)
+    assert tuple(tbuf[corner:corner + 4]) == (0, 0, 0, 0)
+
+    center = (oh // 2 * ow + ow // 2) * 4
+    assert tuple(obuf[center:center + 4]) == tuple(tbuf[center:center + 4]) == (200, 30, 30, 255)
 
 
 # -- 3D ----------------------------------------------------------------------

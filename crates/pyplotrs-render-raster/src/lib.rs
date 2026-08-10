@@ -521,9 +521,9 @@ fn render_node(pixmap: &mut Pixmap, node: &Node, transform: Affine, clip: Option
     }
 }
 
-/// Render `scene` to a [`Pixmap`] (RGBA8, white background) at `scale`
-/// device-pixels per scene-point.
-pub fn render_pixmap(scene: &Scene, scale: f64) -> Result<Pixmap, String> {
+/// Render `scene` to a [`Pixmap`] (RGBA8, white background unless
+/// `transparent`) at `scale` device-pixels per scene-point.
+pub fn render_pixmap(scene: &Scene, scale: f64, transparent: bool) -> Result<Pixmap, String> {
     // `scale` is device-pixels per scene-point (i.e. dpi / 72). Geometry,
     // glyph outlines, images and clips are all mapped by a single root scale,
     // so text is *re-rasterized* crisply at the target resolution rather than
@@ -553,7 +553,11 @@ pub fn render_pixmap(scene: &Scene, scale: f64) -> Result<Pixmap, String> {
     }
     let mut pixmap = Pixmap::new(width, height)
         .ok_or_else(|| format!("cannot allocate a {width} x {height} px raster"))?;
-    pixmap.fill(tiny_skia::Color::WHITE);
+    pixmap.fill(if transparent {
+        tiny_skia::Color::TRANSPARENT
+    } else {
+        tiny_skia::Color::WHITE
+    });
 
     let root = Affine::scale(scale);
     for node in &scene.nodes {
@@ -565,26 +569,34 @@ pub fn render_pixmap(scene: &Scene, scale: f64) -> Result<Pixmap, String> {
 
 /// Render `scene` to PNG-encoded bytes at `dpi` (dots per inch). The output
 /// carries a `pHYs` chunk recording its physical size, so consumers such as
-/// LaTeX `\includegraphics` place it at the intended dimensions.
-pub fn render_png(scene: &Scene, dpi: f64) -> Result<Vec<u8>, String> {
+/// LaTeX `\includegraphics` place it at the intended dimensions. `transparent`
+/// drops the white page fill in favour of an alpha channel.
+pub fn render_png(scene: &Scene, dpi: f64, transparent: bool) -> Result<Vec<u8>, String> {
     let dpi = if dpi.is_finite() && dpi > 0.0 {
         dpi
     } else {
         72.0
     };
-    let pixmap = render_pixmap(scene, dpi / 72.0)?;
-    encode_png_with_dpi(&pixmap, dpi)
+    let pixmap = render_pixmap(scene, dpi / 72.0, transparent)?;
+    encode_png_with_dpi(pixmap, dpi, transparent)
 }
 
-/// Encode an (opaque) pixmap to PNG bytes, tagging it with a `pHYs` density
-/// chunk derived from `dpi`. The final pixmap is fully opaque (white fill
-/// composited under everything), so its premultiplied buffer equals straight
-/// RGBA and can be written directly.
-fn encode_png_with_dpi(pixmap: &Pixmap, dpi: f64) -> Result<Vec<u8>, String> {
+/// Encode a pixmap to PNG bytes, tagging it with a `pHYs` density chunk
+/// derived from `dpi`. An opaque pixmap (white fill composited under
+/// everything) has premultiplied bytes equal to straight RGBA and is written
+/// directly; a `transparent` one is demultiplied first, since tiny-skia's
+/// internal buffer is premultiplied and PNG expects straight alpha.
+fn encode_png_with_dpi(pixmap: Pixmap, dpi: f64, transparent: bool) -> Result<Vec<u8>, String> {
     let ppu = (dpi / 0.0254).round() as u32; // pixels per metre
+    let (width, height) = (pixmap.width(), pixmap.height());
+    let data = if transparent {
+        pixmap.take_demultiplied()
+    } else {
+        pixmap.take()
+    };
     let mut out = Vec::new();
     {
-        let mut encoder = png::Encoder::new(&mut out, pixmap.width(), pixmap.height());
+        let mut encoder = png::Encoder::new(&mut out, width, height);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
         encoder.set_pixel_dims(Some(png::PixelDimensions {
@@ -596,7 +608,7 @@ fn encode_png_with_dpi(pixmap: &Pixmap, dpi: f64) -> Result<Vec<u8>, String> {
             .write_header()
             .map_err(|e| format!("PNG header write failed: {e}"))?;
         writer
-            .write_image_data(pixmap.data())
+            .write_image_data(&data)
             .map_err(|e| format!("PNG data write failed: {e}"))?;
     }
     Ok(out)
@@ -624,7 +636,7 @@ pub fn render_gif(
     }
     let pixmaps: Vec<Pixmap> = scenes
         .iter()
-        .map(|s| render_pixmap(s, scale))
+        .map(|s| render_pixmap(s, scale, false))
         .collect::<Result<_, _>>()?;
     let (w, h) = (pixmaps[0].width() as u16, pixmaps[0].height() as u16);
 
@@ -677,7 +689,7 @@ pub fn render_apng(
     };
     let pixmaps: Vec<Pixmap> = scenes
         .iter()
-        .map(|s| render_pixmap(s, dpi / 72.0))
+        .map(|s| render_pixmap(s, dpi / 72.0, false))
         .collect::<Result<_, _>>()?;
     let (w, h) = (pixmaps[0].width(), pixmaps[0].height());
     let ppu = (dpi / 0.0254).round() as u32;
@@ -782,6 +794,7 @@ mod tests {
                 colors: None,
             })]),
             2.0,
+            false,
         )
         .unwrap();
 
@@ -797,7 +810,7 @@ mod tests {
                 })
             })
             .collect();
-        let reference = render_pixmap(&clip_group(per_path), 2.0).unwrap();
+        let reference = render_pixmap(&clip_group(per_path), 2.0, false).unwrap();
 
         let (avg, non_white) = avg_and_content(&stamped, &reference);
         assert!(
@@ -841,6 +854,7 @@ mod tests {
                 colors: Some(colors.clone()),
             })]),
             2.0,
+            false,
         )
         .unwrap();
 
@@ -856,7 +870,7 @@ mod tests {
                 })
             })
             .collect();
-        let reference = render_pixmap(&clip_group(per_path), 2.0).unwrap();
+        let reference = render_pixmap(&clip_group(per_path), 2.0, false).unwrap();
 
         let (avg, non_white) = avg_and_content(&stamped, &reference);
         assert!(

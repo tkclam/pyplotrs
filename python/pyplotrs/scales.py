@@ -21,6 +21,7 @@ import math
 from typing import Sequence
 
 from . import _pyplotrs_core as _core
+from .ticker import fix_minus
 
 Tick = tuple[float, str]
 
@@ -29,6 +30,19 @@ Tick = tuple[float, str]
 _SYMLOG_LINTHRESH = 1.0
 _SYMLOG_LINSCALE_ADJ = 1.0 / (1.0 - 1.0 / 10.0)
 _LN10 = math.log(10.0)
+
+
+def nice_ticks(lo: float, hi: float, max_ticks: int) -> list[Tick]:
+    """The Rust "nice numbers" auto-locator, signed for display.
+
+    Every caller of the locator goes through here rather than
+    ``_core.nice_ticks``: the Rust side formats with an ASCII hyphen (it is a
+    pure function with no view of the display setting) and this is where that
+    becomes a real :data:`~pyplotrs.ticker.MINUS`. Doing it before the labels
+    reach the layout engine keeps the pre-measured extents honest - a minus is
+    nearly twice the width of a hyphen.
+    """
+    return [(v, fix_minus(s)) for v, s in _core.nice_ticks(lo, hi, max_ticks)]
 
 
 class Scale:
@@ -91,16 +105,16 @@ class LinearScale(Scale):
         return t
 
     def ticks(self, lo: float, hi: float, max_ticks: int = 7) -> list[Tick]:
-        return _core.nice_ticks(lo, hi, max_ticks)
+        return nice_ticks(lo, hi, max_ticks)
 
 
 def _fmt_plain(v: float) -> str:
-    """Format a positive tick value without an exponent, trimming trailing
-    zeros (e.g. ``2.0 -> "2"``, ``0.005 -> "0.005"``)."""
+    """Format a tick value without an exponent, trimming trailing zeros
+    (e.g. ``2.0 -> "2"``, ``0.005 -> "0.005"``, ``-3.0 -> "−3"``)."""
     if v == int(v) and abs(v) < 1e16:
-        return str(int(v))
+        return fix_minus(str(int(v)))
     s = f"{v:.10f}".rstrip("0").rstrip(".")
-    return s or "0"
+    return fix_minus(s) if s else "0"
 
 
 def _fmt_pow10(k: int) -> str:
@@ -215,7 +229,7 @@ class SymlogScale(Scale):
                 if abs(v) >= _SYMLOG_LINTHRESH and lo <= v <= hi:
                     vals.add(v)
         if len(vals) < 2:
-            return _core.nice_ticks(lo, hi, max_ticks)
+            return nice_ticks(lo, hi, max_ticks)
         ordered = sorted(vals)
         return [(v, _fmt_symlog(v)) for v in ordered]
 
@@ -227,7 +241,7 @@ def _fmt_symlog(v: float) -> str:
     if a >= 1000 or a < 1e-3:
         k = round(math.log10(a))
         return ("$-10^{%d}$" % k) if v < 0 else _fmt_pow10(k)
-    return ("-" + _fmt_plain(a)) if v < 0 else _fmt_plain(a)
+    return _fmt_plain(v)
 
 
 class LogitScale(Scale):

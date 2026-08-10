@@ -192,7 +192,7 @@ class Plot3D {
     if (m.pts.length < 2) return;
     ctx.beginPath();
     m.pts.forEach((p, i) => { const dv = P.projn(p); i ? ctx.lineTo(dv[0], dv[1]) : ctx.moveTo(dv[0], dv[1]); });
-    ctx.setLineDash(m.dash || []); ctx.strokeStyle = rgba(m.color); ctx.lineWidth = m.width; ctx.stroke(); ctx.setLineDash([]);
+    ctx.setLineDash(m.dash || []); ctx.strokeStyle = rgba(m.color); ctx.lineWidth = m.linewidth; ctx.stroke(); ctx.setLineDash([]);
   }
   _scatter(ctx, m, P){
     const pts = m.pts.map(p => P.projn(p)).sort((a, b) => a[2] - b[2]);

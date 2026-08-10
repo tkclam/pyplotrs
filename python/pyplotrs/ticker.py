@@ -6,6 +6,12 @@ to a colorbar); the active :class:`~pyplotrs.scales.Scale` locates the tick
 *positions* and the formatter decides how each is written. Labels may contain
 ``$...$`` math (e.g. :class:`LogFormatter` emits ``$10^{k}$``), which flows
 through the same editable-text pipeline as every other label.
+
+Formatters that render a *number* sign it with :data:`MINUS` (see
+:func:`fix_minus`). The ones that hand back a string you supplied -
+:class:`FixedFormatter`, :class:`FuncFormatter`, :class:`StrMethodFormatter`,
+:class:`DateFormatter` - pass it through untouched, so ``"%Y-%m-%d"`` keeps its
+hyphens.
 """
 
 from __future__ import annotations
@@ -16,12 +22,38 @@ from typing import Callable
 __all__ = [
     "Formatter", "ScalarFormatter", "FuncFormatter", "StrMethodFormatter",
     "PercentFormatter", "EngFormatter", "LogFormatter", "FixedFormatter",
-    "DateFormatter",
+    "DateFormatter", "fix_minus", "MINUS",
 ]
+
+#: U+2212 MINUS SIGN: the sign a negative number is set with. Unlike the ASCII
+#: hyphen-minus it is drawn on the math axis and is as wide as ``+`` (and about
+#: as wide as a digit), so negative labels line up in a tick column instead of
+#: carrying a short, low dash. The math engine already writes every binary minus
+#: this way, so plain tick labels using ``-`` would read differently from the
+#: ``$10^{-3}$`` labels on a log axis.
+MINUS = "−"
+
+_UNICODE_MINUS = True
+
+
+def fix_minus(s: str) -> str:
+    """Replace the sign in a *numeric* label with a real :data:`MINUS`.
+
+    Only apply this to strings pyplotrs formatted from a number - never to user
+    text, category names, or ``strftime`` output, where a hyphen is a hyphen.
+    Math (``$...$``) is likewise left alone: the math engine maps ``-`` to
+    U+2212 itself, and feeding it a pre-substituted glyph would lose the binary
+    operator's spacing. Disabled by :func:`pyplotrs.set_unicode_minus`.
+    """
+    return s.replace("-", MINUS) if _UNICODE_MINUS else s
 
 
 def _fmt_g(value: float) -> str:
-    """A compact number: integers without a trailing ``.0``, else ``%g``."""
+    """A compact number: integers without a trailing ``.0``, else ``%g``.
+
+    ASCII-signed - callers that emit the result as plain text pass it through
+    :func:`fix_minus`; callers that embed it in math must not.
+    """
     if value == int(value) and abs(value) < 1e16:
         return str(int(value))
     return f"{value:g}"
@@ -32,7 +64,7 @@ class Formatter:
     with a tick value (and optional integer position) returns its label."""
 
     def __call__(self, value: float, pos: int | None = None) -> str:
-        return _fmt_g(value)
+        return fix_minus(_fmt_g(value))
 
     def format_ticks(self, values) -> list[str]:
         """Label a whole sequence of tick positions (some formatters use the set,
@@ -57,9 +89,9 @@ class ScalarFormatter(Formatter):
             exp = math.floor(math.log10(abs(value)))
             if exp < self.power_limits[0] or exp >= self.power_limits[1]:
                 mant = value / (10.0 ** exp)
-                m = _fmt_g(round(mant, 6))
+                m = _fmt_g(round(mant, 6))  # math: the engine signs it itself
                 return f"${m}\\times10^{{{exp}}}$" if m != "1" else f"$10^{{{exp}}}$"
-        return _fmt_g(value)
+        return fix_minus(_fmt_g(value))
 
 
 class FixedFormatter(Formatter):
@@ -114,7 +146,7 @@ class PercentFormatter(Formatter):
             s = _fmt_g(round(pct, 3))
         else:
             s = f"{pct:.{self.decimals}f}"
-        return f"{s}{self.symbol}"
+        return f"{fix_minus(s)}{self.symbol}"
 
 
 class EngFormatter(Formatter):
@@ -145,7 +177,7 @@ class EngFormatter(Formatter):
             m = f"{mant:.{self.places}f}"
         prefix = self._PREFIX[exp3]
         tail = f"{self.sep}{prefix}{self.unit}" if (prefix or self.unit) else ""
-        return f"{m}{tail}"
+        return f"{fix_minus(m)}{tail}"
 
 
 class LogFormatter(Formatter):
@@ -163,7 +195,7 @@ class LogFormatter(Formatter):
         rexp = round(exp)
         if abs(exp - rexp) < 1e-6:
             return f"$10^{{{rexp}}}$" if self.base == 10.0 else f"${_fmt_g(self.base)}^{{{rexp}}}$"
-        return _fmt_g(value) if self.label_minor else ""
+        return fix_minus(_fmt_g(value)) if self.label_minor else ""
 
 
 class DateFormatter(Formatter):

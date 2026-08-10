@@ -16,7 +16,7 @@ import pytest
 
 import pyplotrs as plt
 from pyplotrs import _pyplotrs_core as _core
-from pyplotrs.figure import _font
+from pyplotrs._draw import _font
 
 
 # -- the selector ------------------------------------------------------------

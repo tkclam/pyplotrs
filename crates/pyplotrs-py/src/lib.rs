@@ -1005,6 +1005,86 @@ impl Scene {
         }));
     }
 
+    /// Fill the band between `y1` and `y2` over `xs`, mapping every point
+    /// through the scale + affine device transform in Rust.
+    ///
+    /// `fill_between` used to build this polygon with a Python comprehension
+    /// calling `sx`/`sy` per point - two device points per sample, so a 50k
+    /// band cost 200k Python calls and ~26 ms against 3 ms of rasterization.
+    /// `line` and `scatter` had been on the Rust path since the ingest work;
+    /// the band never was, and nothing measured it because the benchmark
+    /// matrix only covered `line` and `scatter`.
+    ///
+    /// `swap_axes` transposes the roles for `fill_betweenx`, where the
+    /// sequence runs along y and the two bounds are x values.
+    #[pyo3(signature = (
+        seq, lo, hi, ax, bx, ay, by, fill_color,
+        swap_axes=false, x_scale="linear", y_scale="linear",
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn add_band_xform(
+        &mut self,
+        seq: F64Data,
+        lo: F64Data,
+        hi: F64Data,
+        ax: f64,
+        bx: f64,
+        ay: f64,
+        by: f64,
+        fill_color: (u8, u8, u8, u8),
+        swap_axes: bool,
+        x_scale: &str,
+        y_scale: &str,
+    ) {
+        let n = seq.len().min(lo.len()).min(hi.len());
+        if n < 2 {
+            return;
+        }
+        // The polygon runs forward along the upper bound and back along the
+        // lower one, so a single closed subpath encloses the band.
+        let mut pts: Vec<Point> = Vec::with_capacity(n * 2);
+        let mut back: Vec<Point> = Vec::with_capacity(n);
+        for i in 0..n {
+            let (sx_in, sy_in) = if swap_axes {
+                (lo[i], seq[i])
+            } else {
+                (seq[i], lo[i])
+            };
+            let dx = ax * apply_scale(x_scale, sx_in) + bx;
+            let dy = ay * apply_scale(y_scale, sy_in) + by;
+            if dx.is_finite() && dy.is_finite() {
+                pts.push(Point::new(dx, dy));
+            }
+            let j = n - 1 - i;
+            let (bx_in, by_in) = if swap_axes {
+                (hi[j], seq[j])
+            } else {
+                (seq[j], hi[j])
+            };
+            let dxb = ax * apply_scale(x_scale, bx_in) + bx;
+            let dyb = ay * apply_scale(y_scale, by_in) + by;
+            if dxb.is_finite() && dyb.is_finite() {
+                back.push(Point::new(dxb, dyb));
+            }
+        }
+        pts.append(&mut back);
+        if pts.len() < 3 {
+            return;
+        }
+        let mut geometry = BezPath::new();
+        geometry.move_to(pts[0]);
+        for p in &pts[1..] {
+            geometry.line_to(*p);
+        }
+        geometry.close_path();
+        self.push_node(Node::Path(PathNode {
+            geometry,
+            fill: Some(color_from_rgba(fill_color)),
+            fill_rule: FillRule::NonZero,
+            stroke: None,
+        }));
+    }
+
     /// Fast path: add a polyline straight from raw data arrays, mapping each
     /// point through the linear data->device transform
     /// `(dx, dy) = (ax·x + bx, ay·y + by)` **in Rust**. This avoids building a
@@ -1435,11 +1515,17 @@ impl Scene {
 
     /// Render to PNG bytes at `dpi` dots per inch (the PNG carries a `pHYs`
     /// chunk recording its physical size). PDF/SVG are resolution-independent
-    /// and ignore dpi.
-    #[pyo3(signature = (dpi=200.0))]
-    fn to_png<'py>(&self, py: Python<'py>, dpi: f64) -> PyResult<Bound<'py, PyBytes>> {
-        let bytes =
-            pyplotrs_render_raster::render_png(&self.inner, dpi).map_err(PyValueError::new_err)?;
+    /// and ignore dpi. `transparent` drops the white page fill for an alpha
+    /// channel instead.
+    #[pyo3(signature = (dpi=200.0, transparent=false))]
+    fn to_png<'py>(
+        &self,
+        py: Python<'py>,
+        dpi: f64,
+        transparent: bool,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        let bytes = pyplotrs_render_raster::render_png(&self.inner, dpi, transparent)
+            .map_err(PyValueError::new_err)?;
         Ok(PyBytes::new(py, &bytes))
     }
 }
@@ -1520,6 +1606,63 @@ struct Layout {
     legend: Rect,
 }
 
+/// The projected screen bbox of the unit cube for a `(elev, azim)` camera:
+/// `(min_x, max_x, min_y, max_y)`. The caller needs this to work out the
+/// device scale before any vertex can be projected.
+#[pyfunction]
+fn cube_screen_bbox(elev: f64, azim: f64) -> (f64, f64, f64, f64) {
+    pyplotrs_3d::cube_screen_bbox(&pyplotrs_3d::Camera3D::new(elev, azim))
+}
+
+/// Project data-space vertices to device space through the 3D camera, in one
+/// pass. Returns `(device_x, device_y, depth)`, parallel to the inputs.
+///
+/// This is the 3D analogue of `add_line_xform`'s in-Rust transform. Projecting
+/// in Python cost a camera call, three dot products and a device map per
+/// vertex, which was about a quarter of a 3D save and the reason `line3d` was
+/// the last workload still losing to matplotlib.
+#[pyfunction]
+#[pyo3(signature = (
+    xs, ys, zs, elev, azim,
+    xmin, xspan, ymin, yspan, zmin, zspan,
+    ccx, ccy, scx, scy, scale,
+))]
+#[allow(clippy::too_many_arguments)]
+fn project3d(
+    xs: F64Data,
+    ys: F64Data,
+    zs: F64Data,
+    elev: f64,
+    azim: f64,
+    xmin: f64,
+    xspan: f64,
+    ymin: f64,
+    yspan: f64,
+    zmin: f64,
+    zspan: f64,
+    ccx: f64,
+    ccy: f64,
+    scx: f64,
+    scy: f64,
+    scale: f64,
+) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+    let cam = pyplotrs_3d::Camera3D::new(elev, azim);
+    let frame = pyplotrs_3d::Frame {
+        xmin,
+        xspan,
+        ymin,
+        yspan,
+        zmin,
+        zspan,
+        ccx,
+        ccy,
+        scx,
+        scy,
+        scale,
+    };
+    pyplotrs_3d::project_batch(&xs, &ys, &zs, &cam, &frame)
+}
+
 /// Locate "nice" axis ticks for `[vmin, vmax]`, returning `(value, label)`
 /// pairs. Backed by `pyplotrs_layout::ticks`.
 #[pyfunction]
@@ -1532,8 +1675,10 @@ fn nice_ticks(vmin: f64, vmax: f64, max_ticks: usize) -> Vec<(f64, String)> {
 }
 
 /// Solve a figure layout in one pass. `cells` is a row-major list of
-/// `(title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w)` band sizes
-/// (points). Returns a [`Layout`] with every reserved rectangle.
+/// `(title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w, cbar_h)` band
+/// sizes (points); `cbar_h` reserves a *horizontal* colorbar beneath the plot
+/// instead of `cbar_w`'s vertical one beside it. Returns a [`Layout`] with
+/// every reserved rectangle.
 #[pyfunction]
 #[pyo3(signature = (
     width, height, nrows, ncols,
@@ -1547,7 +1692,7 @@ fn solve_layout(
     height: f64,
     nrows: usize,
     ncols: usize,
-    cells: Vec<(f64, f64, f64, f64, f64, f64)>,
+    cells: Vec<(f64, f64, f64, f64, f64, f64, f64)>,
     outer_margin: f64,
     hspace: f64,
     wspace: f64,
@@ -1573,13 +1718,14 @@ fn solve_layout(
         cells: cells
             .into_iter()
             .map(
-                |(title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w)| AxesBands {
+                |(title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w, cbar_h)| AxesBands {
                     title_h,
                     xlabel_h,
                     ylabel_w,
                     x_tick_h,
                     y_tick_w,
                     cbar_w,
+                    cbar_h,
                 },
             )
             .collect(),
@@ -2007,11 +2153,21 @@ fn hexbin(
             *n2.entry((ix2 as i64, iy2 as i64)).or_insert(0.0) += 1.0;
         }
     }
-    let mut out = Vec::new();
-    for ((ix, iy), c) in n1 {
+    // Sort by cell index before emitting. `HashMap` iteration order is
+    // randomized per process, so without this the *same* data produced a
+    // different hexagon draw order on every run - and since neighbouring
+    // hexagons share an edge, that changed which one won the shared pixels.
+    // A figure has to be reproducible: byte-identical output is what golden
+    // tests and `git diff` on a committed figure both depend on.
+    let mut cells1: Vec<((i64, i64), f64)> = n1.into_iter().collect();
+    let mut cells2: Vec<((i64, i64), f64)> = n2.into_iter().collect();
+    cells1.sort_unstable_by_key(|&((ix, iy), _)| (iy, ix));
+    cells2.sort_unstable_by_key(|&((ix, iy), _)| (iy, ix));
+    let mut out = Vec::with_capacity(cells1.len() + cells2.len());
+    for ((ix, iy), c) in cells1 {
         out.push((xlo + ix as f64 * sx, ylo + iy as f64 * sy, c));
     }
-    for ((ix, iy), c) in n2 {
+    for ((ix, iy), c) in cells2 {
         out.push((
             xlo + (ix as f64 + 0.5) * sx,
             ylo + (iy as f64 + 0.5) * sy,
@@ -2028,6 +2184,8 @@ fn _pyplotrs_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<AxesLayout>()?;
     m.add_class::<Layout>()?;
     m.add_function(wrap_pyfunction!(nice_ticks, m)?)?;
+    m.add_function(wrap_pyfunction!(cube_screen_bbox, m)?)?;
+    m.add_function(wrap_pyfunction!(project3d, m)?)?;
     m.add_function(wrap_pyfunction!(solve_layout, m)?)?;
     m.add_function(wrap_pyfunction!(data_range, m)?)?;
     m.add_function(wrap_pyfunction!(positive_range, m)?)?;

@@ -191,7 +191,8 @@ def test_removed_helpers_are_gone():
 
 def _cell_sizes(n, *, vertical=False, ratios=None, gap=12.0):
     """Cell extents from the Rust solver for a 1xN (or Nx1) grid."""
-    bands = [(0.0,) * 6] * n
+    # (title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w, cbar_h)
+    bands = [(0.0,) * 7] * n
     kwargs = {"height_ratios": ratios} if vertical else {"width_ratios": ratios}
     layout = _core.solve_layout(
         200.0 if vertical else 600.0,
@@ -255,3 +256,149 @@ def test_gridspec_accepts_ratios(tmp_path):
     fig.add_subplot(gs[1, 0]).line([0, 1], [1, 0])
     fig.add_subplot(gs[1, 1]).line([0, 1], [0, 1])
     fig.save(str(tmp_path / "gs.png"))
+
+
+# -- Phase 7a: the six types the "refocus" commit parked and Phase 4 missed ---
+#
+# `046fb58` removed these six along with the ten Phase 4 restored, but they were
+# not on Phase 4's list, so they stayed gone: `quiver` kept a live `_ranges`
+# branch and a live draw handler with no method able to reach them, and
+# `streamplot`'s integrator was deleted outright. These pin all six end to end.
+
+def _rotation(n: int = 13):
+    """Solid-body rotation. Streamlines of this field are exact circles, which
+    is what makes it worth testing against rather than a random field."""
+    xc = [-3 + 6 * j / (n - 1) for j in range(n)]
+    yc = [-3 + 6 * i / (n - 1) for i in range(n)]
+    u = [[-yc[i] for _ in range(n)] for i in range(n)]
+    v = [[xc[j] for j in range(n)] for _ in range(n)]
+    return xc, yc, u, v
+
+
+_SPARSE = [[1 if (i * j) % 3 == 0 else 0 for j in range(8)] for i in range(6)]
+
+
+def _quiver_args():
+    """The rotation field as four 2D grids, which is the shape `quiver` takes."""
+    xc, yc, u, v = _rotation()
+    X = [list(xc) for _ in yc]
+    Y = [[y] * len(xc) for y in yc]
+    return X, Y, u, v
+
+
+RESTORED = {
+    "pcolor": lambda ax: ax.pcolor(_grid(), label="pc"),
+    "matshow": lambda ax: ax.matshow(_grid(), label="m"),
+    "spy": lambda ax: ax.spy(_SPARSE, label="sp"),
+    "stackplot": lambda ax: ax.stackplot([0, 1, 2, 3], [1, 2, 3, 4], [2, 1, 2, 1],
+                                         labels=["a", "b"]),
+    "quiver": lambda ax: ax.quiver(*_quiver_args(), label="q"),
+    "streamplot": lambda ax: ax.streamplot(*_rotation(), density=0.8, label="st"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(RESTORED))
+@pytest.mark.parametrize("ext", FORMATS)
+def test_restored_type_renders(name, ext, tmp_path):
+    fig, ax = plt.subplots(figsize=(260, 200))
+    RESTORED[name](ax)
+    fig.save(str(tmp_path / f"{name}.{ext}"))
+
+
+@pytest.mark.parametrize("name", sorted(RESTORED))
+def test_restored_type_survives_a_legend(name, tmp_path):
+    fig, ax = plt.subplots(figsize=(260, 200))
+    RESTORED[name](ax)
+    ax.legend()
+    fig.save(str(tmp_path / f"{name}_legend.png"))
+
+
+def test_quiver_autoscales_to_the_arrow_tips():
+    """`quiver`'s `_ranges` branch extends the view to `x + u*scale`; it stayed
+    in the tree the whole time with no method able to reach it."""
+    fig, ax = plt.subplots()
+    ax.quiver([0.0], [0.0], [2.0], [0.0], scale=1.0)
+    (x0, x1), _ = ax._ranges()
+    assert x1 >= 2.0, f"arrow tip at x=2 fell outside the view {(x0, x1)}"
+
+
+def test_streamplot_of_a_rotation_traces_circles():
+    """The field is solid-body rotation, so every streamline vertex must sit at
+    a near-constant radius from the origin - the cheapest end-to-end check that
+    the RK4 integrator is integrating the field and not drifting."""
+    fig, ax = plt.subplots()
+    ax.streamplot(*_rotation(21), density=0.8, arrows=False)
+    lines = [m for m in ax._marks if m["kind"] == "line"]
+    assert lines, "streamplot produced no streamlines"
+    checked = 0
+    for m in lines:
+        radii = [math.hypot(x, y) for x, y in zip(m["xs"], m["ys"])]
+        if len(radii) < 5 or max(radii) > 2.6:   # skip stubs and the clipped rim
+            continue
+        spread = (max(radii) - min(radii)) / max(max(radii), 1e-9)
+        assert spread < 0.12, f"streamline drifted across radii: {spread:.3f}"
+        checked += 1
+    assert checked >= 3, f"only {checked} streamlines long enough to check"
+
+
+def test_streamplot_arrows_are_one_mark_not_one_per_line():
+    fig, ax = plt.subplots()
+    ax.streamplot(*_rotation(), density=0.8)
+    quivers = [m for m in ax._marks if m["kind"] == "quiver"]
+    assert len(quivers) == 1
+    assert len(quivers[0]["xs"]) > 1
+
+
+def test_streamplot_arrows_can_be_turned_off():
+    fig, ax = plt.subplots()
+    ax.streamplot(*_rotation(), density=0.8, arrows=False)
+    assert not [m for m in ax._marks if m["kind"] == "quiver"]
+
+
+def test_quiver_rejects_ragged_input():
+    fig, ax = plt.subplots()
+    with pytest.raises(ValueError, match="equal length"):
+        ax.quiver([0, 1], [0, 1], [1], [1])
+
+
+def test_streamplot_rejects_a_degenerate_grid():
+    fig, ax = plt.subplots()
+    with pytest.raises(ValueError, match="2x2"):
+        ax.streamplot([0.0], [0.0], [[1.0]], [[1.0]])
+
+
+def test_stackplot_stacks_rather_than_overlaying():
+    """Each band starts where the previous one ended; the top of the last band
+    is the column total."""
+    fig, ax = plt.subplots()
+    ax.stackplot([0, 1], [1, 1], [2, 2], [3, 3])
+    tops = [list(m["y1"]) for m in ax._marks]
+    assert tops == [[1.0, 1.0], [3.0, 3.0], [6.0, 6.0]]
+
+
+def test_stackplot_accepts_one_sequence_of_series():
+    fig, ax = plt.subplots()
+    ax.stackplot([0, 1], [[1, 1], [2, 2]])
+    assert len(ax._marks) == 2
+
+
+def test_spy_puts_row_zero_at_the_top():
+    fig, ax = plt.subplots()
+    ax.spy([[1, 0], [0, 1]])
+    assert ax._ylim[0] > ax._ylim[1], "spy should invert y so row 0 is on top"
+
+
+def test_matshow_is_imshow_with_matrix_conventions():
+    fig, ax = plt.subplots()
+    ax.matshow([[1, 2], [3, 4]])
+    m = ax._marks[0]
+    assert m["kind"] == "image" and m["origin"] == "upper"
+    assert ax._aspect == "equal"
+
+
+def test_pcolor_is_pcolormesh():
+    fa, axa = plt.subplots()
+    fb, axb = plt.subplots()
+    axa.pcolor(_grid())
+    axb.pcolormesh(_grid())
+    assert axa._marks[0]["kind"] == axb._marks[0]["kind"]

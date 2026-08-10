@@ -127,6 +127,27 @@ All four Liberation Sans faces are **bundled**, so emphasis works even on a
 machine with no fonts installed at all — a slim container, a wheel builder — and
 a figure looks the same wherever it is generated.
 
+### The minus sign
+
+Negative tick labels are signed with **U+2212 MINUS SIGN** (`−2`), not the ASCII
+hyphen-minus (`-2`). The two are different characters: the hyphen is a short, low
+word-joiner, while the minus is drawn on the math axis at the width of a `+` and
+close to the width of a digit, so a column of tick labels stays aligned. It is
+also what `$...$` math has always used, so a linear axis and a log axis' `$10^{-3}$`
+now read the same.
+
+```python
+plt.set_unicode_minus(False)   # back to ASCII "-"
+plt.get_unicode_minus()        # the current setting
+```
+
+Turn it off if labels must survive being copied out of a saved SVG or PDF and
+parsed back as numbers, or if a font you have set lacks the glyph. The setting
+covers labels pyplotrs formats from a number — axis and colorbar ticks, and the
+numeric `pyplotrs.ticker` formatters. Text you write yourself is never
+rewritten, so `set(xticklabels=[...])`, a `FuncFormatter`, and
+`DateFormatter("%Y-%m-%d")` all keep their hyphens.
+
 ## Layering
 
 Marks draw in the order you add them, which is usually all the control you need

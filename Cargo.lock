@@ -488,6 +488,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "pyplotrs-3d"
+version = "0.0.1"
+
+[[package]]
 name = "pyplotrs-color"
 version = "0.0.1"
 dependencies = [
@@ -521,6 +525,7 @@ version = "0.0.1"
 dependencies = [
  "fontdb",
  "pyo3",
+ "pyplotrs-3d",
  "pyplotrs-color",
  "pyplotrs-core",
  "pyplotrs-layout",

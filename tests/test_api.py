@@ -14,7 +14,9 @@ import inspect
 import pytest
 
 import pyplotrs as plt
-from pyplotrs.figure import Axes, Axes3D, PolarAxes, _AxesBase
+from pyplotrs.axes import Axes, _AxesBase
+from pyplotrs.axes3d import Axes3D
+from pyplotrs.polar import PolarAxes
 
 
 # -- one name per concept ----------------------------------------------------
@@ -275,7 +277,7 @@ def test_best_probe_is_bounded_regardless_of_data_size():
         sx = staticmethod(float)
         sy = staticmethod(float)
 
-    from pyplotrs.figure import _LEGEND_PROBE_POINTS
+    from pyplotrs._const import _LEGEND_PROBE_POINTS
     assert len(ax._sample_device_points(_P())) <= _LEGEND_PROBE_POINTS + 1
 
 
@@ -376,3 +378,173 @@ def test_zorder_changes_the_rendered_output(tmp_path):
         return out.read_bytes()
 
     assert render("line_on_top", 2, 1) != render("fill_on_top", 1, 2)
+
+
+# -- the contract is universal, not just for the marks Phase 5 touched --------
+#
+# Phase 5 gave `zorder`/`alpha`/`label` to the eleven marks that existed at the
+# time. Ten more were restored from the parked set in the same window and did
+# not get them, so a boxplot could not carry a legend key and an `imshow` could
+# not be made translucent. These tests pin the contract over *every* mark, so
+# restoring or adding a plot type cannot quietly opt out of it again.
+
+#: Every mark-producing method on `Axes`.
+_ALL_MARKS = [
+    "line", "scatter", "bar", "barh", "hist", "fill_between", "fill_betweenx",
+    "hlines", "vlines", "errorbar", "boxplot", "violinplot", "pie", "imshow",
+    "step", "stairs", "stem", "broken_barh", "eventplot", "hist2d", "hexbin",
+    "pcolormesh", "contour", "contourf",
+]
+
+
+@pytest.mark.parametrize("name", _ALL_MARKS)
+def test_every_mark_takes_zorder(name):
+    assert "zorder" in inspect.signature(getattr(Axes, name)).parameters
+
+
+@pytest.mark.parametrize("name", _ALL_MARKS)
+def test_every_mark_takes_alpha(name):
+    assert "alpha" in inspect.signature(getattr(Axes, name)).parameters
+
+
+@pytest.mark.parametrize("name", [n for n in _ALL_MARKS if n != "pie"])
+def test_every_mark_takes_label(name):
+    """`pie` is the sole exception, and deliberately: its labels are per-wedge,
+    so it spells them `labels` and those are what reach the legend."""
+    assert "label" in inspect.signature(getattr(Axes, name)).parameters
+
+
+_LABELLED = [
+    ("boxplot", lambda ax: ax.boxplot([[1, 2, 3, 4, 9]], label="L")),
+    ("violinplot", lambda ax: ax.violinplot([[1, 2, 2, 3, 4]], label="L")),
+    ("imshow", lambda ax: ax.imshow([[1, 2], [3, 4]], label="L")),
+    ("eventplot", lambda ax: ax.eventplot([[1, 2, 3]], label="L")),
+    ("hist2d", lambda ax: ax.hist2d([1, 2, 3], [1, 2, 3], bins=2, label="L")),
+    ("hexbin", lambda ax: ax.hexbin([1, 2, 3], [1, 2, 3], gridsize=3, label="L")),
+    ("pcolormesh", lambda ax: ax.pcolormesh([[1, 2], [3, 9]], label="L")),
+    ("contour", lambda ax: ax.contour([[1, 2], [3, 4]], label="L")),
+    ("contourf", lambda ax: ax.contourf([[1, 2], [3, 4]], label="L")),
+    ("broken_barh", lambda ax: ax.broken_barh([(0, 2)], (0, 1), label="L")),
+]
+
+
+@pytest.mark.parametrize("name,call", _LABELLED)
+def test_a_labelled_mark_produces_a_legend_entry(name, call):
+    fig, ax = plt.subplots()
+    call(ax)
+    assert len(ax._legend_entries()) == 1, f"{name} label did not reach the legend"
+
+
+@pytest.mark.parametrize("name,call", _LABELLED)
+@pytest.mark.parametrize("ext", ["png", "svg", "pdf"])
+def test_a_labelled_mark_renders_its_legend(name, call, ext, tmp_path):
+    """The legend glyph drawer has per-kind branches; a kind it does not know
+    used to raise mid-render rather than degrade."""
+    fig, ax = plt.subplots(figsize=(240, 180))
+    call(ax)
+    ax.legend()
+    fig.save(str(tmp_path / f"{name}.{ext}"))
+
+
+def test_pie_wedges_become_one_legend_entry_each():
+    fig, ax = plt.subplots()
+    ax.pie([1, 2, 3], labels=["a", "b", "c"])
+    assert [e["label"] for e in ax._legend_entries()] == ["a", "b", "c"]
+
+
+@pytest.mark.parametrize("name,call", [
+    ("boxplot", lambda ax, a: ax.boxplot([[1, 2, 3, 4, 9]], alpha=a)),
+    ("violinplot", lambda ax, a: ax.violinplot([[1, 2, 2, 3, 4]], alpha=a)),
+    ("imshow", lambda ax, a: ax.imshow([[1, 2], [3, 9]], alpha=a)),
+    ("eventplot", lambda ax, a: ax.eventplot([[1, 2, 3]], alpha=a)),
+    ("hexbin", lambda ax, a: ax.hexbin([1, 2, 3], [1, 2, 3], gridsize=3, alpha=a)),
+    ("pcolormesh", lambda ax, a: ax.pcolormesh([[1, 2], [3, 9]], alpha=a)),
+    ("contour", lambda ax, a: ax.contour([[1, 2], [3, 4]], alpha=a)),
+    ("contourf", lambda ax, a: ax.contourf([[1, 2], [3, 4]], alpha=a)),
+    ("pie", lambda ax, a: ax.pie([1, 2, 3], alpha=a)),
+])
+def test_alpha_changes_the_rendered_bytes(name, call, tmp_path):
+    """Accepting `alpha` is not enough - the colormapped kinds have no single
+    colour to fold it into, so it has to ride their LUT or their colour list."""
+    def render(a):
+        fig, ax = plt.subplots(figsize=(200, 150))
+        call(ax, a)
+        out = tmp_path / f"{name}_{a}.png"
+        fig.save(str(out))
+        return out.read_bytes()
+
+    assert render(1.0) != render(0.3), f"{name} accepted alpha but ignored it"
+
+
+# -- one key per concept, inside the mark dict too ----------------------------
+
+def test_the_mark_dict_never_stores_a_stroke_under_width():
+    """The public signatures split `linewidth` from `width`, but the internal
+    mark contract kept both under `"width"` - the same collision, one layer
+    down, disambiguated only by `kind`. `width` is now the data-space extent
+    everywhere and the stroke is always `linewidth`."""
+    fig, ax = plt.subplots()
+    ax.line([0, 1], [0, 1], linewidth=3.0)
+    ax.errorbar([0, 1], [0, 1], yerr=0.1, linewidth=3.0)
+    ax.eventplot([[1, 2]], linewidth=3.0)
+    ax.contour([[1, 2], [3, 4]], linewidth=3.0)
+    for m in ax._marks:
+        assert m.get("linewidth") == pytest.approx(3.0), m["kind"]
+        assert "width" not in m, f"{m['kind']} still stores a stroke as `width`"
+
+
+def test_width_in_the_mark_dict_is_always_a_data_extent():
+    fig, ax = plt.subplots()
+    ax.bar([0], [1], width=0.5)
+    ax.boxplot([[1, 2, 3]], widths=0.4)
+    ax.violinplot([[1, 2, 3]], widths=0.4)
+    extents = [m["width"] for m in ax._marks]
+    assert extents == [0.5, 0.4, 0.4]
+    assert all(e < 1.0 for e in extents)  # data units here, never points
+
+
+# -- the theme reaches every stroke -------------------------------------------
+
+@pytest.mark.parametrize("name,call", [
+    ("line", lambda ax: ax.line([0, 1], [0, 1])),
+    ("errorbar", lambda ax: ax.errorbar([0, 1], [0, 1], yerr=0.1)),
+    ("eventplot", lambda ax: ax.eventplot([[1, 2]])),
+    ("contour", lambda ax: ax.contour([[1, 2], [3, 4]])),
+    ("step", lambda ax: ax.step([0, 1], [0, 1])),
+    ("stairs", lambda ax: ax.stairs([1, 2])),
+    ("hlines", lambda ax: ax.hlines([0], 0, 1)),
+])
+def test_theme_line_width_reaches_every_stroke_mark(name, call):
+    """`errorbar`, `eventplot` and `contour` hardcoded their stroke, so a theme
+    could not restyle them - the same leak Phase 5 found in the style
+    constants, in the marks it did not touch."""
+    fig, ax = plt.subplots(theme=plt.Theme(line_width=6.0))
+    call(ax)
+    assert ax._marks[0]["linewidth"] == pytest.approx(6.0), (
+        f"{name} ignored theme.line_width"
+    )
+
+
+# -- one idiom for writing ----------------------------------------------------
+
+def test_polar_has_no_individual_setters():
+    """`PolarAxes` used to carry seven matplotlib-style `set_*` wrappers while
+    `Axes` and `Axes3D` had none, so polar code read differently from every
+    other panel. Writing is `set(**kwargs)` everywhere now."""
+    leftovers = [n for n in dir(PolarAxes)
+                 if n.startswith("set_") and not n.startswith("set__")]
+    assert leftovers == [], f"PolarAxes regrew individual setters: {leftovers}"
+
+
+@pytest.mark.parametrize("cls", [Axes, Axes3D, PolarAxes])
+def test_every_axes_class_writes_through_set(cls):
+    assert callable(getattr(cls, "set"))
+
+
+def test_polar_set_still_covers_everything_the_wrappers_did():
+    fig, ax = plt.subplots(projection="polar")
+    ax.set(title="t", rmin=0.0, rmax=2.0, rticks=[1, 2], thetagrids=[0, 90],
+           theta_zero_location="N", theta_direction=-1, rlabel_position=45.0)
+    assert ax._rmax == pytest.approx(2.0)
+    assert ax._rticks == [1.0, 2.0]
+    assert ax._theta_dir == -1

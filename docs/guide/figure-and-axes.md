@@ -33,10 +33,10 @@ its axes through `fig.axes` (a flat, row-major list).
 
 `figsize` is `(width, height)` in **points** by default (1 pt = 1/72 inch).
 Sizing in points lets you reason about a figure directly against its font scale —
-a 480×360 pt figure with a 10 pt font. Other units are available via `units`:
+a 420×315 pt figure with a 10 pt font. Other units are available via `units`:
 
 ```python
-plt.subplots(figsize=(480, 360))               # points (default)
+plt.subplots(figsize=(420, 315))               # points (default)
 plt.subplots(figsize=(4, 3), units="in")       # inches
 plt.subplots(figsize=(89, 60), units="mm")     # a Nature single column
 plt.subplots(figsize=(12, 8), units="cm")
@@ -45,7 +45,7 @@ plt.subplots(figsize=(12, 8), units="cm")
 ## Drawing & the `set` method
 
 Each `Axes` exposes the mark vocabulary (`line`, `scatter`, `bar`, …) plus a
-[`set`][pyplotrs.figure.Axes.set] method for chrome:
+[`set`][pyplotrs.axes.Axes.set] method for chrome:
 
 ```python
 ax.line(xs, ys, label="series")

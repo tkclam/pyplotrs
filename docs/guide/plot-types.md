@@ -1,6 +1,6 @@
 # Plot types
 
-Every 2D mark is a method on [`Axes`][pyplotrs.figure.Axes]. They share a few
+Every 2D mark is a method on [`Axes`][pyplotrs.axes.Axes]. They share a few
 conventions:
 
 - `color` may be `None` (cycle the palette), a `"C0".."C7"` palette index, or an
@@ -10,7 +10,7 @@ conventions:
 
 ## Line
 
-[`line`][pyplotrs.figure.Axes.line] plots a polyline. `linestyle` is one of
+[`line`][pyplotrs.axes.Axes.line] plots a polyline. `linestyle` is one of
 `solid`, `dashed`, `dotted`, `dashdot` (or `none` for markers only); an optional
 `marker` draws a glyph at each vertex.
 
@@ -27,7 +27,7 @@ conventions:
 
 ## Scatter
 
-[`scatter`][pyplotrs.figure.Axes.scatter] places markers. `markersize` is the
+[`scatter`][pyplotrs.axes.Axes.scatter] places markers. `markersize` is the
 marker **diameter in points** — the same unit `line(marker=..., markersize=...)`
 uses, so the same number means the same size everywhere. `size` is also accepted
 and means the **area** in pt², matching matplotlib's `s`, so `size=36` and
@@ -42,7 +42,7 @@ and means the **area** in pt², matching matplotlib's `s`, so `size=36` and
 
 ## Bar
 
-[`bar`][pyplotrs.figure.Axes.bar] draws vertical bars. The y-range is forced to
+[`bar`][pyplotrs.axes.Axes.bar] draws vertical bars. The y-range is forced to
 include the 0 baseline when all heights are non-negative.
 
 ```python
@@ -53,7 +53,7 @@ include the 0 baseline when all heights are non-negative.
 
 ## Histogram
 
-[`hist`][pyplotrs.figure.Axes.hist] bins data into equal-width bins. Use
+[`hist`][pyplotrs.axes.Axes.hist] bins data into equal-width bins. Use
 `density=True` to normalize to a probability density, and `range=(lo, hi)` to fix
 the binning extent.
 
@@ -65,7 +65,7 @@ the binning extent.
 
 ## Fill between
 
-[`fill_between`][pyplotrs.figure.Axes.fill_between] shades the band between two
+[`fill_between`][pyplotrs.axes.Axes.fill_between] shades the band between two
 curves (or a curve and a constant) — ideal for confidence intervals. `alpha`
 controls transparency.
 
@@ -77,7 +77,7 @@ controls transparency.
 
 ## Error bars
 
-[`errorbar`][pyplotrs.figure.Axes.errorbar] draws symmetric `yerr`/`xerr` bars
+[`errorbar`][pyplotrs.axes.Axes.errorbar] draws symmetric `yerr`/`xerr` bars
 with caps, optionally connected by a line and decorated with markers.
 
 ```python
@@ -88,7 +88,7 @@ with caps, optionally connected by a line and decorated with markers.
 
 ## Images & heatmaps
 
-[`imshow`][pyplotrs.figure.Axes.imshow] displays a 2D field as a colormapped
+[`imshow`][pyplotrs.axes.Axes.imshow] displays a 2D field as a colormapped
 image and returns a handle you can pass to
 [`Figure.colorbar`][pyplotrs.figure.Figure.colorbar]. See
 [colormaps & images](colormaps-and-images.md) for the full story.
@@ -116,10 +116,24 @@ Beyond the marks above, `Axes` also has:
 | `contour(Z)` / `contourf(Z)` | Contour lines / filled bands |
 | `hlines(y, xmin, xmax)` / `vlines(x, ymin, ymax)` | Data-coordinate segments |
 | `fill_betweenx(ys, x1, x2)` | The transpose of `fill_between` |
+| `fill(x, y)` | Filled polygon through `(x, y)` |
+| `quiver(x, y, u, v)` | Arrow field |
+| `streamplot(x, y, u, v)` | Streamlines of a vector field, RK4-integrated |
+| `stackplot(x, *ys)` | Stacked area plot |
+| `matshow(data)` | `imshow` with matrix conventions (origin top-left, equal aspect) |
+| `spy(data)` | Sparsity pattern: a marker at each nonzero entry |
+| `pcolor(C)` | Alias of `pcolormesh` |
+| `loglog` / `semilogx` / `semilogy` | `line` with one or both axes log-scaled |
 
 The binning, marching-squares and band-fill kernels all run in Rust. `hist2d`,
 `hexbin`, `pcolormesh` and `contourf` return a handle for
 [`Figure.colorbar`](../api/figure.md).
+
+```python
+--8<-- "examples/fields.py"
+```
+
+![vector and matrix fields](../gallery/images/fields.png){ width="640" }
 
 !!! tip "`hlines` vs `axhline`"
     `hlines` takes **data** coordinates and participates in autoscaling;

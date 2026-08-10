@@ -16,6 +16,7 @@ from array import array
 
 from . import _pyplotrs_core as _core
 from . import scales as _scales
+from . import ticker as _ticker
 
 
 def _as_f64(values) -> "array":
@@ -63,7 +64,7 @@ class Normalize:
         return min(1.0, max(0.0, (value - self.vmin) / span))
 
     def colorbar_ticks(self, max_ticks: int = 6) -> list[_Tick]:
-        return _core.nice_ticks(self.vmin, self.vmax, max_ticks)
+        return _scales.nice_ticks(self.vmin, self.vmax, max_ticks)
 
 
 class LogNorm(Normalize):
@@ -143,7 +144,7 @@ class BoundaryNorm(Normalize):
         return min(1.0, max(0.0, (idx + 0.5) / self.nbins))
 
     def colorbar_ticks(self, max_ticks: int = 6) -> list[_Tick]:
-        return [(b, _scales._fmt_plain(b) if b == int(b) else f"{b:g}")
+        return [(b, _ticker.fix_minus(f"{b:g}") if b != int(b) else _scales._fmt_plain(b))
                 for b in self.boundaries]
 
 

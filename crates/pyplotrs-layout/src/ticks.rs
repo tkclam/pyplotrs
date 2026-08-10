@@ -102,6 +102,11 @@ fn decimals_for_step(step: f64) -> usize {
 
 /// Format a single tick `value` given the tick `step` (which fixes the number
 /// of decimal places so all labels on an axis are consistent).
+///
+/// The sign is an ASCII `-`, not U+2212: this is a pure function with no view
+/// of the display setting, so swapping in a real minus is the Python locator
+/// wrapper's job (`scales.nice_ticks`). Keep it ASCII - the `-0` guard below
+/// slices by byte and a multi-byte sign would cut mid-character.
 pub fn format_tick(value: f64, step: f64) -> String {
     let decimals = decimals_for_step(step);
     let v = if value == 0.0 { 0.0 } else { value }; // normalize -0.0

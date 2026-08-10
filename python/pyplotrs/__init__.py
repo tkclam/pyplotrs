@@ -12,7 +12,7 @@ from .figure import Axes, Axes3D, Figure, GridSpec, PolarAxes, subplots, subplot
 from .theme import Theme
 
 
-def figure(figsize: tuple[float, float] = (480, 360), *, theme=None,
+def figure(figsize: tuple[float, float] = (420, 315), *, theme=None,
            units: str = "pt") -> Figure:
     """Create an empty :class:`Figure` (no axes). Use
     :meth:`Figure.add_gridspec` + :meth:`Figure.add_subplot` to place spanning
@@ -53,6 +53,33 @@ def get_font_family() -> list[str]:
     return _core.get_sans_serif()
 
 
+def set_unicode_minus(on: bool = True) -> None:
+    """Whether negative numeric labels are signed with U+2212 MINUS SIGN.
+
+    pyplotrs' analogue of matplotlib's ``rcParams["axes.unicode_minus"]``, and
+    on by default for the same reason: the minus is drawn on the math axis at
+    the width of a ``+``, where the ASCII hyphen-minus is a short, low
+    word-joiner that leaves a tick column looking ragged.
+
+    Turn it off with ``set_unicode_minus(False)`` if labels must survive being
+    copied out of a saved SVG/PDF and parsed back as numbers, or if a font you
+    have set lacks the glyph::
+
+        pyplotrs.set_unicode_minus(False)
+
+    This governs labels pyplotrs formats from a number - axis and colorbar
+    ticks, and the numeric :mod:`~pyplotrs.ticker` formatters. Text you supply
+    yourself is never rewritten, and ``$...$`` math always uses a real minus.
+    """
+    ticker._UNICODE_MINUS = bool(on)
+
+
+def get_unicode_minus() -> bool:
+    """Whether negative numeric labels use U+2212 (see
+    :func:`set_unicode_minus`). Defaults to ``True``."""
+    return ticker._UNICODE_MINUS
+
+
 def resolved_font_name() -> str:
     """The family name body text actually resolves to on this host right now
     (e.g. ``"Arial"`` if installed, otherwise ``"Liberation Sans"``)."""
@@ -65,4 +92,5 @@ __all__ = [
     "themes", "Theme", "norms", "scales", "ticker",
     "Animation", "animate",
     "set_font_family", "get_font_family", "resolved_font_name",
+    "set_unicode_minus", "get_unicode_minus",
 ]

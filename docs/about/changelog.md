@@ -42,6 +42,22 @@ All notable changes to pyplotrs are documented here. The format is based on
   Custom `Colormap(stops=...)` now resamples in Oklab by default, so
   hand-built gradients are perceptually smooth rather than banding. All table
   data and color-space math run in Rust (`pyplotrs-color`).
+- Restored plot types: `quiver`, `streamplot` (RK4-integrated), `stackplot`,
+  `matshow`, `spy`, `pcolor`.
+- `Axes.fill(x, y)`, and `loglog` / `semilogx` / `semilogy` convenience wrappers
+  over `line`.
+- `save(path, transparent=True)` drops the white page fill from `.png` output.
+- A full getter layer: `get_xlim` / `get_ylim` / `get_title` / `get_xlabel` /
+  `get_xscale` / `get_aspect` / `get_xticks` / `get_xticklabels` /
+  `get_legend_handles_labels`, plus 3D and polar equivalents. Every one reports
+  the *effective* value (autoscaling and `sharex`/`sharey` included).
+- `set(xmargin=/ymargin=/margin=)`, `xinverted`/`yinverted`, `xminor`/`yminor`
+  on linear axes, `tick_direction`/`tick_length`, and `xlim="auto"` to clear a
+  pinned limit.
+- `text`/`annotate` `rotation=`, applied as a group transform so rotated text
+  stays selectable in PDF/SVG.
+- `legend(ncol=, title=, frameon=, fontsize=)` and
+  `colorbar(orientation=, shrink=, ticks=, format=)`.
 
 ### Changed
 
@@ -66,6 +82,15 @@ All notable changes to pyplotrs are documented here. The format is based on
 - `legend(loc="best")` now lives up to its name: it scores each corner by how
   much data the box would cover and takes the clearest. It was previously a
   plain alias for `upper right`.
+- **`alpha` and `label` on every 3D mark** (`surface`, `bar3d`,
+  `plot_wireframe`, `contour3d`, `plot_trisurf`, `quiver3d`, `voxels`), not
+  just `scatter`/`plot`. Colormapped kinds (`surface`, `trisurf`, `contour3d`)
+  now carry a legend swatch colour (their colormap's midpoint, or the middle
+  level).
+- `figure.py` split from one 5,307-line file into seven layered modules
+  (`_const`/`_util`/`_draw`/`_layout`/`axes`/`axes3d`/`polar`/`figure`),
+  byte-identical output. The 3D projection layer moved into a dedicated
+  `pyplotrs-3d` crate with batch (whole-mark, not per-vertex) projection.
 
 ### Fixed
 
@@ -88,3 +113,13 @@ All notable changes to pyplotrs are documented here. The format is based on
   `ValueError` instead of unwinding out of Rust as a `PanicException`.
 - The polar outer spine and a colormapped scatter's legend swatch follow the
   theme instead of hardcoded constants.
+- `Axes3D.plot` accepted `alpha` and silently dropped it.
+- `ax.surface(..., label=...)` / `ax.plot_trisurf(..., label=...)` followed by
+  `legend()` raised `KeyError('color')`.
+- `aspect="equal"` computed its scale from signed spans, so a descending limit
+  mirrored the other axis.
+- `+`/`x` markers with no explicit colour raised `NameError`.
+- `hexbin` was not reproducible between runs (iteration order of a `HashMap`
+  leaking into drawn geometry).
+- `bar(width=)`/`barh(height=)`/`boxplot(widths=)` no longer shrink to the
+  stroke width instead of the intended data extent.

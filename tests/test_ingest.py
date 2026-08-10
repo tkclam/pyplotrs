@@ -20,7 +20,7 @@ import pytest
 
 import pyplotrs as plt
 from pyplotrs import _pyplotrs_core as _core
-from pyplotrs.figure import _RangeAcc, _to_f64
+from pyplotrs._util import _RangeAcc, _to_f64
 
 np = pytest.importorskip("numpy", reason="numpy is a test-only convenience")
 
@@ -224,7 +224,7 @@ def test_errorbar_autoscale_stays_two_sided():
 def test_map_colors_matches_the_python_reference():
     """The Rust mapper must agree with ``cmap(norm(v))`` value for value."""
     from pyplotrs import colormaps, norms
-    from pyplotrs.figure import _colormap_lut
+    from pyplotrs._draw import _colormap_lut
 
     cm = colormaps.get_cmap("viridis")
     nrm = norms.Normalize(0.0, 1.0)
@@ -235,7 +235,7 @@ def test_map_colors_matches_the_python_reference():
 
 def test_map_colors_log_matches_lognorm():
     from pyplotrs import colormaps, norms
-    from pyplotrs.figure import _colormap_lut
+    from pyplotrs._draw import _colormap_lut
 
     cm = colormaps.get_cmap("viridis")
     nrm = norms.LogNorm(1.0, 1000.0)
@@ -247,7 +247,7 @@ def test_map_colors_log_matches_lognorm():
 
 def test_map_colors_leaves_out_of_domain_transparent():
     from pyplotrs import colormaps
-    from pyplotrs.figure import _colormap_lut
+    from pyplotrs._draw import _colormap_lut
 
     lut = _colormap_lut(colormaps.get_cmap("viridis"))
     # Non-positive on a log scale, and a NaN, have no position on the colour axis.
@@ -257,7 +257,7 @@ def test_map_colors_leaves_out_of_domain_transparent():
 
 def test_colormap_lut_is_cached_and_stable():
     from pyplotrs import colormaps
-    from pyplotrs.figure import _colormap_lut
+    from pyplotrs._draw import _colormap_lut
 
     cm = colormaps.get_cmap("plasma")
     first = _colormap_lut(cm)
@@ -282,7 +282,7 @@ def test_exotic_norms_still_colour_correctly(tmp_path):
     """TwoSlopeNorm has no Rust transform, so it must fall back to per-value
     Python rather than being mapped as if it were linear."""
     from pyplotrs import norms
-    from pyplotrs.figure import _rgba_values
+    from pyplotrs._draw import _rgba_values
     from pyplotrs import colormaps
 
     cm = colormaps.get_cmap("coolwarm")

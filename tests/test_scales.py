@@ -15,6 +15,7 @@ import pytest
 
 import pyplotrs as plt
 from pyplotrs import norms, scales, ticker
+from pyplotrs import _pyplotrs_core as _core
 
 
 # -- transform round-trips ---------------------------------------------------
@@ -122,6 +123,95 @@ def test_formatters_render_expected_strings(formatter, value, expected):
 def test_ticker_get_accepts_template_and_callable():
     assert isinstance(ticker.get("{x:.1f}"), ticker.Formatter)
     assert isinstance(ticker.get(lambda v, pos=None: "x"), ticker.Formatter)
+
+
+# -- the minus sign ----------------------------------------------------------
+
+@pytest.fixture
+def unicode_minus():
+    """Set the display flag per test and always put it back - it is process
+    global, so a leak would flip labels in unrelated tests."""
+    def apply(on: bool):
+        plt.set_unicode_minus(on)
+    yield apply
+    plt.set_unicode_minus(True)
+
+
+def test_negative_labels_use_a_real_minus_not_a_hyphen():
+    """Negative tick labels must carry U+2212, not ASCII ``-``: the hyphen is a
+    short, low word-joiner where the minus sits on the math axis at the width of
+    a ``+``. Covers the Rust locator, which formats ASCII and is corrected by
+    ``scales.nice_ticks`` on the way out."""
+    labels = [lab for _, lab in scales.nice_ticks(-3.0, 3.0, 7)]
+    assert "−3" in labels and "−1" in labels
+    assert not any("-" in lab for lab in labels)
+
+
+@pytest.mark.parametrize("scale,lo,hi", [
+    ("linear", -3.0, 3.0),
+    ("symlog", -100.0, 100.0),
+])
+def test_every_scale_signs_negative_ticks_the_same_way(scale, lo, hi):
+    for _, lab in scales.get(scale).ticks(lo, hi, 7):
+        assert "-" not in lab or lab.startswith("$"), f"ASCII hyphen in {lab!r}"
+
+
+@pytest.mark.parametrize("formatter,value,expected", [
+    (ticker.ScalarFormatter(), -2.0, "−2"),
+    (ticker.ScalarFormatter(), -1.5, "−1.5"),
+    (ticker.PercentFormatter(), -0.25, "−25%"),
+    (ticker.EngFormatter(unit="V"), -0.0012, "−1.2 mV"),
+    (ticker.LogFormatter(label_minor=True), 0.5, "0.5"),
+])
+def test_numeric_formatters_sign_with_u2212(formatter, value, expected):
+    assert formatter(value) == expected
+
+
+@pytest.mark.parametrize("formatter,value", [
+    (ticker.DateFormatter("%Y-%m-%d"), 0.0),
+    (ticker.StrMethodFormatter("{x:.0f}-{x:.0f}"), -1.0),
+    (ticker.FuncFormatter(lambda v, pos=None: "a-b"), -1.0),
+    (ticker.FixedFormatter(["a-b"]), 0.0),
+])
+def test_user_supplied_label_text_keeps_its_hyphens(formatter, value):
+    """A hyphen in text the caller produced is a hyphen - a date separator, a
+    range dash - and rewriting it would corrupt the label."""
+    assert "-" in formatter(value, 0)
+    assert ticker.MINUS not in formatter(value, 0)
+
+
+def test_math_labels_are_left_for_the_math_engine():
+    """Log-decade labels stay ASCII in the source string: the math engine maps
+    ``-`` to U+2212 itself, and a pre-substituted glyph would lose the binary
+    operator's spacing."""
+    labels = [lab for _, lab in scales.get("log").ticks(1e-4, 1.0, 7)]
+    assert "$10^{-4}$" in labels
+    assert not any(ticker.MINUS in lab for lab in labels)
+
+
+def test_unicode_minus_can_be_turned_off(unicode_minus):
+    unicode_minus(False)
+    assert plt.get_unicode_minus() is False
+    assert [lab for _, lab in scales.nice_ticks(-2.0, 2.0, 5)][0] == "-2"
+    assert ticker.ScalarFormatter()(-1.5) == "-1.5"
+    unicode_minus(True)
+    assert scales.nice_ticks(-2.0, 2.0, 5)[0][1] == "−2"
+
+
+def test_minus_widens_the_reserved_tick_band(unicode_minus):
+    """Labels reach the layout solver already signed, so the y band is measured
+    from the wider glyph. If the substitution ever moved to after measurement,
+    the labels would overrun the space reserved for them."""
+    def y_tick_band(on: bool) -> float:
+        unicode_minus(on)
+        fig, ax = plt.subplots(figsize=(300, 200))
+        ax.line([0, 1], [-100, -50])
+        scene = _core.Scene(300, 200)
+        bands, _xt, yt = ax._bands(scene, *ax._ranges())
+        assert any(ticker.MINUS in lab for _, lab in yt) is on
+        return bands[4]  # y_tick_h: tick length + gap + widest label
+
+    assert y_tick_band(True) > y_tick_band(False)
 
 
 # -- norms -------------------------------------------------------------------

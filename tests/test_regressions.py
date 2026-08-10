@@ -7,6 +7,8 @@ so a future failure reads as "this exact thing broke again".
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 import pyplotrs as plt
@@ -193,3 +195,164 @@ def test_empty_animation_raises():
     is defence in depth for any other caller of the encoder."""
     with pytest.raises(ValueError, match="positive int"):
         plt.animate(lambda i: plt.subplots()[0], 0)
+
+
+def _marker_xy(fig, tmp_path, name):
+    """Device coordinates of each scatter marker, read back out of the SVG."""
+    out = tmp_path / f"{name}.svg"
+    fig.save(str(out))
+    return [(float(x), float(y)) for x, y in
+            re.findall(r'<use[^>]*x="([-\d.]+)"\s+y="([-\d.]+)"', out.read_text())]
+
+
+def test_equal_aspect_does_not_mirror_an_inverted_axis(tmp_path):
+    """`aspect="equal"` computed its scale from *signed* spans, so a descending
+    limit - which is how an inverted axis is spelled - made the unit negative
+    and `new_pw` a negative width, mirroring the *other* axis. Nothing combined
+    the two until `spy`, which needs both (row 0 on top, square cells).
+
+    Checked through the real draw path: the aspect adjustment lives in `_draw`,
+    not in `_proj_for`, so it only shows up in rendered geometry.
+    """
+    fig, ax = plt.subplots(figsize=(240, 240))
+    ax.scatter([0, 3], [1, 1], marker="s")
+    ax.set(xlim=(-0.5, 3.5), ylim=(3.5, -0.5), aspect="equal")
+    left, right = _marker_xy(fig, tmp_path, "aspect")[:2]
+    assert left[0] < right[0], (
+        f"ascending x was mirrored under equal aspect: {left[0]} !< {right[0]}"
+    )
+
+
+def test_equal_aspect_still_squares_the_cells(tmp_path):
+    """The fix must not cost the property aspect="equal" exists for: one data
+    unit spans the same device length on both axes."""
+    fig, ax = plt.subplots(figsize=(300, 300))
+    ax.scatter([0, 2, 0], [0, 0, 2], marker="s")
+    ax.set(xlim=(-0.5, 2.5), ylim=(2.5, -0.5), aspect="equal")
+    pts = _marker_xy(fig, tmp_path, "square")
+    origin, dx2, dy2 = pts[0], pts[1], pts[2]
+    assert abs((dx2[0] - origin[0]) - abs(dy2[1] - origin[1])) < 1.0
+
+
+def test_spy_orientation_is_matrix_order(tmp_path):
+    """Row 0 at the top, column 0 at the left."""
+    fig, ax = plt.subplots(figsize=(240, 240))
+    ax.spy([[1, 0], [0, 1]])
+    (x0, x1), (y0, y1) = ax._ranges()
+    assert x0 < x1, "columns must run left to right"
+    assert y0 > y1, "rows must run top to bottom"
+    fig.save(str(tmp_path / "spy.png"))
+
+
+# -- the band fast path -------------------------------------------------------
+
+def test_fill_between_matches_its_bounds(tmp_path):
+    """`fill_between` moved from a Python per-point polygon build to the Rust
+    affine path (`add_band_xform`), the same one `line`/`scatter` already used.
+    A 50k band went 24.7 ms -> 6.6 ms; this pins that it still draws the right
+    polygon."""
+    fig, ax = plt.subplots(figsize=(240, 180))
+    ax.fill_between([0, 1, 2], [1, 3, 2], 0.0)
+    (x0, x1), (y0, y1) = ax._ranges()
+    assert x0 <= 0.0 and x1 >= 2.0
+    assert y0 <= 0.0 and y1 >= 3.0
+    fig.save(str(tmp_path / "band.png"))
+
+
+def test_fill_betweenx_is_the_transpose(tmp_path):
+    fig, ax = plt.subplots(figsize=(240, 180))
+    ax.fill_betweenx([0, 1, 2], [1, 3, 2], 0.0)
+    (x0, x1), (y0, y1) = ax._ranges()
+    assert y0 <= 0.0 and y1 >= 2.0
+    assert x0 <= 0.0 and x1 >= 3.0
+    fig.save(str(tmp_path / "bandx.png"))
+
+
+def test_fill_between_on_a_log_axis(tmp_path):
+    """The scale transform runs inside the Rust band builder, so a non-linear
+    axis must stay on the fast path rather than silently mis-mapping."""
+    fig, ax = plt.subplots(figsize=(240, 180))
+    ax.fill_between([1, 10, 100], [1, 10, 100], 1.0)
+    ax.set(xscale="log", yscale="log")
+    fig.save(str(tmp_path / "logband.png"))
+
+
+def test_fill_between_survives_non_finite_points(tmp_path):
+    fig, ax = plt.subplots(figsize=(240, 180))
+    ax.fill_between([0, 1, 2, 3], [1, float("nan"), 2, 1], 0.0)
+    fig.save(str(tmp_path / "nanband.png"))
+
+
+def test_degenerate_band_draws_nothing(tmp_path):
+    fig, ax = plt.subplots(figsize=(240, 180))
+    ax.fill_between([0.0], [1.0], 0.0)
+    fig.save(str(tmp_path / "tiny.png"))
+
+
+def test_hexbin_output_is_reproducible(tmp_path):
+    """`hexbin` binned into two `HashMap`s and emitted them in iteration order,
+    which Rust randomizes per process. The same data therefore drew its
+    hexagons in a different order on every run, and since neighbours share an
+    edge, the pixels on that edge changed too - so a figure was not
+    reproducible and could not be golden-tested.
+
+    Checked across *processes*, since the randomization is per-process: a
+    single-process loop would have passed the whole time.
+    """
+    import subprocess
+    import sys
+    import textwrap
+
+    script = textwrap.dedent("""
+        import hashlib, random, sys
+        import pyplotrs as plt
+        random.seed(7)
+        xs = [random.uniform(0, 10) for _ in range(2000)]
+        ys = [random.uniform(0, 10) for _ in range(2000)]
+        fig, ax = plt.subplots(figsize=(240, 180))
+        ax.hexbin(xs, ys, gridsize=14)
+        out = sys.argv[1]
+        fig.save(out)
+        print(hashlib.sha256(open(out, "rb").read()).hexdigest())
+    """)
+    digests = set()
+    for i in range(3):
+        r = subprocess.run(
+            [sys.executable, "-c", script, str(tmp_path / f"h{i}.png")],
+            capture_output=True, text=True, check=True,
+        )
+        digests.add(r.stdout.strip())
+    assert len(digests) == 1, f"hexbin differed across processes: {digests}"
+
+
+def test_data_extent_defaults_match_matplotlib():
+    """`bar(width=)`, `barh(height=)` and `boxplot(widths=)` are *data extents*
+    in axis units, not stroke widths.
+
+    Phase 6 renamed 36 internal `"width"` keys to `"linewidth"` to break exactly
+    that collision, and in the sweep these three signature defaults drifted down
+    with the stroke ones - 0.8/0.8/0.5 became 0.6/0.6/0.35. Nothing caught it:
+    the values are legal, every plot still rendered, and the golden reference
+    was regenerated over the top. Pin them to matplotlib's, which is what a
+    ported script expects a bar chart to look like.
+    """
+    import inspect
+
+    from pyplotrs.axes import Axes
+
+    expected = {("bar", "width"): 0.8, ("barh", "height"): 0.8,
+                ("boxplot", "widths"): 0.5, ("violinplot", "widths"): 0.5}
+    for (method, arg), want in expected.items():
+        got = inspect.signature(getattr(Axes, method)).parameters[arg].default
+        assert got == want, f"Axes.{method}({arg}=) is {got}, expected {want}"
+
+
+def test_bar_occupies_most_of_its_category_slot():
+    """The default above, checked where it is visible rather than in a
+    signature: three categories one unit apart, so a bar spans 0.8 of the gap
+    between neighbours."""
+    fig, ax = plt.subplots(figsize=(300, 200))
+    ax.bar(["a", "b", "c"], [1.0, 2.0, 3.0])
+    mark = ax._marks[0]
+    assert mark["width"] == 0.8
+    assert list(mark["xs"]) == [0.0, 1.0, 2.0]
