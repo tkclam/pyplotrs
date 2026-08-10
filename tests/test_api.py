@@ -380,6 +380,44 @@ def test_zorder_changes_the_rendered_output(tmp_path):
     assert render("line_on_top", 2, 1) != render("fill_on_top", 1, 2)
 
 
+# -- polar marks are 2D marks and take zorder too -----------------------------
+#
+# `PolarAxes.plot`/`scatter` took `label` and `alpha` but not `zorder`, and drew
+# straight from `self._marks` in insertion order - the only 2D marks outside the
+# contract, and undocumented as an exception. `_ordered_marks` was already
+# inherited from `_AxesBase`; polar simply never called it.
+
+@pytest.mark.parametrize("name", ["plot", "scatter"])
+def test_polar_marks_take_zorder(name):
+    assert "zorder" in inspect.signature(getattr(PolarAxes, name)).parameters
+
+
+def test_polar_zorder_lifts_a_mark_above_later_ones():
+    fig, ax = plt.subplots(projection="polar")
+    ax.plot([0, 1], [1, 2], zorder=2)          # added first, drawn last
+    ax.scatter([0, 1], [1, 2], zorder=1)
+    assert [m["kind"] for m in ax._ordered_marks()] == ["scatter", "line"]
+
+
+def test_polar_default_zorder_preserves_insertion_order():
+    fig, ax = plt.subplots(projection="polar")
+    for i in range(4):
+        ax.plot([0, 1], [i, i + 1])
+    assert ax._ordered_marks() == ax._marks
+
+
+def test_polar_zorder_changes_the_rendered_output(tmp_path):
+    def render(name, z):
+        fig, ax = plt.subplots(figsize=(220, 170), projection="polar")
+        ax.plot([0, 1, 2, 3], [1, 2, 3, 4], color="red", linewidth=8, zorder=z)
+        ax.plot([0, 1, 2, 3], [4, 3, 2, 1], color="blue", linewidth=8)
+        out = tmp_path / f"{name}.png"
+        fig.save(str(out))
+        return out.read_bytes()
+
+    assert render("red_under", 0) != render("red_over", 5)
+
+
 # -- the contract is universal, not just for the marks Phase 5 touched --------
 #
 # Phase 5 gave `zorder`/`alpha`/`label` to the eleven marks that existed at the
@@ -452,28 +490,160 @@ def test_pie_wedges_become_one_legend_entry_each():
     assert [e["label"] for e in ax._legend_entries()] == ["a", "b", "c"]
 
 
-@pytest.mark.parametrize("name,call", [
-    ("boxplot", lambda ax, a: ax.boxplot([[1, 2, 3, 4, 9]], alpha=a)),
-    ("violinplot", lambda ax, a: ax.violinplot([[1, 2, 2, 3, 4]], alpha=a)),
-    ("imshow", lambda ax, a: ax.imshow([[1, 2], [3, 9]], alpha=a)),
-    ("eventplot", lambda ax, a: ax.eventplot([[1, 2, 3]], alpha=a)),
-    ("hexbin", lambda ax, a: ax.hexbin([1, 2, 3], [1, 2, 3], gridsize=3, alpha=a)),
-    ("pcolormesh", lambda ax, a: ax.pcolormesh([[1, 2], [3, 9]], alpha=a)),
-    ("contour", lambda ax, a: ax.contour([[1, 2], [3, 4]], alpha=a)),
-    ("contourf", lambda ax, a: ax.contourf([[1, 2], [3, 4]], alpha=a)),
-    ("pie", lambda ax, a: ax.pie([1, 2, 3], alpha=a)),
-])
-def test_alpha_changes_the_rendered_bytes(name, call, tmp_path):
-    """Accepting `alpha` is not enough - the colormapped kinds have no single
-    colour to fold it into, so it has to ride their LUT or their colour list."""
+# -- the contract, checked by behaviour rather than by signature --------------
+#
+# Every audit so far has found the same bug: a contract that held for the marks
+# it was written against and silently missed the ones added afterwards. Phase 5
+# missed the ten restored beside it; Phase 6b missed the seven 3D marks; Phase
+# 7a's six new 2D types were never folded into the lists above.
+#
+# `inspect.signature` cannot close that hole, because it is wrong in *both*
+# directions. It reports a gap where there is none - `pcolor`/`matshow` forward
+# `**kwargs`, and `stackplot` spells it `labels` - and it reports success where
+# the value is accepted and then dropped, which is exactly how
+# `Axes3D.plot(alpha=)` and the 3D `label=` + `legend()` crash both survived.
+# So the tests below call every mark and look at what comes out, and
+# `test_every_public_axes_method_is_classified` makes it impossible to add a
+# thirty-first mark without deciding whether the contract applies to it.
+
+#: How to call each mark with the smallest data that draws something.
+_MARK_CALLS = {
+    "bar": lambda ax, **k: ax.bar([0, 1, 2], [1, 2, 3], **k),
+    "barh": lambda ax, **k: ax.barh([0, 1, 2], [1, 2, 3], **k),
+    "boxplot": lambda ax, **k: ax.boxplot([[1, 2, 3, 4, 9]], **k),
+    "broken_barh": lambda ax, **k: ax.broken_barh([(0, 2)], (0, 1), **k),
+    "contour": lambda ax, **k: ax.contour([[1, 2], [3, 4]], **k),
+    "contourf": lambda ax, **k: ax.contourf([[1, 2], [3, 4]], **k),
+    "errorbar": lambda ax, **k: ax.errorbar([0, 1, 2], [1, 2, 3], yerr=[0.2] * 3, **k),
+    "eventplot": lambda ax, **k: ax.eventplot([[1, 2, 3]], **k),
+    "fill_between": lambda ax, **k: ax.fill_between([0, 1, 2], [1, 2, 3], 0, **k),
+    "fill_betweenx": lambda ax, **k: ax.fill_betweenx([0, 1, 2], [1, 2, 3], 0, **k),
+    "hexbin": lambda ax, **k: ax.hexbin([1, 2, 3], [1, 2, 3], gridsize=3, **k),
+    "hist": lambda ax, **k: ax.hist([1, 2, 2, 3, 3, 3], **k),
+    "hist2d": lambda ax, **k: ax.hist2d([1, 2, 3], [1, 2, 3], bins=2, **k),
+    "hlines": lambda ax, **k: ax.hlines([1, 2], 0, 1, **k),
+    "imshow": lambda ax, **k: ax.imshow([[1, 2], [3, 9]], **k),
+    "line": lambda ax, **k: ax.line([0, 1, 2], [0, 2, 1], **k),
+    "matshow": lambda ax, **k: ax.matshow([[1, 2], [3, 9]], **k),
+    "pcolor": lambda ax, **k: ax.pcolor([[1, 2], [3, 9]], **k),
+    "pcolormesh": lambda ax, **k: ax.pcolormesh([[1, 2], [3, 9]], **k),
+    "pie": lambda ax, **k: ax.pie([1, 2, 3], **k),
+    "quiver": lambda ax, **k: ax.quiver([0, 1], [0, 1], [1, 1], [1, 0], **k),
+    "scatter": lambda ax, **k: ax.scatter([0, 1, 2], [0, 2, 1], **k),
+    "spy": lambda ax, **k: ax.spy([[1, 0], [0, 1]], **k),
+    "stackplot": lambda ax, **k: ax.stackplot([0, 1, 2], [1, 2, 3], **k),
+    "stairs": lambda ax, **k: ax.stairs([1, 2, 3], [0, 1, 2, 3], **k),
+    "stem": lambda ax, **k: ax.stem([0, 1, 2], [1, 2, 3], **k),
+    "step": lambda ax, **k: ax.step([0, 1, 2], [1, 2, 3], **k),
+    "streamplot": lambda ax, **k: ax.streamplot(
+        [0, 1, 2], [0, 1, 2], [[1] * 3] * 3, [[1] * 3] * 3, **k),
+    "violinplot": lambda ax, **k: ax.violinplot([[1, 2, 2, 3, 4]], **k),
+    "vlines": lambda ax, **k: ax.vlines([1, 2], 0, 1, **k),
+}
+
+#: Public `Axes` methods that are deliberately *not* marks, and so sit outside
+#: the zorder/alpha/label contract. Grouped by why.
+_NOT_MARKS = frozenset({
+    # Patches: drawn over the data, documented as outside the contract.
+    "polygon", "rectangle", "circle", "ellipse", "fill",
+    # Annotations and reference lines.
+    "text", "annotate", "arrow",
+    "axhline", "axvline", "axline", "axhspan", "axvspan",
+    # Axis and figure plumbing.
+    "axis", "set", "legend", "inset_axes", "twinx", "twiny",
+    "secondary_xaxis", "secondary_yaxis",
+    # Scale wrappers over `set(xscale=)` + `line()`.
+    "loglog", "semilogx", "semilogy",
+    # Readers.
+    "get_aspect", "get_legend_handles_labels", "get_title", "get_xlabel",
+    "get_xlim", "get_xscale", "get_xticklabels", "get_xticks", "get_ylabel",
+    "get_ylim", "get_yscale", "get_yticklabels", "get_yticks",
+})
+
+#: `pie` spells its labels per-wedge and `stackplot` per-series; both have their
+#: own legend tests below. Every other mark takes a singular `label`.
+_NO_SINGULAR_LABEL = {"pie", "stackplot"}
+
+
+def test_every_public_axes_method_is_classified():
+    """Adding a mark must be a decision, not an omission.
+
+    Each audit found new marks that had quietly skipped the contract because
+    nothing forced anyone to look. A new public method now fails here until it
+    is either registered in `_MARK_CALLS` - which subjects it to every test
+    below - or listed in `_NOT_MARKS` with a reason.
+    """
+    public = {n for n in dir(Axes)
+              if not n.startswith("_") and callable(getattr(Axes, n))}
+
+    unclassified = public - set(_MARK_CALLS) - _NOT_MARKS
+    assert not unclassified, (
+        f"unclassified public Axes method(s): {sorted(unclassified)}. If this is "
+        f"a mark, add it to _MARK_CALLS so the alpha/label/zorder contract is "
+        f"enforced on it; if not, add it to _NOT_MARKS with a reason."
+    )
+    stale = (set(_MARK_CALLS) | _NOT_MARKS) - public
+    assert not stale, f"these no longer exist on Axes: {sorted(stale)}"
+
+
+@pytest.mark.parametrize("name", sorted(_MARK_CALLS))
+def test_every_mark_records_a_mark(name):
+    """Grounds the classification: a `_MARK_CALLS` entry that draws nothing
+    would make every other test in this section vacuous."""
+    fig, ax = plt.subplots()
+    _MARK_CALLS[name](ax)
+    assert ax._marks, f"{name} recorded no mark"
+
+
+@pytest.mark.parametrize("name", sorted(_MARK_CALLS))
+def test_alpha_is_applied_not_merely_accepted(name, tmp_path):
+    """Render at two alphas and compare bytes.
+
+    Accepting the keyword proves nothing: the colormapped kinds have no single
+    colour to fold it into, so it has to ride their LUT or their colour list,
+    and a mark that takes `alpha` and drops it looks identical to one that
+    honours it until you actually rasterize both.
+    """
     def render(a):
-        fig, ax = plt.subplots(figsize=(200, 150))
-        call(ax, a)
+        fig, ax = plt.subplots(figsize=(180, 140))
+        _MARK_CALLS[name](ax, alpha=a)
         out = tmp_path / f"{name}_{a}.png"
         fig.save(str(out))
         return out.read_bytes()
 
-    assert render(1.0) != render(0.3), f"{name} accepted alpha but ignored it"
+    assert render(1.0) != render(0.25), f"{name} accepted alpha but ignored it"
+
+
+@pytest.mark.parametrize("name", sorted(set(_MARK_CALLS) - _NO_SINGULAR_LABEL))
+def test_every_mark_label_reaches_the_legend(name):
+    fig, ax = plt.subplots()
+    _MARK_CALLS[name](ax, label="L")
+    assert "L" in ax.get_legend_handles_labels()[1], (
+        f"{name} accepted label= but it never reached the legend"
+    )
+
+
+@pytest.mark.parametrize("name", sorted(set(_MARK_CALLS) - _NO_SINGULAR_LABEL))
+def test_every_labelled_mark_renders_its_legend(name, tmp_path):
+    """`surface(label=...)` + `legend()` raised `KeyError: 'color'` for a whole
+    release because no test drew the legend it had just asked for."""
+    fig, ax = plt.subplots(figsize=(180, 140))
+    _MARK_CALLS[name](ax, label="L")
+    ax.legend()
+    fig.save(str(tmp_path / f"{name}.png"))
+
+
+@pytest.mark.parametrize("name", sorted(_MARK_CALLS))
+def test_every_mark_honours_zorder(name):
+    fig, ax = plt.subplots()
+    _MARK_CALLS[name](ax, zorder=3)
+    assert all(m["zorder"] == 3 for m in ax._marks), f"{name} dropped zorder"
+
+
+def test_stackplot_labels_each_series():
+    fig, ax = plt.subplots()
+    ax.stackplot([0, 1, 2], [1, 2, 3], [2, 1, 2], labels=["a", "b"])
+    assert ax.get_legend_handles_labels()[1] == ["a", "b"]
 
 
 # -- one key per concept, inside the mark dict too ----------------------------

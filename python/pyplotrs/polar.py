@@ -62,9 +62,11 @@ class PolarAxes(_AxesBase):
     def plot(self, theta, r, *, label: str | None = None, color=None,
              linewidth: float | None = None, alpha: float = 1.0,
              linestyle: str = "solid",
-             marker: str | None = None, markersize: float = 5.0) -> "PolarAxes":
+             marker: str | None = None, markersize: float = 5.0,
+             zorder: float = 0.0) -> "PolarAxes":
         """Line through polar points ``(theta, r)`` (``theta`` in radians)."""
         self._marks.append({
+            "zorder": float(zorder),
             "kind": "line",
             "theta": [float(t) for t in theta],
             "r": [float(v) for v in r],
@@ -80,12 +82,13 @@ class PolarAxes(_AxesBase):
     def scatter(self, theta, r, *, label: str | None = None, color=None,
                 markersize: float | None = None, alpha: float = 1.0,
                 marker: str = "o", edgecolor=None,
-                size: float | None = None) -> "PolarAxes":
+                size: float | None = None, zorder: float = 0.0) -> "PolarAxes":
         """Scatter polar points ``(theta, r)`` (``theta`` in radians).
 
         ``markersize`` is a diameter in points; ``size`` is the matplotlib-style
         area in pt² (see :meth:`Axes.scatter`)."""
         self._marks.append({
+            "zorder": float(zorder),
             "kind": "scatter",
             "theta": [float(t) for t in theta],
             "r": [float(v) for v in r],
@@ -223,7 +226,7 @@ class PolarAxes(_AxesBase):
             _text(scene, lx, ly, lab, t.tick_label_size, t.text_color)
 
         # 6. Data marks, projected through the polar map.
-        for m in self._marks:
+        for m in self._ordered_marks():
             dev = [to_dev(th, rv) for th, rv in zip(m["theta"], m["r"])]
             if m["kind"] == "line":
                 if _draws_line(m["linestyle"]) and len(dev) >= 2:
