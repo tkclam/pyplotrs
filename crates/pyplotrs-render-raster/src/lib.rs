@@ -396,6 +396,33 @@ fn blit_tile(
                 continue;
             }
             let dx = dest_x + sx;
+            let idx = dst_row + dx as usize;
+
+            // Resolve the clip coverage up front: `k = 255` (full coverage)
+            // is the common case away from the clip mask's own edge, and
+            // knowing it here lets the opaque fast path below apply under a
+            // clip too, not just when there is none.
+            let k = match clip_data {
+                Some(cd) => {
+                    let k = cd[idx] as u32;
+                    if k == 0 {
+                        continue;
+                    }
+                    k
+                }
+                None => 255,
+            };
+
+            // Fast path: an opaque, untinted source pixel under full clip
+            // coverage source-over-composites to exactly itself (`inv` below
+            // would be 0, so every blended channel reduces to the source
+            // one). That's the interior of every filled marker, so skipping
+            // the divide-by-255 blend arithmetic there is most of the win.
+            if tint.is_none() && sa == 255 && k == 255 {
+                dst[idx] = s;
+                continue;
+            }
+
             let (mut sr, mut sg, mut sb) = match tint {
                 // Coverage mask: `sa` is the antialiased coverage. Fold in the
                 // tint's own alpha, then premultiply its channels by the result.
@@ -412,19 +439,12 @@ fn blit_tile(
                 }
                 None => (s.red() as u32, s.green() as u32, s.blue() as u32),
             };
-            if let Some(cd) = clip_data {
-                let k = cd[dst_row + dx as usize] as u32;
-                if k == 0 {
-                    continue;
-                }
-                if k != 255 {
-                    sa = (sa * k + 127) / 255;
-                    sr = (sr * k + 127) / 255;
-                    sg = (sg * k + 127) / 255;
-                    sb = (sb * k + 127) / 255;
-                }
+            if k != 255 {
+                sa = (sa * k + 127) / 255;
+                sr = (sr * k + 127) / 255;
+                sg = (sg * k + 127) / 255;
+                sb = (sb * k + 127) / 255;
             }
-            let idx = dst_row + dx as usize;
             let bg = dst[idx];
             let inv = 255 - sa;
             let oa = (sa + (bg.alpha() as u32 * inv + 127) / 255).min(255);

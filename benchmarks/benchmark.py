@@ -28,7 +28,7 @@ import time
 import zlib
 
 import pyplotrs
-from pyplotrs import figure as _F
+from pyplotrs import _pyplotrs_core as _core
 
 OUT = "/tmp/pyplotrs_bench"
 os.makedirs(OUT, exist_ok=True)
@@ -66,13 +66,13 @@ def bench_ab():
     for n in (10_000, 100_000, 1_000_000):
         xs, ys = gen(n)
 
-        scene = _F._core.Scene(600.0, 400.0)
+        scene = _core.Scene(600.0, 400.0)
         t0 = time.perf_counter()
         pts = [(ax_ * x + bx_, ay_ * y + by_) for x, y in zip(xs, ys)]
         scene.add_path(pts, stroke_color=(0, 0, 0, 255), stroke_width=1.0)
         t_py = time.perf_counter() - t0
 
-        scene2 = _F._core.Scene(600.0, 400.0)
+        scene2 = _core.Scene(600.0, 400.0)
         t0 = time.perf_counter()
         scene2.add_line_xform(xs, ys, ax_, bx_, ay_, by_, (0, 0, 0, 255), 1.0, None,
                               "round", "round")
