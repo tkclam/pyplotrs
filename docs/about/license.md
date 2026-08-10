@@ -30,13 +30,28 @@ Sans; the chosen font is embedded into every saved figure. See
 [`assets/fonts/NOTICE.md`](https://github.com/tkclam/pyplotrs/blob/main/assets/fonts/NOTICE.md)
 for which file plays which role.
 
-### Colormap data
+### Colormap and palette data
 
-The `viridis`, `plasma`, `inferno`, `magma` and `cividis` lookup tables are the
-canonical perceptually-uniform colormaps created for matplotlib by Stefan van der
-Walt and Nathaniel Smith, dedicated to the **public domain (CC0)**. pyplotrs ships
-the exact 256-entry RGB lookup tables in `python/pyplotrs/_colormap_data.py`,
-generated from matplotlib's upstream `_cm_listed.py`.
+pyplotrs embeds **127 colormaps and 25 categorical palettes**, compiled into the
+extension as lookup tables (`crates/pyplotrs-color`) so that naming one at
+runtime pulls in no third-party package. The full source-by-source breakdown,
+with licenses and the required colorcet attribution, is in
+[`THIRD_PARTY_COLORMAPS.md`](https://github.com/tkclam/pyplotrs/blob/main/THIRD_PARTY_COLORMAPS.md);
+in summary the data comes from matplotlib, [colorcet](https://colorcet.holoviz.org/)
+(CC-BY 4.0, `cet_*`), [cmocean](https://matplotlib.org/cmocean/) (MIT, `cmo_*`)
+and [seaborn](https://seaborn.pydata.org/) (BSD-3-Clause, `sns_*`).
 
-`grays` and `coolwarm` are defined analytically in `python/pyplotrs/colormaps.py`
-and carry no third-party data.
+Among them, the `viridis`, `plasma`, `inferno`, `magma` and `cividis` tables are
+the canonical perceptually-uniform colormaps created for matplotlib by Stefan van
+der Walt and Nathaniel Smith, dedicated to the **public domain (CC0)**.
+
+### PDF writer (compiled into the extension)
+
+- **krilla** — © Laurenz Stampfl. **MIT OR Apache-2.0**. The PDF backend.
+  pyplotrs carries a minimally patched copy under
+  [`vendor/krilla-0.8.2`](https://github.com/tkclam/pyplotrs/blob/main/vendor/krilla-0.8.2),
+  which cuts export time on point-heavy figures without changing output
+  semantics; the changes and their rationale are documented in
+  [`PYPLOTRS_PATCH.md`](https://github.com/tkclam/pyplotrs/blob/main/vendor/krilla-0.8.2/PYPLOTRS_PATCH.md),
+  and the license texts travel with it as `LICENSE-MIT` and `LICENSE-APACHE`.
+  Source: <https://github.com/LaurenzV/krilla>.

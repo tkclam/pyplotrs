@@ -1,5 +1,13 @@
 # pyplotrs patch notes
 
+> **License.** krilla is © Laurenz Stampfl, dual-licensed **MIT OR
+> Apache-2.0**; pyplotrs redistributes it under those terms, unchanged. The
+> crates.io `.crate` tarball ships no license files, so verbatim copies are
+> included here as [`LICENSE-MIT`](LICENSE-MIT) and
+> [`LICENSE-APACHE`](LICENSE-APACHE) — both licenses require the notice to
+> travel with the source, and this copy goes out in pyplotrs' sdist and is
+> compiled into every wheel. See also `docs/about/license.md`.
+
 This is a vendored copy of [`krilla`](https://github.com/LaurenzV/krilla)
 0.8.2 (MIT OR Apache-2.0, per its `Cargo.toml`), pulled from crates.io and
 patched by pyplotrs to remove per-placement overhead that showed up when
