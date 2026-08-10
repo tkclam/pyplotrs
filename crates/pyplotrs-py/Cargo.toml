@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyplotrs-core = { path = "../pyplotrs-core" }
+pyplotrs-color = { path = "../pyplotrs-color" }
 pyplotrs-text = { path = "../pyplotrs-text" }
 pyplotrs-math = { path = "../pyplotrs-math" }
 pyplotrs-layout = { path = "../pyplotrs-layout" }

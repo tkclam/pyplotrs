@@ -53,6 +53,8 @@ nav:
   - API reference:
       - Figure & Axes: api/figure.md
       - Colormaps: api/colormaps.md
+      - Palettes: api/palettes.md
+      - Color science: api/color.md
       - Themes: api/themes.md
       - Animation: api/animation.md
   - About:

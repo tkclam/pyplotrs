@@ -1,0 +1,15 @@
+[package]
+name = "pyplotrs-color"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# Color-space conversions (sRGB/linear/XYZ/Lab/Oklab/Oklch/CAM16) - a
+# well-established, actively maintained crate rather than hand-rolled color
+# math. Trimmed to the pieces pyplotrs actually needs: no CSS name tables
+# (`named`), no RNG sampling (`random`), no serde.
+palette = { version = "0.7", default-features = false, features = ["std", "approx"] }
+
+[dev-dependencies]
+approx = "0.5"

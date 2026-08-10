@@ -564,6 +564,195 @@ fn map_colors(
         .collect()
 }
 
+// -- colormap/palette registry + color science (pyplotrs-color) -------------
+//
+// The curated colormap/palette tables and all color-space math live in the
+// `pyplotrs-color` crate (matplotlib/colorcet/cmocean-sourced continuous
+// maps, matplotlib/ColorBrewer/seaborn-sourced categorical palettes, and
+// sRGB/XYZ/Lab/Oklab/CAM16-UCS conversions). These bindings are thin: every
+// function below is a direct pass-through, with `u8` triples standing in for
+// `pyplotrs_color::Table`'s `[u8; 3]` entries (PyO3 has no fixed-size-array
+// conversion, so `Colormap` materializes its 256-entry table as a
+// `list[tuple[int,int,int]]` on the Python side).
+
+/// A built-in colormap's exact 256-entry RGB table (`_r` suffix reverses it).
+/// `None` if `name` is not registered.
+#[pyfunction]
+fn colormap_table(name: &str) -> Option<Vec<(u8, u8, u8)>> {
+    pyplotrs_color::colormap_table(name).map(|t| t.into_iter().map(|[r, g, b]| (r, g, b)).collect())
+}
+
+/// Build a 256-entry RGB table from `(position, color)` stops, interpolated
+/// in `space` (`"oklab"` (default/unrecognized), `"lab"`, `"linear"`, or
+/// `"srgb"`). Mirrors `Colormap(name, stops=...)`'s construction path.
+#[pyfunction]
+fn colormap_table_from_stops(stops: Vec<(f64, (u8, u8, u8))>, space: &str) -> Vec<(u8, u8, u8)> {
+    let stops: Vec<(f64, [u8; 3])> = stops.into_iter().map(|(p, (r, g, b))| (p, [r, g, b])).collect();
+    pyplotrs_color::colormap_table_from_stops(&stops, space)
+        .into_iter()
+        .map(|[r, g, b]| (r, g, b))
+        .collect()
+}
+
+/// A built-in categorical/qualitative palette's colors by name (`None` if
+/// unregistered).
+#[pyfunction]
+fn categorical_palette(name: &str) -> Option<Vec<(u8, u8, u8)>> {
+    pyplotrs_color::categorical_palette(name).map(|colors| colors.iter().map(|&[r, g, b]| (r, g, b)).collect())
+}
+
+/// Names of built-in continuous colormaps, optionally filtered to one
+/// category (`"sequential"`, `"diverging"`, `"cyclic"`,
+/// `"perceptually_uniform"`, `"miscellaneous"`).
+#[pyfunction]
+#[pyo3(signature = (category=None))]
+fn list_colormaps(category: Option<&str>) -> Vec<String> {
+    pyplotrs_color::list_colormaps(category).into_iter().map(String::from).collect()
+}
+
+/// Names of built-in categorical/qualitative palettes.
+#[pyfunction]
+fn list_palettes() -> Vec<String> {
+    pyplotrs_color::list_palettes().into_iter().map(String::from).collect()
+}
+
+/// Alpha-scale a 256-entry RGB table into a draw-ready 1024-byte RGBA LUT
+/// (replaces the 256-iteration Python loop `_draw.py::_colormap_lut` used to
+/// do). Errors if `table` is not exactly 256 entries.
+#[pyfunction]
+fn colormap_rgba_lut(table: Vec<(u8, u8, u8)>, alpha: f64) -> PyResult<Vec<u8>> {
+    let table: [[u8; 3]; 256] = table
+        .into_iter()
+        .map(|(r, g, b)| [r, g, b])
+        .collect::<Vec<_>>()
+        .try_into()
+        .map_err(|_| PyValueError::new_err("colormap_rgba_lut needs exactly 256 entries"))?;
+    Ok(pyplotrs_color::rgba_lut(&table, alpha).to_vec())
+}
+
+/// sRGB (as `(r, g, b)` bytes 0-255) -> Oklab (`L` in `[0, 1]`, `a`/`b`
+/// roughly `[-0.4, 0.4]`).
+#[pyfunction]
+fn srgb_to_oklab(rgb: (u8, u8, u8)) -> (f64, f64, f64) {
+    let [l, a, b] = pyplotrs_color::colorspace::srgb_to_oklab([rgb.0, rgb.1, rgb.2]);
+    (l, a, b)
+}
+
+/// Oklab -> sRGB bytes (out-of-gamut input is clipped per channel).
+#[pyfunction]
+fn oklab_to_srgb(lab: (f64, f64, f64)) -> (u8, u8, u8) {
+    let [r, g, b] = pyplotrs_color::colorspace::oklab_to_srgb([lab.0, lab.1, lab.2]);
+    (r, g, b)
+}
+
+/// sRGB -> Oklch (`L` in `[0, 1]`, `chroma` >= 0, `hue` degrees).
+#[pyfunction]
+fn srgb_to_oklch(rgb: (u8, u8, u8)) -> (f64, f64, f64) {
+    let [l, c, h] = pyplotrs_color::colorspace::srgb_to_oklch([rgb.0, rgb.1, rgb.2]);
+    (l, c, h)
+}
+
+/// Oklch -> sRGB bytes.
+#[pyfunction]
+fn oklch_to_srgb(lch: (f64, f64, f64)) -> (u8, u8, u8) {
+    let [r, g, b] = pyplotrs_color::colorspace::oklch_to_srgb([lch.0, lch.1, lch.2]);
+    (r, g, b)
+}
+
+/// sRGB -> CIELAB (D65), `L*` in `[0, 100]`.
+#[pyfunction]
+fn srgb_to_lab(rgb: (u8, u8, u8)) -> (f64, f64, f64) {
+    let [l, a, b] = pyplotrs_color::colorspace::srgb_to_lab([rgb.0, rgb.1, rgb.2]);
+    (l, a, b)
+}
+
+/// CIELAB (D65) -> sRGB bytes.
+#[pyfunction]
+fn lab_to_srgb(lab: (f64, f64, f64)) -> (u8, u8, u8) {
+    let [r, g, b] = pyplotrs_color::colorspace::lab_to_srgb([lab.0, lab.1, lab.2]);
+    (r, g, b)
+}
+
+/// sRGB -> CIE 1931 XYZ (D65 white point, `Y` in `[0, 1]`).
+#[pyfunction]
+fn srgb_to_xyz(rgb: (u8, u8, u8)) -> (f64, f64, f64) {
+    let [x, y, z] = pyplotrs_color::colorspace::srgb_to_xyz([rgb.0, rgb.1, rgb.2]);
+    (x, y, z)
+}
+
+/// CIE 1931 XYZ (D65) -> sRGB bytes.
+#[pyfunction]
+fn xyz_to_srgb(xyz: (f64, f64, f64)) -> (u8, u8, u8) {
+    let [r, g, b] = pyplotrs_color::colorspace::xyz_to_srgb([xyz.0, xyz.1, xyz.2]);
+    (r, g, b)
+}
+
+/// Encoded (gamma) sRGB -> linear-light sRGB (each component `[0, 1]`).
+#[pyfunction]
+fn srgb_to_linear(rgb: (u8, u8, u8)) -> (f64, f64, f64) {
+    let [r, g, b] = pyplotrs_color::colorspace::srgb_to_linear([rgb.0, rgb.1, rgb.2]);
+    (r, g, b)
+}
+
+/// Linear-light sRGB -> encoded (gamma) sRGB bytes.
+#[pyfunction]
+fn linear_to_srgb(rgb: (f64, f64, f64)) -> (u8, u8, u8) {
+    let [r, g, b] = pyplotrs_color::colorspace::linear_to_srgb([rgb.0, rgb.1, rgb.2]);
+    (r, g, b)
+}
+
+/// sRGB -> CAM16-UCS (Jmh form: lightness, colorfulness, hue-degrees) under
+/// pyplotrs' fixed viewing conditions (see `pyplotrs_color::colorspace`).
+#[pyfunction]
+fn srgb_to_cam16ucs(rgb: (u8, u8, u8)) -> (f64, f64, f64) {
+    let [j, m, h] = pyplotrs_color::colorspace::srgb_to_cam16ucs([rgb.0, rgb.1, rgb.2]);
+    (j, m, h)
+}
+
+/// CAM16-UCS (Jmh form) -> sRGB bytes.
+#[pyfunction]
+fn cam16ucs_to_srgb(ucs: (f64, f64, f64)) -> (u8, u8, u8) {
+    let [r, g, b] = pyplotrs_color::colorspace::cam16ucs_to_srgb([ucs.0, ucs.1, ucs.2]);
+    (r, g, b)
+}
+
+/// Perceptual (CAM16-UCS) distance between two sRGB colors.
+#[pyfunction]
+fn cam16ucs_distance(a: (u8, u8, u8), b: (u8, u8, u8)) -> f64 {
+    pyplotrs_color::colorspace::cam16ucs_distance([a.0, a.1, a.2], [b.0, b.1, b.2])
+}
+
+/// Simulate `rgb` as seen under a color-vision deficiency (`"protanopia"`,
+/// `"deuteranopia"`, or `"tritanopia"`), via the Machado/Oliveira/Fernandes
+/// (2009) model.
+#[pyfunction]
+fn simulate_cvd(rgb: (u8, u8, u8), kind: &str) -> PyResult<(u8, u8, u8)> {
+    let [r, g, b] = pyplotrs_color::simulate_cvd([rgb.0, rgb.1, rgb.2], kind)
+        .ok_or_else(|| PyValueError::new_err(format!("unknown CVD kind {kind:?}")))?;
+    Ok((r, g, b))
+}
+
+/// Worst-case distinguishability of a 256-entry colormap table under a CVD
+/// kind: `1.0` = unaffected, near `0.0` = some pair of its colors becomes
+/// indistinguishable. Takes a table (not a name) so it works for *any*
+/// `Colormap`, built-in or custom - `color.py` passes `cmap._table`.
+#[pyfunction]
+fn cvd_safety_ratio(table: Vec<(u8, u8, u8)>, kind: &str) -> PyResult<f64> {
+    let kind = pyplotrs_color::CvdKind::parse(kind)
+        .ok_or_else(|| PyValueError::new_err(format!("unknown CVD kind {kind:?}")))?;
+    let table: Vec<[u8; 3]> = table.into_iter().map(|(r, g, b)| [r, g, b]).collect();
+    Ok(pyplotrs_color::cvd::cvd_safety_ratio(&table, kind))
+}
+
+/// Perceptual-uniformity roughness of a 256-entry colormap table: `0.0`
+/// means every step along it looks equally large; larger values mean some
+/// regions compress more visual change into less data range than others.
+#[pyfunction]
+fn perceptual_uniformity(table: Vec<(u8, u8, u8)>) -> f64 {
+    let table: Vec<[u8; 3]> = table.into_iter().map(|(r, g, b)| [r, g, b]).collect();
+    pyplotrs_color::cvd::perceptual_uniformity(&table)
+}
+
 /// Symlog parameters (matplotlib defaults: linthresh=1, linscale=1, base=10).
 /// `linscale_adj = linscale / (1 - 1/base)`; `log_base = ln(base)`.
 const SYMLOG_LINTHRESH: f64 = 1.0;
@@ -1857,5 +2046,27 @@ fn _pyplotrs_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(hist2d, m)?)?;
     m.add_function(wrap_pyfunction!(gaussian_kde, m)?)?;
     m.add_function(wrap_pyfunction!(hexbin, m)?)?;
+    m.add_function(wrap_pyfunction!(colormap_table, m)?)?;
+    m.add_function(wrap_pyfunction!(colormap_table_from_stops, m)?)?;
+    m.add_function(wrap_pyfunction!(categorical_palette, m)?)?;
+    m.add_function(wrap_pyfunction!(list_colormaps, m)?)?;
+    m.add_function(wrap_pyfunction!(list_palettes, m)?)?;
+    m.add_function(wrap_pyfunction!(colormap_rgba_lut, m)?)?;
+    m.add_function(wrap_pyfunction!(srgb_to_oklab, m)?)?;
+    m.add_function(wrap_pyfunction!(oklab_to_srgb, m)?)?;
+    m.add_function(wrap_pyfunction!(srgb_to_oklch, m)?)?;
+    m.add_function(wrap_pyfunction!(oklch_to_srgb, m)?)?;
+    m.add_function(wrap_pyfunction!(srgb_to_lab, m)?)?;
+    m.add_function(wrap_pyfunction!(lab_to_srgb, m)?)?;
+    m.add_function(wrap_pyfunction!(srgb_to_xyz, m)?)?;
+    m.add_function(wrap_pyfunction!(xyz_to_srgb, m)?)?;
+    m.add_function(wrap_pyfunction!(srgb_to_linear, m)?)?;
+    m.add_function(wrap_pyfunction!(linear_to_srgb, m)?)?;
+    m.add_function(wrap_pyfunction!(srgb_to_cam16ucs, m)?)?;
+    m.add_function(wrap_pyfunction!(cam16ucs_to_srgb, m)?)?;
+    m.add_function(wrap_pyfunction!(cam16ucs_distance, m)?)?;
+    m.add_function(wrap_pyfunction!(simulate_cvd, m)?)?;
+    m.add_function(wrap_pyfunction!(cvd_safety_ratio, m)?)?;
+    m.add_function(wrap_pyfunction!(perceptual_uniformity, m)?)?;
     Ok(())
 }

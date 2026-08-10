@@ -10,12 +10,15 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 # Bundled fonts (Liberation Sans, STIX Two Math) ship under the SIL OFL; the
-# colormap tables are CC0. These travel with every wheel as required by the OFL.
+# curated colormap/palette tables are matplotlib/colorcet/cmocean/seaborn-derived
+# (see THIRD_PARTY_COLORMAPS.md - colorcet's CC-BY 4.0 requires attribution).
+# These travel with every wheel as required by the OFL/CC-BY.
 license-files = [
     "LICENSE",
     "assets/fonts/LiberationSans-OFL.txt",
     "assets/fonts/STIXTwoMath-OFL.txt",
     "assets/fonts/NOTICE.md",
+    "THIRD_PARTY_COLORMAPS.md",
 ]
 authors = [{ name = "The pyplotrs authors" }]
 keywords = [

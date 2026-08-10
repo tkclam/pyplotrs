@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/pyplotrs-core",
+    "crates/pyplotrs-color",
     "crates/pyplotrs-text",
     "crates/pyplotrs-math",
     "crates/pyplotrs-layout",

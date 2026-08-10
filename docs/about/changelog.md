@@ -34,6 +34,14 @@ All notable changes to pyplotrs are documented here. The format is based on
   self-contained HTML.
 - Exact CC0 perceptually-uniform colormaps; custom `Colormap` support.
 - Cross-machine font embedding in every saved format.
+- A much larger curated colormap/palette registry (`pyplotrs.colormaps`,
+  `pyplotrs.palettes`) sourced from matplotlib, colorcet, cmocean and seaborn
+  (see `THIRD_PARTY_COLORMAPS.md` for attribution), and a `pyplotrs.color`
+  module for sRGB/XYZ/Lab/Oklab/Oklch/CAM16-UCS conversion, color-vision-
+  deficiency simulation, and colormap distinguishability/uniformity scoring.
+  Custom `Colormap(stops=...)` now resamples in Oklab by default, so
+  hand-built gradients are perceptually smooth rather than banding. All table
+  data and color-space math run in Rust (`pyplotrs-color`).
 
 ### Changed
 

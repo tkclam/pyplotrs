@@ -1,0 +1,741 @@
+{
+  "categorical": {
+    "Accent": {
+      "n": 8,
+      "source": "matplotlib"
+    },
+    "Dark2": {
+      "n": 8,
+      "source": "matplotlib"
+    },
+    "Paired": {
+      "n": 12,
+      "source": "matplotlib"
+    },
+    "Pastel1": {
+      "n": 9,
+      "source": "matplotlib"
+    },
+    "Pastel2": {
+      "n": 8,
+      "source": "matplotlib"
+    },
+    "Set1": {
+      "n": 9,
+      "source": "matplotlib"
+    },
+    "Set2": {
+      "n": 8,
+      "source": "matplotlib"
+    },
+    "Set3": {
+      "n": 12,
+      "source": "matplotlib"
+    },
+    "cet_glasbey": {
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_glasbey_cool": {
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_glasbey_dark": {
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_glasbey_hv": {
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_glasbey_light": {
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_glasbey_warm": {
+      "n": 256,
+      "source": "colorcet"
+    },
+    "okabe_ito": {
+      "n": 8,
+      "source": "matplotlib"
+    },
+    "sns_bright": {
+      "n": 10,
+      "source": "seaborn"
+    },
+    "sns_colorblind": {
+      "n": 10,
+      "source": "seaborn"
+    },
+    "sns_dark": {
+      "n": 10,
+      "source": "seaborn"
+    },
+    "sns_deep": {
+      "n": 10,
+      "source": "seaborn"
+    },
+    "sns_muted": {
+      "n": 10,
+      "source": "seaborn"
+    },
+    "sns_pastel": {
+      "n": 10,
+      "source": "seaborn"
+    },
+    "tab10": {
+      "n": 10,
+      "source": "matplotlib"
+    },
+    "tab20": {
+      "n": 20,
+      "source": "matplotlib"
+    },
+    "tab20b": {
+      "n": 20,
+      "source": "matplotlib"
+    },
+    "tab20c": {
+      "n": 20,
+      "source": "matplotlib"
+    }
+  },
+  "continuous": {
+    "Blues": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "BrBG": {
+      "category": "diverging",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "BuGn": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "BuPu": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "CMRmap": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "GnBu": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "Grays": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "Greens": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "Greys": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "OrRd": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "Oranges": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "PRGn": {
+      "category": "diverging",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "PiYG": {
+      "category": "diverging",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "PuBu": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "PuBuGn": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "PuOr": {
+      "category": "diverging",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "PuRd": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "Purples": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "RdBu": {
+      "category": "diverging",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "RdGy": {
+      "category": "diverging",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "RdPu": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "RdYlBu": {
+      "category": "diverging",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "RdYlGn": {
+      "category": "diverging",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "Reds": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "Spectral": {
+      "category": "diverging",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "Wistia": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "YlGn": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "YlGnBu": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "YlOrBr": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "YlOrRd": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "afmhot": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "autumn": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "berlin": {
+      "category": "diverging",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "binary": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "bone": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "brg": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "bwr": {
+      "category": "diverging",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "cet_bgy": {
+      "category": "sequential",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_bgyw": {
+      "category": "sequential",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_bjy": {
+      "category": "diverging",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_bkr": {
+      "category": "diverging",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_bky": {
+      "category": "diverging",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_blues": {
+      "category": "sequential",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_bmw": {
+      "category": "sequential",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_bmy": {
+      "category": "sequential",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_bwy": {
+      "category": "diverging",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_colorwheel": {
+      "category": "cyclic",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_coolwarm": {
+      "category": "diverging",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_cwr": {
+      "category": "diverging",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_dimgray": {
+      "category": "sequential",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_fire": {
+      "category": "sequential",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_gouldian": {
+      "category": "sequential",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_gray": {
+      "category": "sequential",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_gwv": {
+      "category": "diverging",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_isolum": {
+      "category": "cyclic",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_kb": {
+      "category": "sequential",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_kbc": {
+      "category": "sequential",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_kbgyw": {
+      "category": "sequential",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_kg": {
+      "category": "sequential",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_kgy": {
+      "category": "sequential",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_kr": {
+      "category": "sequential",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_rainbow": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cet_rainbow4": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "colorcet"
+    },
+    "cividis": {
+      "category": "perceptually_uniform",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "cmo_algae": {
+      "category": "sequential",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_amp": {
+      "category": "sequential",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_balance": {
+      "category": "diverging",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_curl": {
+      "category": "diverging",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_deep": {
+      "category": "sequential",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_delta": {
+      "category": "diverging",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_dense": {
+      "category": "sequential",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_diff": {
+      "category": "diverging",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_gray": {
+      "category": "sequential",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_haline": {
+      "category": "sequential",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_ice": {
+      "category": "sequential",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_matter": {
+      "category": "sequential",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_oxy": {
+      "category": "sequential",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_phase": {
+      "category": "cyclic",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_rain": {
+      "category": "sequential",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_solar": {
+      "category": "sequential",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_speed": {
+      "category": "sequential",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_tarn": {
+      "category": "diverging",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_tempo": {
+      "category": "sequential",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_thermal": {
+      "category": "sequential",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_topo": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cmo_turbid": {
+      "category": "sequential",
+      "n": 256,
+      "source": "cmocean"
+    },
+    "cool": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "coolwarm": {
+      "category": "diverging",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "copper": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "cubehelix": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "flag": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "gist_earth": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "gist_gray": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "gist_grey": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "gist_heat": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "gist_ncar": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "gist_rainbow": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "gist_stern": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "gist_yarg": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "gist_yerg": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "gnuplot": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "gnuplot2": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "gray": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "grays": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "grey": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "hot": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "hsv": {
+      "category": "cyclic",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "inferno": {
+      "category": "perceptually_uniform",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "jet": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "magma": {
+      "category": "perceptually_uniform",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "managua": {
+      "category": "diverging",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "nipy_spectral": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "ocean": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "pink": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "plasma": {
+      "category": "perceptually_uniform",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "prism": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "rainbow": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "seismic": {
+      "category": "diverging",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "spring": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "summer": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "terrain": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "turbo": {
+      "category": "miscellaneous",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "twilight": {
+      "category": "cyclic",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "twilight_shifted": {
+      "category": "cyclic",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "vanimo": {
+      "category": "diverging",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "viridis": {
+      "category": "perceptually_uniform",
+      "n": 256,
+      "source": "matplotlib"
+    },
+    "winter": {
+      "category": "sequential",
+      "n": 256,
+      "source": "matplotlib"
+    }
+  }
+}

@@ -6,3 +6,4 @@
         - Colormap
         - get_cmap
         - available
+        - CATEGORIES

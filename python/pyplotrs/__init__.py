@@ -1,6 +1,8 @@
 from . import _pyplotrs_core as _core
+from . import color
 from . import colormaps
 from . import norms
+from . import palettes
 from . import scales
 from . import ticker
 from . import theme as themes
@@ -59,7 +61,7 @@ def resolved_font_name() -> str:
 
 __all__ = [
     "Axes", "Axes3D", "Figure", "GridSpec", "PolarAxes", "subplots", "subplot_mosaic", "figure",
-    "colormaps", "Colormap", "get_cmap",
+    "colormaps", "Colormap", "get_cmap", "palettes", "color",
     "themes", "Theme", "norms", "scales", "ticker",
     "Animation", "animate",
     "set_font_family", "get_font_family", "resolved_font_name",
