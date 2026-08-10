@@ -173,6 +173,185 @@ def _time_mpl(plt, mark, n, nrows, ncols, fmt) -> tuple[float, int]:
         plt.close(fig)
 
 
+# -- per-mark-type coverage sweep --------------------------------------------
+#
+# The grid above sweeps N and panel count, but over only *two* mark types. That
+# made "every row wins" a claim about `line` and `scatter` and nothing else -
+# contour, hexbin, boxplot, pie and all of 3D had never been timed against
+# matplotlib at all. This sweep trades the N/panel axes for breadth: one
+# representative size per type, one panel, all three formats.
+
+def _field(k: int = 60):
+    xc = [-3 + 6 * j / (k - 1) for j in range(k)]
+    yc = [-3 + 6 * i / (k - 1) for i in range(k)]
+    z = [[math.sin(xc[j]) * math.cos(yc[i]) for j in range(k)] for i in range(k)]
+    return xc, yc, z
+
+
+def _groups(g: int = 5, n: int = 2000):
+    random.seed(1)
+    return [[random.gauss(i, 1.0) for _ in range(n)] for i in range(g)]
+
+
+#: name -> (pyplotrs builder, matplotlib builder or None). Sizes are chosen so
+#: each cell is a few milliseconds to a few hundred, not so each is equal.
+def _mark_cases():
+    sx, sy = _scatter_xy(20_000)
+    lx, ly = _line_xy(50_000)
+    xc, yc, Z = _field()
+    grp = _groups()
+    cats = list(range(40))
+    vals = [abs(math.sin(i)) * 10 for i in cats]
+    ev = [[random.uniform(0, 10) for _ in range(400)] for _ in range(12)]
+    qs = 12
+    qx = [[-3 + 6 * j / (qs - 1) for j in range(qs)] for _ in range(qs)]
+    qy = [[-3 + 6 * i / (qs - 1)] * qs for i in range(qs)]
+    qu = [[-row[0] for _ in range(qs)] for row in qy]
+    qv = [[c for c in row] for row in qx]
+    sparse = [[1 if (i * j) % 7 == 0 else 0 for j in range(120)] for i in range(120)]
+
+    return {
+        "line":        (lambda a: a.line(lx, ly),
+                        lambda a: a.plot(lx, ly)),
+        "scatter":     (lambda a: a.scatter(sx, sy, markersize=2),
+                        lambda a: a.scatter(sx, sy, s=4)),
+        "scatter_cmap": (lambda a: a.scatter(sx, sy, c=sy, markersize=2),
+                         lambda a: a.scatter(sx, sy, c=sy, s=4)),
+        "bar":         (lambda a: a.bar(cats, vals),
+                        lambda a: a.bar(cats, vals)),
+        "barh":        (lambda a: a.barh(cats, vals),
+                        lambda a: a.barh(cats, vals)),
+        "hist":        (lambda a: a.hist(sx, bins=50),
+                        lambda a: a.hist(sx, bins=50)),
+        "fill_between": (lambda a: a.fill_between(lx, ly, 0.0),
+                         lambda a: a.fill_between(lx, ly, 0.0)),
+        "step":        (lambda a: a.step(cats, vals),
+                        lambda a: a.step(cats, vals)),
+        "stem":        (lambda a: a.stem(cats, vals),
+                        lambda a: a.stem(cats, vals)),
+        "errorbar":    (lambda a: a.errorbar(cats, vals, yerr=0.5),
+                        lambda a: a.errorbar(cats, vals, yerr=0.5)),
+        "boxplot":     (lambda a: a.boxplot(grp),
+                        lambda a: a.boxplot(grp)),
+        "violinplot":  (lambda a: a.violinplot(grp),
+                        lambda a: a.violinplot(grp)),
+        "pie":         (lambda a: a.pie(vals[:8]),
+                        lambda a: a.pie(vals[:8])),
+        "imshow":      (lambda a: a.imshow(Z),
+                        lambda a: a.imshow(Z)),
+        "hist2d":      (lambda a: a.hist2d(sx, sy, bins=40),
+                        lambda a: a.hist2d(sx, sy, bins=40)),
+        "hexbin":      (lambda a: a.hexbin(sx, sy, gridsize=40),
+                        lambda a: a.hexbin(sx, sy, gridsize=40)),
+        "pcolormesh":  (lambda a: a.pcolormesh(xc, yc, Z),
+                        lambda a: a.pcolormesh(xc, yc, Z)),
+        "contour":     (lambda a: a.contour(xc, yc, Z),
+                        lambda a: a.contour(xc, yc, Z)),
+        "contourf":    (lambda a: a.contourf(xc, yc, Z),
+                        lambda a: a.contourf(xc, yc, Z)),
+        "eventplot":   (lambda a: a.eventplot(ev),
+                        lambda a: a.eventplot(ev)),
+        "broken_barh": (lambda a: a.broken_barh([(i, 0.6) for i in cats], (0, 1)),
+                        lambda a: a.broken_barh([(i, 0.6) for i in cats], (0, 1))),
+        "stackplot":   (lambda a: a.stackplot(cats, vals, vals, vals),
+                        lambda a: a.stackplot(cats, vals, vals, vals)),
+        "quiver":      (lambda a: a.quiver(qx, qy, qu, qv, scale=0.3),
+                        lambda a: a.quiver(qx, qy, qu, qv)),
+        "streamplot":  (lambda a: a.streamplot(xc, yc, [[-y for _ in xc] for y in yc],
+                                               [[x for x in xc] for _ in yc]),
+                        lambda a: a.streamplot(
+                            __import__("numpy").asarray(xc),
+                            __import__("numpy").asarray(yc),
+                            __import__("numpy").asarray([[-y for _ in xc] for y in yc]),
+                            __import__("numpy").asarray([[x for x in xc] for _ in yc]))),
+        "spy":         (lambda a: a.spy(sparse),
+                        lambda a: a.spy(sparse)),
+        "matshow":     (lambda a: a.matshow(Z),
+                        lambda a: a.matshow(Z)),
+    }
+
+
+def _mark_cases_3d():
+    random.seed(2)
+    n = 5000
+    xs = [random.uniform(-3, 3) for _ in range(n)]
+    ys = [random.uniform(-3, 3) for _ in range(n)]
+    zs = [math.sin(x) * math.cos(y) for x, y in zip(xs, ys)]
+    k = 50
+    X = [[-3 + 6 * j / (k - 1) for j in range(k)] for _ in range(k)]
+    Y = [[-3 + 6 * i / (k - 1)] * k for i in range(k)]
+    Z = [[math.sin(X[i][j]) * math.cos(Y[i][j]) for j in range(k)] for i in range(k)]
+    # A smooth parametric curve as well as the random walk. They are not the
+    # same workload for pyplotrs: it depth-sorts a 3D line **per segment** so
+    # the line can pass behind things (and itself), which matplotlib never
+    # does. On a random walk that means 5k separately-rasterized paths in
+    # essentially random order, which is the worst case for it; a real curve
+    # is the common one. `line3d_flat` is the same semantics matplotlib uses,
+    # via `depthsort=False`, and is the honest like-for-like row.
+    m = 5000
+    t = [i * 20 * math.pi / m for i in range(m)]
+    hx = [math.cos(v) for v in t]
+    hy = [math.sin(v) for v in t]
+    hz = [v / (20 * math.pi) for v in t]
+
+    return {
+        "scatter3d": (lambda a: a.scatter(xs, ys, zs, markersize=2),
+                      lambda a: a.scatter(xs, ys, zs, s=4)),
+        "line3d_walk": (lambda a: a.plot(xs, ys, zs),
+                        lambda a: a.plot(xs, ys, zs)),
+        "line3d_curve": (lambda a: a.plot(hx, hy, hz),
+                         lambda a: a.plot(hx, hy, hz)),
+        "line3d_flat": (lambda a: a.plot(hx, hy, hz, depthsort=False),
+                        lambda a: a.plot(hx, hy, hz)),
+        "surface3d": (lambda a: a.surface(X, Y, Z),
+                      lambda a: a.plot_surface(
+                          __import__("numpy").asarray(X),
+                          __import__("numpy").asarray(Y),
+                          __import__("numpy").asarray(Z))),
+    }
+
+
+def run_marks(plt, formats=("pdf", "png", "svg")):
+    """Time every mark type once per format, pyplotrs vs matplotlib."""
+    rows = []
+    for label, cases, is3d in (("2D", _mark_cases(), False),
+                               ("3D", _mark_cases_3d(), True)):
+        for name, (build_p, build_m) in cases.items():
+            for fmt in formats:
+                fig, ax = pyplotrs.subplots(
+                    figsize=_figsize(1, 1), units="in",
+                    projection=("3d" if is3d else None))
+                try:
+                    build_p(ax)
+                except Exception as exc:            # pragma: no cover - harness
+                    print(f"  {name:12} {fmt:3}  pyplotrs FAILED: {exc}")
+                    continue
+                path = f"{OUT}/pyplotrs_mark_{name}.{fmt}"
+                ft, fsz = _best(lambda p: fig.save(p, dpi=BENCH_DPI), path)
+
+                mt = msz = None
+                if plt is not None and build_m is not None:
+                    mfig = plt.figure(figsize=_figsize(1, 1))
+                    max_ = (mfig.add_subplot(projection="3d") if is3d
+                            else mfig.add_subplot())
+                    try:
+                        build_m(max_)
+                        mpath = f"{OUT}/mpl_mark_{name}.{fmt}"
+                        mt, msz = _best(
+                            lambda p: mfig.savefig(p, dpi=BENCH_DPI), mpath)
+                    except Exception as exc:        # pragma: no cover - harness
+                        print(f"  {name:12} {fmt:3}  mpl FAILED: {exc}")
+                    finally:
+                        plt.close(mfig)
+
+                rows.append((label, name, fmt, ft, fsz, mt, msz))
+                extra = (f"   mpl {mt:7.3f}s {_fmt_size(msz):>8}  ({mt / ft:5.1f}x)"
+                         if mt is not None and ft > 0 else "   mpl n/a")
+                print(f"  {name:12} {fmt:3}  pyplotrs {ft:7.3f}s "
+                      f"{_fmt_size(fsz):>8}{extra}")
+    return rows
+
+
 # -- driver ----------------------------------------------------------------
 
 def run(quick: bool):
@@ -202,10 +381,13 @@ def run(quick: bool):
                       f"pyplotrs {ft:7.3f}s {_fmt_size(fsz):>8}"
                       + (f"   mpl {mt:7.3f}s {_fmt_size(msz):>8}"
                          f"  ({mt / ft:5.1f}x)" if mt is not None else ""))
-    return rows, plt is not None
+
+    print("\nPer-mark-type coverage sweep:")
+    mark_rows = run_marks(plt, formats=(("png",) if quick else FORMATS))
+    return rows, mark_rows, plt is not None
 
 
-def write_markdown(rows, have_mpl: bool, path: str):
+def write_markdown(rows, mark_rows, have_mpl: bool, path: str):
     lines = [
         "# pyplotrs benchmark matrix",
         "",
@@ -257,11 +439,12 @@ def write_markdown(rows, have_mpl: bool, path: str):
             "single-pass layout amortizes per-panel chrome that matplotlib "
             "re-solves per axes.",
             "",
-            "**The one place matplotlib wins on time** is a single very large "
-            "line (`N`=1e6, 1 panel): there the work is one long polyline with "
-            "no per-panel overhead, and matplotlib's C path-simplification "
-            "narrowly edges pyplotrs' Rust one (~0.7x). Add panels and pyplotrs "
-            "retakes the lead.",
+            "**The large single line used to be matplotlib's one win** "
+            "(`N`=1e6, 1 panel, ~0.7x), when ingest and autoscale still ran in "
+            "Python. That loop moved to Rust and the row now wins like the "
+            "others; the table above is the current measurement, and any "
+            "statement about who wins where should be read off it rather than "
+            "from this paragraph.",
             "",
             "**On file size**, each format has its own story:",
             "",
@@ -288,9 +471,49 @@ def write_markdown(rows, have_mpl: bool, path: str):
             "and the deterministic `--check` CI regression gate.",
             "",
         ]
+
+    # -- second table: every mark type, once ---------------------------------
+    if mark_rows:
+        lines += [
+            "## Per-mark-type coverage",
+            "",
+            "The grid above sweeps point count and panel count but over only "
+            "**two** mark types, so \"every row wins\" was a statement about "
+            "`line` and `scatter`. This table trades those axes for breadth: "
+            "every mark type once, one panel, at a representative size. It is "
+            "the first time contour, hexbin, boxplot, pie and the 3D types have "
+            "been timed against matplotlib at all.",
+            "",
+        ]
+        if have_mpl:
+            lines += [
+                "| kind | mark | format | pyplotrs time | pyplotrs size | "
+                "matplotlib time | matplotlib size | speedup |",
+                "|---|---|---|---:|---:|---:|---:|---:|",
+            ]
+            for kind, name, fmt, ft, fsz, mt, msz in mark_rows:
+                if mt is None:
+                    lines.append(
+                        f"| {kind} | {name} | {fmt} | {ft:.3f}s | "
+                        f"{_fmt_size(fsz)} | n/a | n/a | - |")
+                else:
+                    lines.append(
+                        f"| {kind} | {name} | {fmt} | {ft:.3f}s | "
+                        f"{_fmt_size(fsz)} | {mt:.3f}s | {_fmt_size(msz)} | "
+                        f"{mt / ft:.1f}x |")
+        else:
+            lines += [
+                "| kind | mark | format | pyplotrs time | pyplotrs size |",
+                "|---|---|---|---:|---:|",
+            ]
+            for kind, name, fmt, ft, fsz, _mt, _msz in mark_rows:
+                lines.append(f"| {kind} | {name} | {fmt} | {ft:.3f}s | "
+                             f"{_fmt_size(fsz)} |")
+        lines.append("")
+
     with open(path, "w") as fh:
         fh.write("\n".join(lines))
-    print(f"\nwrote {path} ({len(rows)} rows)")
+    print(f"\nwrote {path} ({len(rows)} grid rows, {len(mark_rows)} mark rows)")
 
 
 def main():
@@ -301,8 +524,8 @@ def main():
         os.path.dirname(__file__), "RESULTS.md"))
     args = ap.parse_args()
     print(f"=== pyplotrs benchmark matrix ({'quick' if args.quick else 'full'}) ===")
-    rows, have_mpl = run(args.quick)
-    write_markdown(rows, have_mpl, args.out)
+    rows, mark_rows, have_mpl = run(args.quick)
+    write_markdown(rows, mark_rows, have_mpl, args.out)
     return 0
 
 
