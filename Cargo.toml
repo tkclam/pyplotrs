@@ -12,6 +12,7 @@ members = [
     "crates/pyplotrs-render-svg",
     "crates/pyplotrs-py",
 ]
+exclude = ["vendor/krilla-0.8.2"]
 
 [workspace.package]
 version = "0.0.1"
@@ -22,3 +23,8 @@ rust-version = "1.80"
 [profile.release]
 lto = true
 codegen-units = 1
+
+# Vendored, minimally-patched krilla: see vendor/krilla-0.8.2/PYPLOTRS_PATCH.md
+# for what changed and why.
+[patch.crates-io]
+krilla = { path = "vendor/krilla-0.8.2" }

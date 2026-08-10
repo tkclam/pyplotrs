@@ -6,7 +6,9 @@
 
 use pyplotrs_core::{FontData, GlyphRun, PositionedGlyph};
 use rustybuzz::{Direction, Face, UnicodeBuffer};
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Load a font file from disk into [`FontData`] (face index 0).
 pub fn load_font_file(path: &Path) -> std::io::Result<FontData> {
@@ -81,17 +83,54 @@ impl VMetrics {
     }
 }
 
+/// The four raw (unscaled, font-units) header fields `font_vmetrics` needs -
+/// cheap to store, and all that's needed to answer any `size` query without
+/// re-parsing the font.
+#[derive(Clone, Copy)]
+struct RawVMetrics {
+    units_per_em: f32,
+    ascender: f32,
+    descender: f32,
+    line_gap: f32,
+}
+
+/// Per-font-buffer cache of [`RawVMetrics`], so a layout pass that asks for
+/// vertical metrics repeatedly (once per label band, per axes - a multi-panel
+/// figure repeats this many times over the same one or two fonts) parses the
+/// font file once rather than on every call. Keyed by buffer identity
+/// (`FontData::key()`) but also *holds* a clone of the `Arc`, not just the
+/// pointer: since this cache is process-lifetime (unlike the equivalent
+/// per-render `HashMap<*const Vec<u8>, _>` caches used elsewhere, e.g.
+/// `PdfRenderer::fonts`), a pointer-only key could alias a since-freed,
+/// unrelated font's buffer reusing the same address. Holding the `Arc` pins
+/// that address for as long as the cache entry lives, so the key stays
+/// unambiguous.
+fn raw_vmetrics_cache() -> &'static Mutex<HashMap<usize, (Arc<Vec<u8>>, RawVMetrics)>> {
+    static CACHE: OnceLock<Mutex<HashMap<usize, (Arc<Vec<u8>>, RawVMetrics)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Vertical metrics for `font` at `size` (points). These are font-global (not
 /// dependent on any particular string), so the layout engine can reserve
 /// label band heights before knowing the exact text. `descent` is returned as
 /// a positive magnitude.
 pub fn font_vmetrics(font: &FontData, size: f32) -> VMetrics {
-    let face = Face::from_slice(&font.data, font.index).expect("invalid font data");
-    let upem = face.units_per_em() as f32;
-    let scale = size / upem;
+    let key = font.key() as usize;
+    let mut cache = raw_vmetrics_cache().lock().unwrap();
+    let (_, raw) = cache.entry(key).or_insert_with(|| {
+        let face = Face::from_slice(&font.data, font.index).expect("invalid font data");
+        let raw = RawVMetrics {
+            units_per_em: face.units_per_em() as f32,
+            ascender: face.ascender() as f32,
+            descender: face.descender() as f32,
+            line_gap: face.line_gap() as f32,
+        };
+        (font.data.clone(), raw)
+    });
+    let scale = size / raw.units_per_em;
     VMetrics {
-        ascent: face.ascender() as f32 * scale,
-        descent: -(face.descender() as f32) * scale,
-        line_gap: face.line_gap() as f32 * scale,
+        ascent: raw.ascender * scale,
+        descent: -raw.descender * scale,
+        line_gap: raw.line_gap * scale,
     }
 }
