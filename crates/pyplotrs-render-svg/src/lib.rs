@@ -30,30 +30,26 @@ fn opacity_attr(a: u8) -> String {
     }
 }
 
+// Writes numbers straight into the destination buffer via `write!`'s `{:.3}`
+// precision spec rather than through `fmt_num`, which would heap-allocate a
+// throwaway `String` per coordinate - the dominant cost for large paths and
+// scatters (one path element or `<use>` per point).
 fn path_data(path: &pyplotrs_core::kurbo::BezPath) -> String {
     let mut d = String::new();
     for el in path.elements() {
         match *el {
-            PathEl::MoveTo(p) => write!(d, "M{} {} ", fmt_num(p.x), fmt_num(p.y)).unwrap(),
-            PathEl::LineTo(p) => write!(d, "L{} {} ", fmt_num(p.x), fmt_num(p.y)).unwrap(),
+            PathEl::MoveTo(p) => write!(d, "M{:.3} {:.3} ", p.x, p.y).unwrap(),
+            PathEl::LineTo(p) => write!(d, "L{:.3} {:.3} ", p.x, p.y).unwrap(),
             PathEl::QuadTo(p1, p2) => write!(
                 d,
-                "Q{} {} {} {} ",
-                fmt_num(p1.x),
-                fmt_num(p1.y),
-                fmt_num(p2.x),
-                fmt_num(p2.y)
+                "Q{:.3} {:.3} {:.3} {:.3} ",
+                p1.x, p1.y, p2.x, p2.y
             )
             .unwrap(),
             PathEl::CurveTo(p1, p2, p3) => write!(
                 d,
-                "C{} {} {} {} {} {} ",
-                fmt_num(p1.x),
-                fmt_num(p1.y),
-                fmt_num(p2.x),
-                fmt_num(p2.y),
-                fmt_num(p3.x),
-                fmt_num(p3.y)
+                "C{:.3} {:.3} {:.3} {:.3} {:.3} {:.3} ",
+                p1.x, p1.y, p2.x, p2.y, p3.x, p3.y
             )
             .unwrap(),
             PathEl::ClosePath => d.push_str("Z "),
@@ -259,10 +255,12 @@ impl SvgWriter<'_> {
                 for (pos, c) in m.positions.iter().zip(colors) {
                     writeln!(
                         self.body,
-                        r##"<use xlink:href="#{id}" x="{}" y="{}" fill="{}"{}/>"##,
-                        fmt_num(pos.x),
-                        fmt_num(pos.y),
-                        color_hex(*c),
+                        r##"<use xlink:href="#{id}" x="{:.3}" y="{:.3}" fill="#{:02x}{:02x}{:02x}"{}/>"##,
+                        pos.x,
+                        pos.y,
+                        c.r,
+                        c.g,
+                        c.b,
                         opacity_attr_named("fill-opacity", c.a),
                     )
                     .unwrap();
@@ -272,9 +270,8 @@ impl SvgWriter<'_> {
                 for pos in &m.positions {
                     writeln!(
                         self.body,
-                        r##"<use xlink:href="#{id}" x="{}" y="{}"/>"##,
-                        fmt_num(pos.x),
-                        fmt_num(pos.y)
+                        r##"<use xlink:href="#{id}" x="{:.3}" y="{:.3}"/>"##,
+                        pos.x, pos.y
                     )
                     .unwrap();
                 }
