@@ -123,3 +123,8 @@ All notable changes to pyplotrs are documented here. The format is based on
   leaking into drawn geometry).
 - `bar(width=)`/`barh(height=)`/`boxplot(widths=)` no longer shrink to the
   stroke width instead of the intended data extent.
+- `contour` lines showed a hairline break at every turn: marching squares was
+  drawn as one stroked path per grid cell, so neighboring pieces met butt cap
+  to butt cap and left a wedge of background at each joint. The kernel now
+  stitches the pieces into whole lines (matched on grid-edge identity, so the
+  join is exact), and each line is one path with round joins.

@@ -1924,23 +1924,125 @@ fn _iso_t(va: f64, vb: f64, level: f64) -> f64 {
     }
 }
 
+/// Identity of the grid edge a crossing point sits on, used to stitch the
+/// per-cell segments back into continuous lines. Horizontal edge `(r, c)` joins
+/// corners `(c, r)` and `(c+1, r)`; vertical edge `(r, c)` joins `(c, r)` and
+/// `(c, r+1)`. Two neighboring cells name their shared edge with the same id,
+/// and both compute the crossing on it from the same corner pair, so matching on
+/// the id is exact - no coordinate rounding or tolerance involved.
+#[inline]
+fn _edge_h(r: usize, c: usize, w: usize) -> u64 {
+    ((r * w + c) as u64) << 1
+}
+
+#[inline]
+fn _edge_v(r: usize, c: usize, w: usize) -> u64 {
+    (((r * w + c) as u64) << 1) | 1
+}
+
+/// One marching-squares segment: the grid edges its two endpoints lie on, plus
+/// the interpolated crossing coordinates on them.
+struct IsoSeg {
+    ends: [u64; 2],
+    pts: [(f64, f64); 2],
+}
+
+/// Stitch marching-squares segments into continuous polylines.
+///
+/// Every edge carries at most one crossing per level and borders at most two
+/// cells, so each edge id joins at most two segments: the pieces form simple
+/// open paths (ending on the grid boundary) and closed loops. Open paths are
+/// walked first, from their free end, so a loop is only ever started by a
+/// segment no open path could claim.
+///
+/// Returns `(closed, points)` per polyline; a closed loop does *not* repeat its
+/// first point at the end.
+fn _stitch_polylines(segs: &[IsoSeg]) -> Vec<(bool, Vec<(f64, f64)>)> {
+    const NONE: usize = usize::MAX;
+    // Edge id -> the (at most two) segments meeting on it.
+    let mut adj: HashMap<u64, [usize; 2]> = HashMap::with_capacity(segs.len() * 2);
+    for (i, s) in segs.iter().enumerate() {
+        for &e in &s.ends {
+            let slot = adj.entry(e).or_insert([NONE; 2]);
+            if slot[0] == NONE {
+                slot[0] = i;
+            } else {
+                slot[1] = i;
+            }
+        }
+    }
+    let at = |seg: usize, edge: u64| {
+        let s = &segs[seg];
+        if s.ends[0] == edge {
+            s.pts[0]
+        } else {
+            s.pts[1]
+        }
+    };
+    // Walk the chain that leaves `start` along segment `si`, consuming segments
+    // as it goes.
+    let walk = |start: u64, si: usize, used: &mut Vec<bool>| {
+        let (mut edge, mut seg) = (start, si);
+        let mut points = vec![at(seg, edge)];
+        loop {
+            used[seg] = true;
+            let e = segs[seg].ends;
+            edge = if e[0] == edge { e[1] } else { e[0] };
+            if edge == start {
+                return (true, points); // closed loop: back where we began
+            }
+            points.push(at(seg, edge));
+            let n = adj[&edge];
+            seg = match n.iter().find(|&&i| i != NONE && !used[i]) {
+                Some(&next) => next,
+                None => return (false, points),
+            };
+        }
+    };
+    let mut used = vec![false; segs.len()];
+    let mut out = Vec::new();
+    // Open paths first, from their free end (an edge with a single segment on
+    // it), so that a path is never entered mid-way and split in two.
+    for (i, s) in segs.iter().enumerate() {
+        if used[i] {
+            continue;
+        }
+        if let Some(&end) = s.ends.iter().find(|e| adj[e][1] == NONE) {
+            out.push(walk(end, i, &mut used));
+        }
+    }
+    // Whatever is left is a closed loop.
+    for (i, s) in segs.iter().enumerate() {
+        if !used[i] {
+            out.push(walk(s.ends[0], i, &mut used));
+        }
+    }
+    out
+}
+
+/// One contour line as handed back to Python: `(level index, closed, points)`.
+type ContourLine = (u32, bool, Vec<(f64, f64)>);
+
 /// Marching-squares contour lines. `values` is a row-major `w*h` grid (index =
-/// `row*w + col`). Returns `(level_idx, x0, y0, x1, y1)` line segments in
-/// fractional grid coordinates (`x` = column in `0..w-1`, `y` = row in `0..h-1`);
-/// the caller maps those to data space against its coordinate vectors.
+/// `row*w + col`). Returns one entry per continuous contour line as
+/// `(level_idx, closed, points)`, where `points` are in fractional grid
+/// coordinates (`x` = column in `0..w-1`, `y` = row in `0..h-1`) and a closed
+/// line does not repeat its first point; the caller maps those to data space
+/// against its coordinate vectors.
+///
+/// Stitching happens here rather than in the caller because drawing each cell's
+/// segment as its own stroked path leaves a wedge of background showing at every
+/// joint (butt caps meeting at an angle); one path per line joins them properly.
 #[pyfunction]
-fn contour_lines(
-    values: F64Data,
-    w: usize,
-    h: usize,
-    levels: F64Data,
-) -> Vec<(u32, f64, f64, f64, f64)> {
+fn contour_lines(values: F64Data, w: usize, h: usize, levels: F64Data) -> Vec<ContourLine> {
     let mut out = Vec::new();
     if w < 2 || h < 2 {
         return out;
     }
+    let mut segs: Vec<IsoSeg> = Vec::new();
     for (li, &level) in levels.iter().enumerate() {
         let li = li as u32;
+        segs.clear();
         for r in 0..h - 1 {
             for c in 0..w - 1 {
                 let a = values[r * w + c]; // A: (c,   r)
@@ -1950,51 +2052,57 @@ fn contour_lines(
                 if !(a.is_finite() && b.is_finite() && cc.is_finite() && d.is_finite()) {
                     continue;
                 }
-                let (fc, fr) = (c as f64, r as f64);
-                // Edge crossing points (top AB, right BC, bottom CD, left DA).
-                let p_ab = (fc + _iso_t(a, b, level), fr);
-                let p_bc = (fc + 1.0, fr + _iso_t(b, cc, level));
-                let p_cd = (fc + _iso_t(d, cc, level), fr + 1.0);
-                let p_da = (fc, fr + _iso_t(a, d, level));
                 let case = ((a >= level) as u8) << 3
                     | ((b >= level) as u8) << 2
                     | ((cc >= level) as u8) << 1
                     | (d >= level) as u8;
-                let center = (a + b + cc + d) * 0.25;
-                let mut seg = |p: (f64, f64), q: (f64, f64)| {
-                    out.push((li, p.0, p.1, q.0, q.1));
+                if case == 0 || case == 15 {
+                    continue;
+                }
+                let (fc, fr) = (c as f64, r as f64);
+                // Edge crossings (top AB, right BC, bottom CD, left DA), each
+                // tagged with the id of the grid edge it lies on. Only the
+                // crossed edges are ever named by the cases below, so the
+                // uncrossed ones' coordinates (which fall outside the cell) are
+                // never used.
+                let ab = (_edge_h(r, c, w), (fc + _iso_t(a, b, level), fr));
+                let bc = (_edge_v(r, c + 1, w), (fc + 1.0, fr + _iso_t(b, cc, level)));
+                let cd = (_edge_h(r + 1, c, w), (fc + _iso_t(d, cc, level), fr + 1.0));
+                let da = (_edge_v(r, c, w), (fc, fr + _iso_t(a, d, level)));
+                let mut seg = |p: (u64, (f64, f64)), q: (u64, (f64, f64))| {
+                    segs.push(IsoSeg {
+                        ends: [p.0, q.0],
+                        pts: [p.1, q.1],
+                    });
                 };
                 match case {
-                    1 | 14 => seg(p_cd, p_da),
-                    2 | 13 => seg(p_bc, p_cd),
-                    3 | 12 => seg(p_bc, p_da),
-                    4 | 11 => seg(p_ab, p_bc),
-                    6 | 9 => seg(p_ab, p_cd),
-                    7 | 8 => seg(p_ab, p_da),
-                    5 => {
-                        // b,d inside; a,cc outside (saddle).
-                        if center >= level {
-                            seg(p_da, p_ab);
-                            seg(p_bc, p_cd);
+                    1 | 14 => seg(cd, da),
+                    2 | 13 => seg(bc, cd),
+                    3 | 12 => seg(bc, da),
+                    4 | 11 => seg(ab, bc),
+                    6 | 9 => seg(ab, cd),
+                    7 | 8 => seg(ab, da),
+                    // Saddle: case 5 has b,d inside and a,cc outside, case 10 the
+                    // other way round. Which pair of corners the two lines wrap
+                    // is decided by the cell center.
+                    5 | 10 => {
+                        if ((a + b + cc + d) * 0.25 >= level) == (case == 10) {
+                            seg(ab, bc);
+                            seg(cd, da);
                         } else {
-                            seg(p_ab, p_bc);
-                            seg(p_cd, p_da);
-                        }
-                    }
-                    10 => {
-                        // a,cc inside; b,d outside (saddle).
-                        if center >= level {
-                            seg(p_ab, p_bc);
-                            seg(p_cd, p_da);
-                        } else {
-                            seg(p_da, p_ab);
-                            seg(p_bc, p_cd);
+                            seg(da, ab);
+                            seg(bc, cd);
                         }
                     }
                     _ => {}
                 }
             }
         }
+        out.extend(
+            _stitch_polylines(&segs)
+                .into_iter()
+                .map(|(closed, points)| (li, closed, points)),
+        );
     }
     out
 }

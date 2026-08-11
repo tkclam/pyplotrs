@@ -205,13 +205,13 @@ class Axes3D(_AxesBase):
         gx, gy, gz, nr, nc = _grid_xyz(X, Y, Z)
         flat = [v for row in gz for v in row]
         lvls = _auto_levels(flat, levels)
-        segs = _core.contour_lines(flat, nc, nr, lvls)
+        lines = _core.contour_lines(flat, nc, nr, lvls)
         cm = _colormaps.get_cmap(cmap)
         lo, hi = (min(lvls), max(lvls)) if lvls else (0.0, 1.0)
         span = (hi - lo) or 1.0
         colors = [_with_alpha(cm((lv - lo) / span), alpha) for lv in lvls]
         self._marks3.append({
-            "kind": "contour3d", "segs": segs, "gx": gx, "gy": gy, "levels": lvls,
+            "kind": "contour3d", "lines": lines, "gx": gx, "gy": gy, "levels": lvls,
             "colors": colors, "linewidth": float(linewidth), "label": label,
             # Legend fallback: the middle level's color stands for the line set.
             "color": colors[len(colors) // 2] if colors else _with_alpha((0, 0, 0, 255), alpha),
@@ -572,12 +572,18 @@ class Axes3D(_AxesBase):
                         add_seg(grid[r][c], grid[r + 1][c], m["color"], m["linewidth"])
             elif k == "contour3d":
                 gx, gy = m["gx"], m["gy"]
-                for li, x0, y0, x1, y1 in m["segs"]:
+                # The kernel hands back whole contour lines; the painter's-
+                # algorithm sort works on segments, so walk each line pairwise
+                # (a closed line wrapping from its last point back to its first).
+                for li, closed, pts in m["lines"]:
                     lv = m["levels"][li]
-                    a = proj(_bilinear_grid(gx, y0, x0), _bilinear_grid(gy, y0, x0), lv)
-                    b = proj(_bilinear_grid(gx, y1, x1), _bilinear_grid(gy, y1, x1), lv)
-                    add_seg(a, b, m["colors"][li] if li < len(m["colors"]) else m["colors"][-1],
-                            m["linewidth"])
+                    col = m["colors"][li] if li < len(m["colors"]) else m["colors"][-1]
+                    proj_pts = [proj(_bilinear_grid(gx, py, px),
+                                     _bilinear_grid(gy, py, px), lv) for px, py in pts]
+                    if closed and proj_pts:
+                        proj_pts.append(proj_pts[0])
+                    for a, b in zip(proj_pts, proj_pts[1:]):
+                        add_seg(a, b, col, m["linewidth"])
             elif k == "bar3d":
                 for i in range(len(m["xs"])):
                     box_faces(m["xs"][i], m["ys"][i], m["zs"][i],

@@ -539,3 +539,59 @@ def test_secondary_y_does_not_displace_a_colorbar_label(tmp_path):
         f"colorbar label at x={cbar_label_x} was pushed past the secondary "
         f"axis (tick labels start at x={min(ticks)})"
     )
+
+
+# -- contour lines -----------------------------------------------------------
+
+def test_contour_emits_one_path_per_line_not_one_per_cell():
+    """Marching squares was handed to the renderer as loose two-point segments.
+
+    Each cell's piece became its own stroked path, so neighboring pieces met
+    butt cap to butt cap and left a wedge of background showing at every turn -
+    a contour that looked finely dashed under any zoom. The kernel now stitches
+    the pieces into whole lines, which is what lets a single path with round
+    joins close those wedges.
+    """
+    import math
+
+    # A cone, so each level is one ring; the levels stay clear of the border, so
+    # every ring closes rather than running off the edge of the grid.
+    n, mid = 21, 10.0
+    Z = [[-math.hypot(c - mid, r - mid) for c in range(n)] for r in range(n)]
+    rings = [-2.0, -4.0, -6.0, -8.0]
+
+    fig, ax = plt.subplots()
+    ax.contour(Z, levels=rings)
+    lines = ax._marks[0]["lines"]
+
+    assert len(lines) == len(rings), (
+        f"{len(rings)} concentric rings came back as {len(lines)} paths; "
+        f"one closed ring per level is the whole point of stitching"
+    )
+    for li, closed, pts in lines:
+        assert closed, f"level {rings[li]} is a ring around the peak but came back open"
+        assert len(pts) > 4, f"level {rings[li]} is only {len(pts)} points - not stitched"
+
+
+def test_stitched_contour_never_joins_points_from_different_cells():
+    """The stitch has to follow the grid, not just pair up nearby points.
+
+    Consecutive points on a contour line are the crossings on two edges of one
+    cell, so they can never be more than a cell apart in either axis. A stitch
+    that matched on coordinates (rather than on edge identity) would jump
+    between unrelated parts of the same level and draw a chord across the field.
+    """
+    import math
+
+    n = 24
+    Z = [[math.sin(c / 3.0) * math.cos(r / 3.0) for c in range(n)] for r in range(n)]
+    fig, ax = plt.subplots()
+    ax.contour(Z, levels=6)
+
+    for li, closed, pts in ax._marks[0]["lines"]:
+        ring = pts + [pts[0]] if closed else pts
+        for (x0, y0), (x1, y1) in zip(ring, ring[1:]):
+            assert max(abs(x1 - x0), abs(y1 - y0)) <= 1.0 + 1e-9, (
+                f"level {li} jumps from ({x0}, {y0}) to ({x1}, {y1}) - further "
+                f"than one grid cell, so these two points are not one segment"
+            )

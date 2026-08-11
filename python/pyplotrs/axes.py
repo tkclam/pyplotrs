@@ -939,15 +939,15 @@ class Axes(_AxesBase):
         h = len(Z)
         w = len(Z[0]) if Z else 0
         flat = _to_f64([v for row in Z for v in row])
-        lvls = _auto_levels(list(flat), levels)
-        segs = _core.contour_lines(flat, w, h, lvls)
+        lvls = _auto_levels(flat, levels)
+        lines = _core.contour_lines(flat, w, h, lvls)
         lcolors = self._level_colors(len(lvls), colors, cmap)
         if alpha < 1.0:
             lcolors = [_with_alpha(c, alpha) for c in lcolors]
         self._marks.append({
             "zorder": float(zorder),
-            "kind": "contour", "segs": segs, "xcoords": xc, "ycoords": yc,
-            "colors": lcolors, "label": label,
+            "kind": "contour", "lines": lines, "xcoords": xc, "ycoords": yc,
+            "levels": lvls, "colors": lcolors, "label": label,
             "linewidth": self._theme.line_width if linewidth is None else float(linewidth),
             # Legend key: the middle level's color stands for the line set.
             "color": lcolors[len(lcolors) // 2] if lcolors else self._theme.palette[0],
@@ -2556,12 +2556,15 @@ class Axes(_AxesBase):
                                fill_color=col, close=True)
         elif kind == "contour":
             xc, yc, w = m["xcoords"], m["ycoords"], m["linewidth"]
-            for li, x0, y0, x1, y1 in m["segs"]:
+            # One path per continuous line, not per marching-squares cell: a
+            # per-cell path meets its neighbor butt-cap to butt-cap and leaves a
+            # wedge of background showing at every turn. Round joins close them.
+            for li, closed, pts in m["lines"]:
                 col = m["colors"][li] if li < len(m["colors"]) else m["colors"][-1]
                 scene.add_path(
-                    [(sx(_interp_coord(xc, x0)), sy(_interp_coord(yc, y0))),
-                     (sx(_interp_coord(xc, x1)), sy(_interp_coord(yc, y1)))],
-                    stroke_color=col, stroke_width=w)
+                    [(sx(_interp_coord(xc, px)), sy(_interp_coord(yc, py)))
+                     for px, py in pts],
+                    stroke_color=col, stroke_width=w, close=closed, join="round")
         elif kind == "contourf":
             self._draw_field_image(scene, m, sx, sy)
         elif kind == "quiver":
