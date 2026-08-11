@@ -11,12 +11,10 @@ from __future__ import annotations
 import datetime as dt
 import math
 
-import pytest
-
 import pyplotrs as plt
-from pyplotrs import norms, scales, ticker
+import pytest
 from pyplotrs import _pyplotrs_core as _core
-
+from pyplotrs import norms, scales, ticker
 
 # -- transform round-trips ---------------------------------------------------
 

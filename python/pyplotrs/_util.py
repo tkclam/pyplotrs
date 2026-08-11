@@ -12,7 +12,6 @@ import math
 from array import array
 
 from . import _pyplotrs_core as _core
-
 from ._const import _DATA_PAD, _UNIT_TO_PT
 
 

@@ -4,6 +4,7 @@ A theme is passed to ``subplots`` and flows to its axes (there is no global
 'current theme'). Here we render the same line in each preset.
 """
 import math
+
 import pyplotrs as plt
 
 xs = [i * 0.2 for i in range(40)]

@@ -1,5 +1,6 @@
 """A multi-panel figure with a shared y-axis and a figure-level legend."""
 import math
+
 import pyplotrs as plt
 
 xs = [i * 0.15 for i in range(60)]

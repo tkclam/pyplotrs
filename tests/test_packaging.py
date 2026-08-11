@@ -245,3 +245,35 @@ def test_third_party_notices_are_up_to_date():
         "THIRD-PARTY-NOTICES.md is stale; run "
         "`python tools/gen_third_party_notices.py` and commit the result"
     )
+
+
+@requires_toml
+def test_the_typing_classifier_is_backed_by_a_py_typed_marker():
+    """PEP 561: without the marker, a type checker discards every annotation in
+    the package and the shipped `_pyplotrs_core.pyi` stub, and reports
+    `module is installed, but missing library stubs or py.typed marker`. The
+    classifier claimed otherwise in immutable published metadata."""
+    classifiers = _pyproject()["project"]["classifiers"]
+    marker = ROOT / "python" / "pyplotrs" / "py.typed"
+    if "Typing :: Typed" in classifiers:
+        assert marker.is_file(), (
+            "pyproject declares `Typing :: Typed` but python/pyplotrs/py.typed "
+            "does not exist, so the claim is false for every consumer"
+        )
+    else:
+        assert not marker.is_file(), (
+            "py.typed is present but the `Typing :: Typed` classifier was "
+            "removed, so consumers cannot discover the typing support"
+        )
+
+
+def test_py_typed_is_next_to_the_installed_package():
+    """The marker has to reach the *installed* package, not merely the repo:
+    maturin's `python-source` sweep is what carries it, and a stray
+    `[tool.maturin] include` or exclude could drop it."""
+    import pyplotrs
+
+    installed = Path(pyplotrs.__file__).parent
+    assert (installed / "py.typed").is_file(), (
+        f"py.typed is missing from the installed package at {installed}"
+    )

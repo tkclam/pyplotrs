@@ -19,10 +19,8 @@ Two failure modes are covered:
 
 from __future__ import annotations
 
-import pytest
-
 import pyplotrs as plt
-
+import pytest
 
 # -- mismatched array lengths ------------------------------------------------
 #

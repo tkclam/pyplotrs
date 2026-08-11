@@ -1,6 +1,8 @@
 """3D scatter cloud."""
 import math
+
 import pyplotrs as plt
+
 
 def rnd(seed):
     s = seed

@@ -12,12 +12,10 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 import pyplotrs as plt
+import pytest
 from pyplotrs import _pyplotrs_core as _core
 from pyplotrs._draw import _font
-
 
 # -- the selector ------------------------------------------------------------
 

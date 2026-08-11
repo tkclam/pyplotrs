@@ -14,9 +14,8 @@ test dependency) is needed.
 
 from __future__ import annotations
 
-import pytest
-
 import pyplotrs as plt
+import pytest
 
 
 @pytest.fixture

@@ -14,9 +14,8 @@ from __future__ import annotations
 
 import math
 
-import pytest
-
 import pyplotrs as plt
+import pytest
 from pyplotrs import _pyplotrs_core as _core
 from pyplotrs import threed as _threed
 

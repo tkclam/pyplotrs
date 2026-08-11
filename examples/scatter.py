@@ -1,5 +1,6 @@
 """Scatter plot with marker styling."""
 import math
+
 import pyplotrs as plt
 
 n = 80

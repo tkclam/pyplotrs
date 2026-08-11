@@ -13,9 +13,8 @@ from __future__ import annotations
 import math
 import random
 
-import pytest
-
 import pyplotrs as plt
+import pytest
 from pyplotrs import _pyplotrs_core as _core
 
 FORMATS = ("pdf", "svg", "png")

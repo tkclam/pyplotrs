@@ -1,6 +1,8 @@
 """Histogram of a synthetic distribution."""
 import math
+
 import pyplotrs as plt
+
 
 # Box-Muller normal samples (no numpy dependency).
 def normals(n, seed=1):

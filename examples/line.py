@@ -1,5 +1,6 @@
 """Line plot: multiple series with a legend."""
 import math
+
 import pyplotrs as plt
 
 xs = [i * 0.1 for i in range(80)]

@@ -16,9 +16,8 @@ from __future__ import annotations
 import math
 from array import array
 
-import pytest
-
 import pyplotrs as plt
+import pytest
 from pyplotrs import _pyplotrs_core as _core
 from pyplotrs._util import _RangeAcc, _to_f64, _to_f64_grid
 
@@ -385,9 +384,8 @@ def test_norms_declare_a_rust_code_only_when_one_exists():
 def test_exotic_norms_still_colour_correctly(tmp_path):
     """TwoSlopeNorm has no Rust transform, so it must fall back to per-value
     Python rather than being mapped as if it were linear."""
-    from pyplotrs import norms
+    from pyplotrs import colormaps, norms
     from pyplotrs._draw import _rgba_values
-    from pyplotrs import colormaps
 
     cm = colormaps.get_cmap("coolwarm")
     nrm = norms.TwoSlopeNorm(vcenter=0.0, vmin=-1.0, vmax=3.0)
@@ -403,7 +401,7 @@ def test_colormapped_scatter_renders_identically_at_both_sizes(tmp_path):
     """Above 64 markers the raster backend switches to tinted sprite stamping;
     below it, per-point fills. The two must agree, or a scatter would change
     appearance as points were added."""
-    from conftest import image_diff, read_png
+    from conftest import read_png
 
     def render(n, name):
         xs = [i / n for i in range(n)]

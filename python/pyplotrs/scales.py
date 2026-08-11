@@ -17,6 +17,7 @@ knows to pre-transform mark coordinates before the affine fast path.
 
 from __future__ import annotations
 
+import datetime as _dt
 import math
 from typing import Sequence
 
@@ -312,8 +313,6 @@ class CategoricalScale(Scale):
 
 
 # -- datetime axis ----------------------------------------------------------
-
-import datetime as _dt
 
 #: Epoch for pyplotrs' day-number convention (float days since this instant).
 _EPOCH = _dt.datetime(1970, 1, 1)

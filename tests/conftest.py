@@ -19,9 +19,8 @@ import struct
 import zlib
 from pathlib import Path
 
-import pytest
-
 import pyplotrs as plt
+import pytest
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
 

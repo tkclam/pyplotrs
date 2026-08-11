@@ -28,7 +28,7 @@ from __future__ import annotations
 from typing import Literal
 
 from . import _pyplotrs_core as _core
-from .colormaps import Colormap, get_cmap
+from .colormaps import get_cmap
 
 _RGB = tuple[int, int, int]
 _Triple = tuple[float, float, float]

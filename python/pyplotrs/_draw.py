@@ -12,9 +12,8 @@ import math
 from . import _pyplotrs_core as _core
 from . import mathtext as _mathtext
 from . import scales as _scales
-from . import ticker as _ticker
 from . import theme as _theme
-
+from . import ticker as _ticker
 from ._const import (
     _DASH_PATTERNS,
     _HATCH_SPACING,

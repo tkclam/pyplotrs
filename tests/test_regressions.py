@@ -9,11 +9,9 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 import pyplotrs as plt
+import pytest
 from pyplotrs.theme import parse_color
-
 
 # -- color parsing ----------------------------------------------------------
 

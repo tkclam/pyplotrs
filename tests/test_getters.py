@@ -20,9 +20,8 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 import pyplotrs as plt
+import pytest
 from pyplotrs.axes import Axes
 from pyplotrs.axes3d import Axes3D
 from pyplotrs.polar import PolarAxes
@@ -126,8 +125,8 @@ def test_legend_handles_expand_pie_wedges():
 
 @pytest.mark.parametrize("cls", [Axes, Axes3D, PolarAxes])
 def test_every_axes_kind_can_be_read_back(cls):
-    assert callable(getattr(cls, "get_title"))
-    assert callable(getattr(cls, "get_legend_handles_labels"))
+    assert callable(cls.get_title)
+    assert callable(cls.get_legend_handles_labels)
 
 
 @pytest.mark.parametrize("cls", [Axes, Axes3D, PolarAxes])

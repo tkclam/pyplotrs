@@ -13,14 +13,22 @@ from . import _pyplotrs_core as _core
 from . import colormaps as _colormaps
 from . import scales as _scales
 from . import threed as _threed
-from .theme import Theme
-
 from ._const import (
     _CUBE_FILL,
     _GRID_3D,
     _PANE_EDGE,
     _PANE_FILL,
     _TITLE_GAP,
+)
+from ._draw import (
+    _dash_for,
+    _draw_legend_box,
+    _draw_marker,
+    _font,
+    _measure_legend,
+    _text,
+    _th,
+    _tw,
 )
 from ._util import (
     _as_seq,
@@ -33,17 +41,8 @@ from ._util import (
     _to_f64,
     _with_alpha,
 )
-from ._draw import (
-    _dash_for,
-    _draw_legend_box,
-    _draw_marker,
-    _font,
-    _measure_legend,
-    _text,
-    _th,
-    _tw,
-)
 from .axes import _AxesBase
+from .theme import Theme
 
 
 def _grid_xyz(X, Y, Z):
@@ -612,15 +611,21 @@ class Axes3D(_AxesBase):
             draw()
 
         # 3. Tick labels + axis labels (on top, offset radially outward).
-        def place(anchor, text, size, outward):
+        #
+        # `font` defaults to the body face for tick labels; the three axis
+        # labels pass the theme's `axis_label_weight`. That used to be resolved
+        # into a `label_font` local that nothing ever read, so a theme setting
+        # `axis_label_weight="bold"` styled a 2D figure's labels and silently
+        # left a 3D figure's upright - the same leak Phase 6c closed for 2D.
+        def place(anchor, text, size, outward, font: str = "body"):
             dx, dy, _ = projn(anchor)
             vx, vy = dx - center_dev[0], dy - center_dev[1]
             vlen = math.hypot(vx, vy) or 1.0
             dx += vx / vlen * outward
             dy += vy / vlen * outward
-            tw = _tw(scene, text, size)
+            tw = _tw(scene, text, size, font)
             a, dd, _ = scene.font_vmetrics(size)
-            _text(scene, dx - tw / 2.0, dy + (a - dd) / 2.0, text, size, _BLACK)
+            _text(scene, dx - tw / 2.0, dy + (a - dd) / 2.0, text, size, _BLACK, font)
 
         # x/y tick labels along the bottom-front edges; z along the leftmost edge.
         x_edge_y = max((-0.5, 0.5), key=lambda yy: projn((0.0, yy, z_back))[1])
@@ -635,16 +640,16 @@ class Axes3D(_AxesBase):
         for nz, lab in zt:
             place((z_edge[0], z_edge[1], nz), lab, _TICK_LABEL_SIZE, 9.0)
 
+        label_font = _font(t.axis_label_weight)
         if self._xlabel:
-            place((0.0, x_edge_y, z_back), self._xlabel, _AXIS_LABEL_SIZE, 26.0)
+            place((0.0, x_edge_y, z_back), self._xlabel, _AXIS_LABEL_SIZE, 26.0, label_font)
         if self._ylabel:
-            place((y_edge_x, 0.0, z_back), self._ylabel, _AXIS_LABEL_SIZE, 26.0)
+            place((y_edge_x, 0.0, z_back), self._ylabel, _AXIS_LABEL_SIZE, 26.0, label_font)
         if self._zlabel:
-            place((z_edge[0], z_edge[1], 0.0), self._zlabel, _AXIS_LABEL_SIZE, 30.0)
+            place((z_edge[0], z_edge[1], 0.0), self._zlabel, _AXIS_LABEL_SIZE, 30.0, label_font)
 
         # Title in its reserved band.
         title_font = _font(t.title_weight)
-        label_font = _font(t.axis_label_weight)
         if self._title:
             a, _d = _th(scene, self._title, _TITLE_SIZE, title_font)
             tw = _tw(scene, self._title, _TITLE_SIZE, title_font)

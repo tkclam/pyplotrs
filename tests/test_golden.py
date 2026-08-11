@@ -19,9 +19,8 @@ from __future__ import annotations
 import math
 import random
 
-import pytest
-
 import pyplotrs as plt
+import pytest
 from conftest import assert_matches_golden, read_png
 
 

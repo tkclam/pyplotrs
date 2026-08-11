@@ -17,7 +17,7 @@ hyphens.
 from __future__ import annotations
 
 import math
-from typing import Callable
+from typing import Callable, ClassVar
 
 __all__ = [
     "Formatter", "ScalarFormatter", "FuncFormatter", "StrMethodFormatter",
@@ -153,7 +153,9 @@ class EngFormatter(Formatter):
     """Engineering notation: scale by a power of 1000 and append an SI prefix
     (``k``, ``M``, ``m``, ``µ`` …), then ``unit``."""
 
-    _PREFIX = {
+    #: Shared lookup, not per-instance state - `ClassVar` says so, and keeps a
+    #: type checker from reading it as a mutable default on every instance.
+    _PREFIX: ClassVar[dict[int, str]] = {
         -8: "y", -7: "z", -6: "a", -5: "f", -4: "p", -3: "n", -2: "µ", -1: "m",
         0: "", 1: "k", 2: "M", 3: "G", 4: "T", 5: "P", 6: "E", 7: "Z", 8: "Y",
     }

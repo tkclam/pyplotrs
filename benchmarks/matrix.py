@@ -59,9 +59,42 @@ QUICK_SCATTER_N = [10_000]
 
 
 def _line_xy(n: int):
+    """A smooth curve: the *best* case for polyline simplification.
+
+    Consecutive points are near-collinear at export resolution, so both
+    libraries' simplification passes collapse most of them and the drawn
+    geometry is far smaller than `n`. This is the honest shape for "a sampled
+    signal", which is what most line plots are - but it is not the whole story,
+    and reporting only this shape is what let the README claim million-point
+    lines were sub-second in every format. See `_line_xy_dense`.
+    """
     step = 10.0 / n
     xs = [i * step for i in range(n)]
     ys = [math.sin(x) * math.exp(-0.00002 * x) for x in xs]
+    return xs, ys
+
+
+def _line_xy_dense(n: int):
+    """Monotonic in x, random in y: a noisy signal simplification cannot help.
+
+    Every vertex survives to the renderer, so this is the honest counterpart to
+    `_line_xy`'s smooth curve - same point count, no collapsing. Reporting only
+    the smooth shape is what let "million-point line exports are sub-second"
+    stand as an unqualified claim.
+
+    Note what this does *not* measure. Raster cost tracks the polyline's total
+    length in device pixels rather than its vertex count, because each segment
+    is rasterized over its own bounding box. Here x advances by a fraction of a
+    pixel per point, so the line is short however noisy y is. A polyline whose
+    consecutive points are far apart *in x* - unsorted data, or a parametric
+    curve that criss-crosses the panel - is a different regime entirely, and
+    `docs/guide/performance.md` documents it rather than this table, since one
+    row would read as an anomaly rather than as the rule it follows.
+    """
+    random.seed(1)
+    step = 10.0 / n
+    xs = [i * step for i in range(n)]
+    ys = [random.uniform(0.0, 10.0) for _ in range(n)]
     return xs, ys
 
 
@@ -99,8 +132,8 @@ def _build_pyplotrs(mark: str, n: int, nrows: int, ncols: int):
     )
     per = max(2, n // (nrows * ncols))
     for ax in fig.axes:
-        if mark == "line":
-            xs, ys = _line_xy(per)
+        if mark.startswith("line"):
+            xs, ys = (_line_xy_dense if mark == "line_dense" else _line_xy)(per)
             ax.line(xs, ys, color="C0")
         else:
             xs, ys = _scatter_xy(per)
@@ -154,8 +187,8 @@ def _build_mpl(plt, mark: str, n: int, nrows: int, ncols: int):
     axlist = axes.ravel() if hasattr(axes, "ravel") else [axes]
     per = max(2, n // (nrows * ncols))
     for ax in axlist:
-        if mark == "line":
-            xs, ys = _line_xy(per)
+        if mark.startswith("line"):
+            xs, ys = (_line_xy_dense if mark == "line_dense" else _line_xy)(per)
             ax.plot(xs, ys)
         else:
             import numpy as np
@@ -367,7 +400,14 @@ def run(quick: bool):
         plt = _plt
 
     rows = []  # (mark, n, panels_label, fmt, ft, fsz, mt, msz)
-    cases = [("line", n) for n in line_n] + [("scatter", n) for n in scatter_n]
+    # `line_dense` is capped below `line`'s top N on purpose: it is the shape
+    # simplification cannot collapse, so PNG cost tracks the point count
+    # directly and a 1e6 row would take minutes rather than milliseconds. The
+    # point is to show the *scaling*, which 1e4 -> 1e5 already does.
+    dense_n = [n for n in line_n if n <= 100_000]
+    cases = ([("line", n) for n in line_n]
+             + [("line_dense", n) for n in dense_n]
+             + [("scatter", n) for n in scatter_n])
     for mark, n in cases:
         for nrows, ncols in panels:
             for fmt in FORMATS:
@@ -387,6 +427,55 @@ def run(quick: bool):
     return rows, mark_rows, plt is not None
 
 
+# -- summary prose, derived rather than asserted -----------------------------
+#
+# These paragraphs used to be string literals, and they drifted: the file
+# claimed "PDF - pyplotrs is smaller everywhere" while the table above it
+# showed pyplotrs larger on every `line`/pdf row (the embedded font is a floor
+# that a simplified line's geometry never pays off), and quoted scatter SVG at
+# "~15-22x" where the rows read 29-43x. A benchmark file that contradicts its
+# own table is worse than one with no prose at all, so the numbers now come out
+# of `rows`.
+
+def _losses_paragraph(rows) -> str:
+    losses = [r for r in rows if r[6] and r[4] > 0 and (r[6] / r[4]) < 1.0]
+    if not losses:
+        return ("**pyplotrs is faster in every row above.** The table is the "
+                "measurement; read any claim about who wins where off it.")
+    worst = ", ".join(
+        f"`{mark}` N={n:,} {panels} panel(s) {fmt} ({mt / ft:.1f}x)"
+        for mark, n, panels, fmt, ft, _fsz, mt, _msz in sorted(
+            losses, key=lambda r: r[6] / r[4])[:3])
+    return (f"**Where matplotlib wins.** {len(losses)} of {len(rows)} rows come "
+            f"out below 1.0x: {worst}. These are kept in the table rather than "
+            f"trimmed out of it - a benchmark with no losses in it is a "
+            f"benchmark that has not looked hard enough.")
+
+
+def _pdf_size_bullet(rows) -> str:
+    pdf = [r for r in rows if r[3] == "pdf" and r[7]]
+    smaller = [r for r in pdf if r[5] < r[7]]
+    if not pdf:
+        return "- **PDF** - no matplotlib comparison available in this run."
+    if len(smaller) == len(pdf):
+        return ("- **PDF** - pyplotrs is smaller on every row (subsetted fonts, "
+                "instanced markers, path simplification).")
+    return (f"- **PDF** - pyplotrs is smaller on {len(smaller)} of {len(pdf)} "
+            f"rows (instanced markers and path simplification), and *larger* on "
+            f"the rest. The difference is the embedded font: pyplotrs subsets "
+            f"and embeds it so the file renders identically anywhere, which is "
+            f"a fixed cost a sparse figure never earns back, while matplotlib "
+            f"leaves a simple line plot's text referencing a system font.")
+
+
+def _scatter_svg_speedup(rows) -> str:
+    sp = sorted(r[6] / r[4] for r in rows
+                if r[0] == "scatter" and r[3] == "svg" and r[6] and r[4] > 0)
+    if not sp:
+        return "faster"
+    return f"~{sp[0]:.0f}-{sp[-1]:.0f}x faster"
+
+
 def write_markdown(rows, mark_rows, have_mpl: bool, path: str):
     lines = [
         "# pyplotrs benchmark matrix",
@@ -404,6 +493,18 @@ def write_markdown(rows, mark_rows, have_mpl: bool, path: str):
         "has built its artists beforehand. Data ingestion is outside the timer "
         "for both, as is import time (`import pyplotrs` is ~12 ms against "
         "~237 ms for `matplotlib.pyplot`, which no row here reflects).",
+        "",
+        "The `line` rows use a smooth damped sinusoid, whose consecutive "
+        "points are near-collinear at export resolution, so both libraries' "
+        "simplification passes collapse most of them - the drawn geometry is "
+        "far smaller than `N`. That is the honest shape for a sampled signal, "
+        "but it is the best case, so `line_dense` repeats it with random `y`, "
+        "where nothing collapses and every vertex survives. Neither row "
+        "measures the case where consecutive points are far apart *in x* "
+        "(unsorted data, or a parametric curve crossing the panel): raster "
+        "cost tracks the polyline's length in device pixels, not its vertex "
+        "count, and that shape is a different regime. See the performance "
+        "guide.",
         "",
         "A third caveat applies only to **PNG**: raster export in pyplotrs is "
         "multi-threaded, both in rasterizing (an expensive canvas is split into "
@@ -447,21 +548,15 @@ def write_markdown(rows, mark_rows, have_mpl: bool, path: str):
             "single-pass layout amortizes per-panel chrome that matplotlib "
             "re-solves per axes.",
             "",
-            "**The large single line used to be matplotlib's one win** "
-            "(`N`=1e6, 1 panel, ~0.7x), when ingest and autoscale still ran in "
-            "Python. That loop moved to Rust and the row now wins like the "
-            "others; the table above is the current measurement, and any "
-            "statement about who wins where should be read off it rather than "
-            "from this paragraph.",
+            _losses_paragraph(rows),
             "",
             "**On file size**, each format has its own story:",
             "",
-            "- **PDF** - pyplotrs is smaller everywhere (subsetted fonts + "
-            "instanced markers + path simplification).",
+            _pdf_size_bullet(rows),
             "- **SVG, marker-heavy (scatter)** - pyplotrs is *smaller* **and** "
-            "~15-22x faster: markers are one `<defs>` glyph + a `<use>` per "
-            "point, versus matplotlib's per-point path, which outweighs even the "
-            "embedded font.",
+            + _scatter_svg_speedup(rows) + ": markers are one `<defs>` glyph "
+            "and a `<use>` per point, versus matplotlib's per-point path, which "
+            "outweighs even the embedded font.",
             "- **SVG, sparse geometry (line)** - pyplotrs is *larger*, and on "
             "purpose: it **embeds the bundled font** so the SVG is "
             "self-contained and renders identically on any machine (a pyplotrs "

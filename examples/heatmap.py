@@ -1,5 +1,6 @@
 """Image / heatmap with a colorbar."""
 import math
+
 import pyplotrs as plt
 
 n = 100

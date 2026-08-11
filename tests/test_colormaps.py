@@ -8,10 +8,8 @@ matplotlib/ColorBrewer/seaborn (categorical) via ``tools/extract_colormaps.py``
 from __future__ import annotations
 
 import pytest
-
 from pyplotrs import color, colormaps, palettes
 from pyplotrs.colormaps import Colormap
-
 
 # -- registry coverage --------------------------------------------------------
 

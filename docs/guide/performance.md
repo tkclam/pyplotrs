@@ -98,3 +98,34 @@ figure.
   materialized first.
 - **Non-finite handling is free.** `NaN`/`inf` filtering happens inside the same
   Rust reduction that computes the data range, not as a separate pass.
+
+## The one case that is slow: a long polyline
+
+Raster (`.png`) cost for a line scales with the polyline's **total length in
+device pixels**, not with its point count. Each segment is rasterized over its
+own bounding box, so a segment that crosses the panel costs far more than one
+that advances a pixel — however many points are behind it.
+
+For a sampled signal this never matters, because x advances by a fraction of a
+pixel per point. It matters when consecutive points are far apart in x:
+
+| 300 000 points, one panel, `.png` | time |
+|---|---|
+| smooth curve (`sin`, simplification collapses most vertices) | 0.02 s |
+| noisy signal, sorted x (nothing collapses) | 0.12 s |
+| **unsorted x — consecutive points jump across the panel** | **26 s** |
+
+The third row is almost always a mistake rather than a workload — it draws a
+scribble covering the whole panel. If you hit it:
+
+- **Sort by x** if the data is a function of x. This is the usual fix, and it
+  is what makes the figure readable as well as fast.
+- **Use [`scatter`](../api/figure.md#pyplotrs.axes.Axes.scatter)** if the points
+  are not a path. Scatter draws one stamped marker per point regardless of how
+  far apart they are: a million points rasterize in ~0.15 s.
+- **Export to `.pdf` or `.svg`** if you do need the path drawn. Vector output
+  records segments rather than filling pixels, so it stays sub-second at a
+  million points on any shape.
+
+`benchmarks/RESULTS.md` reports both the smooth (`line`) and the noisy
+(`line_dense`) shapes so that neither number stands alone.

@@ -30,9 +30,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-import colorcet as cc
 import cmocean
+import colorcet as cc
+import matplotlib.pyplot as plt
 import seaborn as sns
 
 ROOT = Path(__file__).resolve().parent.parent

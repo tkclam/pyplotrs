@@ -1,5 +1,6 @@
 """Polar plot: line + scatter on a polar projection, with a legend."""
 import math
+
 import pyplotrs as plt
 
 theta = [i * math.pi / 180 for i in range(0, 361)]

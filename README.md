@@ -33,10 +33,14 @@ fig.save("hello.html")  # self-contained, selectable text
 - **Publication-quality defaults** — a colorblind-safe palette, sensible type
   scale, despined axes, and "nice-number" ticks out of the box. No styling
   required to get a figure that looks finished.
-- **Fast** — the hot per-point/per-pixel loops live in Rust. Million-point line
-  and scatter exports are sub-second, the single-pass layout engine means the
-  lead grows with panel count, and the GIL is released while rendering, so a
-  thread pool over figures actually parallelizes.
+- **Fast** — the hot per-point/per-pixel loops live in Rust. A million-point
+  line exports to PDF in ~0.5 s and SVG in ~0.25 s; a million-point scatter
+  rasterizes to PNG in ~0.15 s. The single-pass layout engine means the lead
+  over matplotlib grows with panel count, and the GIL is released while
+  rendering, so a thread pool over figures actually parallelizes. See
+  [benchmarks](https://tkclam.github.io/pyplotrs/guide/performance/) for the
+  measured table, the machine it came from, and the one case that is *slower*
+  than matplotlib.
 - **Portable output** — the chosen font is **embedded into every saved file**
   (PDF/SVG/PNG/HTML), so a figure looks identical on any machine, regardless of
   the fonts installed there.
@@ -101,8 +105,23 @@ mkdocs serve
 
 ## License
 
-Licensed under the [MIT license](LICENSE).
+Licensed under the **MIT license**
+([LICENSE](https://github.com/tkclam/pyplotrs/blob/main/LICENSE)).
 
-The bundled fonts (Liberation Sans, STIX Two Math) are under the SIL Open Font
-License 1.1 and the colormap data is CC0; see
-[docs/about/license.md](docs/about/license.md).
+pyplotrs redistributes a few third-party assets, each under a permissive
+license, and ships every license text in the wheel under
+`pyplotrs-<version>.dist-info/licenses/`:
+
+| Asset | License |
+|---|---|
+| Liberation Sans, STIX Two Math (bundled fonts) | SIL Open Font License 1.1 |
+| `viridis`/`plasma`/`inferno`/`magma`/`cividis` | CC0 1.0 (public domain) |
+| colorcet colormaps (`cet_*`) | **CC-BY 4.0 — attribution required** |
+| cmocean (`cmo_*`) · seaborn (`sns_*`) | MIT · BSD-3-Clause |
+| MathJax 3.2.2 (inlined into HTML math output) | Apache-2.0 |
+| krilla (PDF backend, vendored) | MIT OR Apache-2.0 |
+| ~110 Rust crates compiled into the extension | MIT / Apache-2.0 / BSD / Zlib / … |
+
+Full details in
+[THIRD-PARTY-NOTICES.md](https://github.com/tkclam/pyplotrs/blob/main/THIRD-PARTY-NOTICES.md)
+and the [license page](https://tkclam.github.io/pyplotrs/about/license/).

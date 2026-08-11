@@ -23,10 +23,7 @@ import textwrap
 
 from . import _pyplotrs_core as _core
 from . import theme as _theme
-from .theme import Theme
-
 from ._const import (
-    DEFAULT_FIGSIZE,
     _HSPACE,
     _INLINE_DPI,
     _LEGEND_COL_GAP_L,
@@ -34,8 +31,8 @@ from ._const import (
     _OUTER_MARGIN,
     _TITLE_GAP,
     _WSPACE,
+    DEFAULT_FIGSIZE,
 )
-from ._util import _figsize_to_points
 from ._draw import (
     _draw_legend_box,
     _font,
@@ -44,9 +41,11 @@ from ._draw import (
     _th,
     _tw,
 )
-from .axes import Axes
+from ._util import _figsize_to_points
+from .axes import Axes, Mappable
 from .axes3d import Axes3D
 from .polar import PolarAxes
+from .theme import Theme
 
 
 def _svg_to_html(svg: str, title: str, alt: str) -> str:
@@ -216,7 +215,7 @@ class Figure:
                     entries.append(m)
         return entries
 
-    def colorbar(self, mappable: "_Mappable", *, label: str | None = None,
+    def colorbar(self, mappable: "Mappable", *, label: str | None = None,
                  orientation: str = "vertical", shrink: float = 1.0,
                  ticks=None, format=None) -> "Figure":
         """Attach a colorbar for ``mappable`` (from :meth:`Axes.imshow` or a

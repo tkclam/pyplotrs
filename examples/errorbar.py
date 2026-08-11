@@ -1,5 +1,6 @@
 """Error bars with caps."""
 import math
+
 import pyplotrs as plt
 
 xs = list(range(1, 9))

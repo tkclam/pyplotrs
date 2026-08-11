@@ -1,15 +1,19 @@
 from . import _pyplotrs_core as _core
-from . import color
-from . import colormaps
-from . import norms
-from . import palettes
-from . import scales
-from . import ticker
+from . import color, colormaps, norms, palettes, scales, ticker
 from . import theme as themes
-from .animation import Animation, animate
 from ._const import DEFAULT_FIGSIZE
+from .animation import Animation, animate
 from .colormaps import Colormap, get_cmap
-from .figure import Axes, Axes3D, Figure, GridSpec, PolarAxes, subplots, subplot_mosaic
+from .figure import (
+    Axes,
+    Axes3D,
+    Figure,
+    GridSpec,
+    Mappable,
+    PolarAxes,
+    subplot_mosaic,
+    subplots,
+)
 from .theme import Theme
 
 
@@ -103,7 +107,8 @@ def resolved_font_variants() -> list[tuple[str, str]]:
 
 
 __all__ = [
-    "Axes", "Axes3D", "Figure", "GridSpec", "PolarAxes", "subplots", "subplot_mosaic", "figure",
+    "Axes", "Axes3D", "Figure", "GridSpec", "Mappable", "PolarAxes",
+    "subplots", "subplot_mosaic", "figure",
     "colormaps", "Colormap", "get_cmap", "palettes", "color",
     "themes", "Theme", "norms", "scales", "ticker",
     "Animation", "animate",

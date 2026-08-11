@@ -61,10 +61,19 @@ docs = [
     "mkdocstrings[python]>=0.26",
     "black>=24",
 ]
-# Test suite: `pytest` from the repo root. The suite itself depends only on the
-# standard library (it decodes PNGs with `zlib`), matching pyplotrs' own
-# zero-runtime-dependency stance.
-test = ["pytest>=8"]
+# Test suite: `pytest` from the repo root. The suite is deliberately close to
+# standard-library-only (it decodes PNGs with `zlib`), matching pyplotrs' own
+# zero-runtime-dependency stance, and every test that needs more is skipped
+# individually rather than at module scope - a module-level `importorskip`
+# silently disabled 26 tests in CI and hid a crash for months.
+#   numpy  - the array-ingest tests; the fast path exists for it, so it has to
+#            be exercised somewhere, and CI is that somewhere.
+#   tomli  - `tomllib` backport for 3.9/3.10, used by the packaging tests.
+test = [
+    "pytest>=8",
+    "numpy>=1.24",
+    "tomli>=2; python_version<'3.11'",
+]
 # Benchmark-only: `benchmarks/benchmark.py` times pyplotrs head-to-head against matplotlib.
 # Not a runtime dependency of pyplotrs itself. Install with `pip install -e .[bench]`.
 bench = ["matplotlib>=3.8", "numpy>=1.24"]
@@ -110,3 +119,53 @@ include = [
     { path = "tests/**/*", format = "sdist" },
     { path = "tools/gen_third_party_notices.py", format = "sdist" },
 ]
+
+[tool.ruff]
+# Match the codebase as written rather than reformatting 8.5k lines: the
+# surrounding style is 4-space, ~95-column, and consistent.
+line-length = 100
+target-version = "py39"
+extend-exclude = ["python/pyplotrs/_vendor", "vendor", "site"]
+
+[tool.ruff.lint]
+# Chosen to catch defects, not to restyle a codebase that is already
+# internally consistent. The full `UP`/`RUF` sets flag ~190 quoted annotations
+# and unused tuple elements across this tree; that is churn with no defect
+# behind it, and a lint gate people route around is worse than none.
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes: undefined names, unused imports and variables
+    "I",        # import sorting
+    "B",        # bugbear: mutable defaults, loop-variable capture in closures
+    "RUF012",   # mutable class attribute that should be a ClassVar
+    "RUF034",   # `x if c else x` - both branches identical, so one is wrong
+    "UP032",    # `.format()` where an f-string reads better
+]
+ignore = [
+    # `l` is never used as a name here, and the rule fights the math code where
+    # single letters are the domain vocabulary (`w`, `h`, `r`, `c`).
+    "E741",
+    # Line length is enforced by `line-length` above; E501 double-reports it.
+    "E501",
+    # Semicolon-joined assignments (`h = len(Z); w = len(Z[0])`) are a
+    # deliberate local style for values that are only meaningful as a pair, and
+    # the rule catches no defect.
+    "E702",
+    # `int(round(v))` / `int(math.floor(v))` look redundant in pure Python and
+    # are not: `round` on a NumPy scalar returns a NumPy scalar, and these sites
+    # take values straight from user arrays.
+    "RUF046",
+    # `raise ... from` inside `except` - the raise sites here deliberately
+    # replace an internal error (KeyError on a lookup table) with a message
+    # about the caller's argument, and chaining the original back in shows the
+    # user an implementation detail.
+    "B904",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests reach into private helpers on purpose - that is what they are testing.
+"tests/*" = ["E402"]
+# Examples are read as prose as much as run, and re-import per snippet.
+"examples/*" = ["E402", "F401"]
+# The benchmark harness closes over the loop's figure and calls immediately.
+"benchmarks/*" = ["B023"]

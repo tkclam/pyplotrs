@@ -1,5 +1,6 @@
 """LaTeX math in titles, axis labels and the legend."""
 import math
+
 import pyplotrs as plt
 
 xs = [i * 0.05 for i in range(1, 120)]

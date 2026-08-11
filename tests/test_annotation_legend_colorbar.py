@@ -16,10 +16,8 @@ from __future__ import annotations
 import re
 import subprocess
 
-import pytest
-
 import pyplotrs as plt
-
+import pytest
 
 # -- text rotation ------------------------------------------------------------
 
@@ -88,8 +86,8 @@ def _multi(ax, n=6):
 
 
 def test_ncol_makes_the_box_wider_and_shorter():
-    from pyplotrs._draw import _measure_legend
     from pyplotrs import _pyplotrs_core as _core
+    from pyplotrs._draw import _measure_legend
     scene = _core.Scene(400.0, 300.0)
     entries = [{"kind": "line", "label": f"series {i}", "color": (0, 0, 0, 255)}
                for i in range(6)]
@@ -106,8 +104,8 @@ def test_ncol_renders(tmp_path):
 
 
 def test_legend_title_grows_the_box():
-    from pyplotrs._draw import _measure_legend
     from pyplotrs import _pyplotrs_core as _core
+    from pyplotrs._draw import _measure_legend
     scene = _core.Scene(400.0, 300.0)
     entries = [{"kind": "line", "label": "a", "color": (0, 0, 0, 255)}]
     _, h1, _ = _measure_legend(scene, entries, None, {})
@@ -130,8 +128,8 @@ def test_frameon_false_drops_the_box(tmp_path):
 
 
 def test_legend_fontsize_overrides_the_theme():
-    from pyplotrs._draw import _measure_legend
     from pyplotrs import _pyplotrs_core as _core
+    from pyplotrs._draw import _measure_legend
     scene = _core.Scene(400.0, 300.0)
     entries = [{"kind": "line", "label": "abc", "color": (0, 0, 0, 255)}]
     _, _, m1 = _measure_legend(scene, entries, None, {})

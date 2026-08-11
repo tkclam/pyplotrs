@@ -13,9 +13,8 @@ from __future__ import annotations
 
 import re
 
-import pytest
-
 import pyplotrs as plt
+import pytest
 
 
 def _axes(**kw):

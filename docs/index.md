@@ -49,9 +49,10 @@ fig.save("hello.png")   # 200 dpi by default
 
     ---
 
-    The hot per-point and per-pixel loops live in Rust. Million-point line and
-    scatter exports are sub-second, the single-pass layout means the lead grows
-    with panel count, and the GIL is released while rendering.
+    The hot per-point and per-pixel loops live in Rust. A million-point line
+    exports to PDF in ~0.5 s, a million-point scatter to PNG in ~0.15 s, the
+    single-pass layout means the lead grows with panel count, and the GIL is
+    released while rendering.
 
 -   :material-earth:{ .lg .middle } **Portable output**
 

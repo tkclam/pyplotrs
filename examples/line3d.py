@@ -1,5 +1,6 @@
 """A 3D parametric curve (helix)."""
 import math
+
 import pyplotrs as plt
 
 t = [i * 0.1 for i in range(220)]

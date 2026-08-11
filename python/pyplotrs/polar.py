@@ -6,8 +6,6 @@ import math
 
 from . import scales as _scales
 from . import ticker as _ticker
-from .theme import Theme
-
 from ._const import _TITLE_GAP
 from ._draw import (
     _dash_for,
@@ -20,6 +18,7 @@ from ._draw import (
     _tw,
 )
 from .axes import _AxesBase
+from .theme import Theme
 
 
 def _theta_zero(loc) -> float:

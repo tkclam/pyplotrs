@@ -11,15 +11,28 @@ on:
   push:
     branches:
       - main
-      - master
       - dev
+    # Only release tags. `'*'` matched anything, so an annotation tag or a
+    # `docs-v2` bookmark would run the whole wheel matrix and hand whatever
+    # version happened to be in the metadata to PyPI - which, on a repository
+    # sitting at 0.0.1, means tagging `v0.1.0` publishes `0.0.1` and burns both
+    # names. The release job now also asserts the tag matches the metadata.
     tags:
-      - '*'
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+[ab-]*'
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# One run per ref. A re-tag or a quick second push otherwise races the first
+# run, and two concurrent publishes to the same version is not a state PyPI
+# lets you recover from. Tag runs are never cancelled: a half-finished release
+# is worse than a duplicated one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   # Fast, single-platform correctness gate. Runs on every push and PR and is
@@ -40,21 +53,34 @@ jobs:
       - name: cargo fmt
         run: cargo fmt --all -- --check
       - name: cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: cargo test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
-      - name: Build the extension in-place
+      - name: ruff
+        # `ruff check` only. `ruff format --check` would rewrite 80 of 103
+        # files - the mark dictionaries and the tick tables are hand-aligned to
+        # be read as tables, and a formatter unwraps all of it. The lint rules
+        # in pyproject.toml are chosen to catch defects instead; see the
+        # comment on `[tool.ruff.lint] select`.
         run: |
-          python -m pip install --upgrade pip maturin
-          maturin develop --release
+          python -m pip install --upgrade pip ruff
+          ruff check .
 
       - name: pytest
+        # `pip install .` builds and installs the extension, so there is no
+        # separate build step. There used to be a `maturin develop --release`
+        # here, and it could never have worked: `actions/setup-python` does not
+        # create a virtualenv and `.venv/` is gitignored, so maturin exited 1
+        # with "Couldn't find a virtualenv or conda environment" and took the
+        # whole job with it before a single test ran. It passed locally only
+        # because a `.venv/` happened to exist in the working tree.
+        #
+        # `--strict-markers` and a non-zero collection are both deliberate: a
+        # bare `pytest` over a checkout with no tests exits 5, which used to
+        # look like a failure while asserting nothing.
         run: |
           python -m pip install ".[test]"
-          # `--strict-markers` and a non-zero collection are both deliberate:
-          # a bare `pytest` over a checkout with no tests exits 5, which used to
-          # look like a failure while asserting nothing.
           pytest -q --strict-markers
 
       - name: Source distribution builds
@@ -66,14 +92,31 @@ jobs:
         run: pytest -q --strict-markers -m packaging
 
       - name: Benchmark regression gate
-        run: |
-          python -m pip install ".[bench]"
-          python benchmarks/benchmark.py --check
+        # Structural invariants (marker XObject counts, `<use>` counts, vertex
+        # simplification), not wall-clock thresholds, so this does not flap on
+        # a shared runner. It needs neither matplotlib nor numpy.
+        run: python benchmarks/benchmark.py --check
 
       - name: Build docs
         run: |
           python -m pip install ".[docs]"
           mkdocs build --strict
+
+  # The declared MSRV has to be a fact, not an aspiration. Nothing verified it
+  # before, and it was wrong by twelve minor versions.
+  msrv:
+    name: minimum supported Rust version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - id: msrv
+        run: |
+          echo "version=$(grep -m1 '^rust-version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets --locked
 
   linux:
     runs-on: ${{ matrix.platform.runner }}
@@ -119,11 +162,15 @@ jobs:
           uv venv .venv
           source .venv/bin/activate
           uv pip install pyplotrs --no-index --no-deps --find-links dist --reinstall
-          uv pip install pyplotrs pytest
+          uv pip install "pyplotrs[test]"
           pytest
       - name: pytest
         if: ${{ !startsWith(matrix.platform.target, 'x86') && matrix.platform.target != 'ppc64' }}
-        uses: uraimo/run-on-arch-action@v2
+        # v3, not v2: `distro: ubuntu24.04` only exists from v3 onward
+        # (v2's Dockerfiles stop at 22.04), so on v2 every cross-arch job
+        # failed to find an image - taking aarch64/armv7/s390x/ppc64le
+        # with it, and with them the `release` job that needs them.
+        uses: uraimo/run-on-arch-action@v3
         with:
           arch: ${{ matrix.platform.target }}
           distro: ubuntu24.04
@@ -179,12 +226,16 @@ jobs:
             python3 -m virtualenv .venv
             source .venv/bin/activate
             pip install pyplotrs --no-index --no-deps --find-links dist --force-reinstall
-            pip install pyplotrs pytest
+            pip install "pyplotrs[test]"
             pytest
           '
       - name: pytest
         if: ${{ !startsWith(matrix.platform.target, 'x86') }}
-        uses: uraimo/run-on-arch-action@v2
+        # v3, not v2: `distro: ubuntu24.04` only exists from v3 onward
+        # (v2's Dockerfiles stop at 22.04), so on v2 every cross-arch job
+        # failed to find an image - taking aarch64/armv7/s390x/ppc64le
+        # with it, and with them the `release` job that needs them.
+        uses: uraimo/run-on-arch-action@v3
         with:
           arch: ${{ matrix.platform.target }}
           distro: alpine_latest
@@ -196,7 +247,7 @@ jobs:
             python3 -m virtualenv .venv
             source .venv/bin/activate
             pip install pyplotrs --no-index --no-deps --find-links dist --force-reinstall
-            pip install pyplotrs pytest
+            pip install "pyplotrs[test]"
             pytest
 
   windows:
@@ -238,7 +289,7 @@ jobs:
           uv venv .venv
           source .venv/Scripts/activate
           uv pip install pyplotrs --no-index --no-deps --find-links dist --reinstall
-          uv pip install pyplotrs pytest
+          uv pip install "pyplotrs[test]"
           pytest
 
   macos:
@@ -273,7 +324,7 @@ jobs:
           uv venv .venv
           source .venv/bin/activate
           uv pip install pyplotrs --no-index --no-deps --find-links dist --reinstall
-          uv pip install pyplotrs pytest
+          uv pip install "pyplotrs[test]"
           pytest
 
   sdist:
@@ -294,26 +345,73 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
-    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
-    needs: [checks, linux, musllinux, windows, macos, sdist]
+    # Tags only. `workflow_dispatch` used to reach this job, where it ran the
+    # whole matrix, minted attestations for artifacts that were then thrown
+    # away, and published nothing - a long, confusing no-op.
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    needs: [checks, msrv, linux, musllinux, windows, macos, sdist]
+    # Trusted Publishing: PyPI verifies this workflow's OIDC identity, so there
+    # is no long-lived API token to leak, rotate or scope. Configure the
+    # publisher at https://pypi.org/manage/account/publishing/ before the first
+    # release. `environment` gates the job on whatever protection rules the
+    # repository puts on it (required reviewers, tag restrictions).
+    environment:
+      name: pypi
+      url: https://pypi.org/p/pyplotrs
     permissions:
-      # Use to sign the release artifacts
+      # OIDC token for Trusted Publishing and for attestation.
       id-token: write
-      # Used to upload release artifacts
+      # Create the GitHub Release below.
       contents: write
-      # Used to generate artifact attestation
+      # Generate the artifact attestation.
       attestations: write
     steps:
+      - uses: actions/checkout@v6
       - uses: actions/download-artifact@v7
+
+      - name: The tag must match the version being published
+        # Every artifact is named from the metadata version, not from the tag,
+        # so a mismatch silently publishes the wrong number - and a version on
+        # PyPI cannot be replaced, only yanked. Tagging `v0.1.0` on a tree
+        # still saying `0.0.1` would have burned both.
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          meta=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          echo "tag=$tag metadata=$meta"
+          if [ "$tag" != "$meta" ]; then
+            echo "::error::tag v$tag does not match the package version $meta;" \
+                 "bump [workspace.package].version in Cargo.toml, or retag"
+            exit 1
+          fi
+          if ! ls wheels-*/pyplotrs-"$meta"-*.whl >/dev/null 2>&1; then
+            echo "::error::no wheel named pyplotrs-$meta-*.whl among the artifacts"
+            exit 1
+          fi
+
+      - name: Check the artifacts are well-formed
+        run: |
+          python -m pip install --upgrade twine
+          twine check wheels-*/*
+
       - name: Generate artifact attestation
         uses: actions/attest@v4
         with:
           subject-path: 'wheels-*/*'
+
       - name: Install uv
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         uses: astral-sh/setup-uv@v7
+
       - name: Publish to PyPI
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
-        run: uv publish 'wheels-*/*'
+        # `always`, not `automatic`: a misconfigured publisher must fail loudly
+        # here rather than silently falling back to looking for a token.
+        run: uv publish --trusted-publishing always 'wheels-*/*'
+
+      - name: Create the GitHub Release
         env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" wheels-*/* \
+            --title "$GITHUB_REF_NAME" \
+            --notes "See [the changelog](https://tkclam.github.io/pyplotrs/about/changelog/)." \
+            --verify-tag

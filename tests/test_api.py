@@ -11,13 +11,11 @@ from __future__ import annotations
 
 import inspect
 
-import pytest
-
 import pyplotrs as plt
+import pytest
 from pyplotrs.axes import Axes, _AxesBase
 from pyplotrs.axes3d import Axes3D
 from pyplotrs.polar import PolarAxes
-
 
 # -- one name per concept ----------------------------------------------------
 
@@ -708,7 +706,7 @@ def test_polar_has_no_individual_setters():
 
 @pytest.mark.parametrize("cls", [Axes, Axes3D, PolarAxes])
 def test_every_axes_class_writes_through_set(cls):
-    assert callable(getattr(cls, "set"))
+    assert callable(cls.set)
 
 
 def test_polar_set_still_covers_everything_the_wrappers_did():

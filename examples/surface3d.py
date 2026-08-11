@@ -1,5 +1,6 @@
 """3D surface (the classic 'sombrero')."""
 import math
+
 import pyplotrs as plt
 
 n = 40

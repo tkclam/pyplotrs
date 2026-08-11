@@ -10,9 +10,8 @@ ticks for a colorbar. Used by :meth:`pyplotrs.Axes.scatter` (``c=``) and
 from __future__ import annotations
 
 import math
-from typing import Sequence
-
 from array import array
+from typing import Sequence
 
 from . import _pyplotrs_core as _core
 from . import scales as _scales

@@ -2,7 +2,7 @@
 
 Also holds :class:`_AxesBase` - the contract every axes kind shares (color
 cycling, the mark ordering rule, legends, the ``get_*`` readers) - and
-:class:`_Mappable`, the handle a colormapped mark returns for
+:class:`Mappable`, the handle a colormapped mark returns for
 :meth:`Figure.colorbar`.
 """
 
@@ -15,10 +15,8 @@ from . import _pyplotrs_core as _core
 from . import colormaps as _colormaps
 from . import norms as _norms
 from . import scales as _scales
-from . import ticker as _ticker
 from . import theme as _theme
-from .theme import Theme
-
+from . import ticker as _ticker
 from ._const import (
     _AXIS_LABEL_GAP,
     _CBAR_GAP,
@@ -35,31 +33,6 @@ from ._const import (
     _TICK_LABEL_GAP,
     _TICK_LENGTH,
     _TITLE_GAP,
-)
-from ._util import (
-    _NUMERIC_BUFFER_FORMATS,
-    _RangeAcc,
-    _as_seq,
-    _auto_levels,
-    _boxstats,
-    _clip_segment,
-    _concat,
-    _edges_from_centers,
-    _field_args,
-    _flatten2d,
-    _interp_coord,
-    _is_2d,
-    _is_uniform,
-    _level_edges,
-    _patch_bbox,
-    _require_same_length,
-    _spine_ends,
-    _step_points,
-    _streamlines,
-    _subdivide,
-    _to_f64,
-    _to_f64_grid,
-    _with_alpha,
 )
 from ._draw import (
     _colorbar_ticks,
@@ -78,15 +51,56 @@ from ._draw import (
     _th,
     _tw,
 )
-from ._layout import _Proj, _Rect, _layout_cell
+from ._layout import _layout_cell, _Proj, _Rect
+from ._util import (
+    _NUMERIC_BUFFER_FORMATS,
+    _as_seq,
+    _auto_levels,
+    _boxstats,
+    _clip_segment,
+    _concat,
+    _edges_from_centers,
+    _field_args,
+    _flatten2d,
+    _interp_coord,
+    _is_2d,
+    _is_uniform,
+    _level_edges,
+    _patch_bbox,
+    _RangeAcc,
+    _require_same_length,
+    _spine_ends,
+    _step_points,
+    _streamlines,
+    _subdivide,
+    _to_f64,
+    _to_f64_grid,
+    _with_alpha,
+)
+from .theme import Theme
 
 #: Alias so methods taking a ``range=`` keyword can still reach the builtin.
 _irange = range
 
 
-class _Mappable:
-    """Handle returned by :meth:`Axes.imshow`/:meth:`Axes.scatter` (``c=``),
-    consumed by :meth:`Figure.colorbar` to build a matching color scale."""
+class Mappable:
+    """The colormapped-mark handle that :meth:`Figure.colorbar` takes.
+
+    Returned by every mark that maps values through a colormap -
+    :meth:`Axes.imshow`, :meth:`Axes.scatter` with ``c=``,
+    :meth:`Axes.pcolormesh`, :meth:`Axes.hexbin`, :meth:`Axes.hist2d`,
+    :meth:`Axes.contourf` - and carrying the colormap and value range the
+    colorbar needs to draw a matching scale::
+
+        im = ax.imshow(field, cmap="magma")
+        fig.colorbar(im, label="intensity")
+
+    You rarely construct one; you hold the value a mark hands back and pass it
+    on. It is named in the signature of a public method, so it is public
+    itself: it was spelled ``_Mappable`` until 0.1.0, which made
+    ``Figure.colorbar``'s own annotation refer to a name no importer could
+    resolve.
+    """
 
     def __init__(self, ax: "Axes", cmap, vmin: float, vmax: float, norm=None) -> None:
         self.ax = ax
@@ -460,7 +474,7 @@ class Axes(_AxesBase):
         nrm = _norms.get(norm, vmin, vmax).autoscale(cvals)
         cm = _colormaps.get_cmap(cmap)
         mark["colors"] = _rgba_values(cvals, cm, nrm)
-        return _Mappable(self, cm, nrm.vmin, nrm.vmax, norm=nrm)
+        return Mappable(self, cm, nrm.vmin, nrm.vmax, norm=nrm)
 
     def bar(self, x, height, *, width: float = 0.5, bottom=0.0, color=None,
             alpha: float = 1.0, label: str | None = None, edgecolor=None, zorder: float = 0.0) -> "Axes":
@@ -731,7 +745,7 @@ class Axes(_AxesBase):
     def imshow(self, data, *, cmap="viridis", vmin: float | None = None,
                vmax: float | None = None, norm=None, extent=None,
                origin: str = "upper", alpha: float = 1.0,
-               label: str | None = None, zorder: float = 0.0) -> "_Mappable":
+               label: str | None = None, zorder: float = 0.0) -> "Mappable":
         """Display 2D ``data`` as a colormapped image.
 
         ``data`` is a sequence of equal-length rows. ``cmap`` is a colormap
@@ -777,7 +791,7 @@ class Axes(_AxesBase):
             # colormap's midpoint - the one swatch that reads as "this map".
             "color": _with_alpha(cm(0.5), alpha),
         })
-        return _Mappable(self, cm, lo, hi, norm=(nrm if norm_code != "linear" else None))
+        return Mappable(self, cm, lo, hi, norm=(nrm if norm_code != "linear" else None))
 
     # -- step / stair family ------------------------------------------------
 
@@ -883,7 +897,7 @@ class Axes(_AxesBase):
     def hist2d(self, xs, ys, *, bins=10, range=None, cmap="viridis", norm=None,
                vmin: float | None = None, vmax: float | None = None,
                alpha: float = 1.0, label: str | None = None,
-               zorder: float = 0.0) -> "_Mappable":
+               zorder: float = 0.0) -> "Mappable":
         """2D histogram of ``(xs, ys)`` rendered as a colormapped image. ``bins``
         is an int or ``(nx, ny)``; the count grid is built in Rust."""
         xs = _to_f64(xs)
@@ -910,7 +924,7 @@ class Axes(_AxesBase):
     def hexbin(self, xs, ys, *, gridsize: int = 30, cmap="viridis", norm=None,
                vmin: float | None = None, vmax: float | None = None,
                alpha: float = 1.0, label: str | None = None,
-               zorder: float = 0.0) -> "_Mappable":
+               zorder: float = 0.0) -> "Mappable":
         """Hexagonal binning of ``(xs, ys)`` colored by count (binning in Rust).
 
         The whole lattice is drawn, as in matplotlib: a cell no point landed in
@@ -939,14 +953,14 @@ class Axes(_AxesBase):
             "colors": colors, "offsets": offs, "label": label,
             "color": _with_alpha(cm(0.5), alpha),
         })
-        return _Mappable(self, cm, nrm.vmin, nrm.vmax,
+        return Mappable(self, cm, nrm.vmin, nrm.vmax,
                          norm=(nrm if type(nrm) is not _norms.Normalize else None))
 
     # -- field / grid -------------------------------------------------------
 
     def pcolormesh(self, *args, cmap="viridis", norm=None, vmin: float | None = None,
                    vmax: float | None = None, alpha: float = 1.0,
-                   label: str | None = None, zorder: float = 0.0) -> "_Mappable":
+                   label: str | None = None, zorder: float = 0.0) -> "Mappable":
         """Pseudocolor plot of a 2D grid: ``pcolormesh(C)`` or
         ``pcolormesh(X, Y, C)``. Regular grids route to the fast Rust image path;
         irregular grids draw one colored quad per cell."""
@@ -977,7 +991,7 @@ class Axes(_AxesBase):
                             "kind": "quadmesh", "quads": quads, "label": label,
                             "color": _with_alpha(cm(0.5), alpha),
                             "extent": (xe[0], xe[-1], ye[0], ye[-1])})
-        return _Mappable(self, cm, nrm.vmin, nrm.vmax)
+        return Mappable(self, cm, nrm.vmin, nrm.vmax)
 
     def contour(self, *args, levels=None, colors=None, cmap=None,
                 linewidth: float | None = None, alpha: float = 1.0,
@@ -1014,7 +1028,7 @@ class Axes(_AxesBase):
     def contourf(self, *args, levels=None, cmap="viridis", norm=None,
                  vmin: float | None = None, vmax: float | None = None,
                  upsample: int = 6, alpha: float = 1.0,
-                 label: str | None = None, zorder: float = 0.0) -> "_Mappable":
+                 label: str | None = None, zorder: float = 0.0) -> "Mappable":
         """Filled contour bands of a 2D field. The field is bilinearly upsampled
         and band-colored in Rust (a raster fill, like ``imshow``).
 
@@ -1042,9 +1056,9 @@ class Axes(_AxesBase):
             "label": label, "color": _with_alpha(cm(0.5), alpha),
             "extent": (min(xc), max(xc), min(yc), max(yc)),
         })
-        return _Mappable(self, cm, edges[0], edges[-1], norm=nrm)
+        return Mappable(self, cm, edges[0], edges[-1], norm=nrm)
 
-    def pcolor(self, *args, **kwargs) -> "_Mappable":
+    def pcolor(self, *args, **kwargs) -> "Mappable":
         """Alias of :meth:`pcolormesh`.
 
         matplotlib distinguishes the two (``pcolor`` returns a masked-aware
@@ -1054,7 +1068,7 @@ class Axes(_AxesBase):
         nothing left to express."""
         return self.pcolormesh(*args, **kwargs)
 
-    def matshow(self, data, **kwargs) -> "_Mappable":
+    def matshow(self, data, **kwargs) -> "Mappable":
         """Display a matrix with row 0 at the top and one cell per entry.
 
         :meth:`imshow` with the conventions a *matrix* wants rather than the
@@ -2676,8 +2690,7 @@ class Axes(_AxesBase):
                 x0, x1 = sx(x0d), sx(x0d + wdt)
                 scene.add_path([(x0, y0), (x1, y0), (x1, y1), (x0, y1)],
                                fill_color=_with_alpha(m["color"], m["alpha"]), close=True,
-                               stroke_color=m["edgecolor"],
-                               stroke_width=1.0 if m["edgecolor"] else 1.0)
+                               stroke_color=m["edgecolor"], stroke_width=1.0)
         elif kind == "eventplot":
             horiz = m["orientation"] == "horizontal"
             half = m["length"] / 2.0
