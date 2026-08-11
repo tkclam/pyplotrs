@@ -509,11 +509,11 @@ dependencies = [
 
 [[package]]
 name = "pyplotrs-3d"
-version = "0.0.1"
+version = "0.1.0"
 
 [[package]]
 name = "pyplotrs-color"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "approx",
  "palette",
@@ -521,18 +521,18 @@ dependencies = [
 
 [[package]]
 name = "pyplotrs-core"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "kurbo",
 ]
 
 [[package]]
 name = "pyplotrs-layout"
-version = "0.0.1"
+version = "0.1.0"
 
 [[package]]
 name = "pyplotrs-math"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "pyplotrs-core",
  "pyplotrs-text",
@@ -541,7 +541,7 @@ dependencies = [
 
 [[package]]
 name = "pyplotrs-py"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "fontdb",
  "pyo3",
@@ -558,7 +558,7 @@ dependencies = [
 
 [[package]]
 name = "pyplotrs-render-pdf"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "krilla",
  "pyplotrs-core",
@@ -566,7 +566,7 @@ dependencies = [
 
 [[package]]
 name = "pyplotrs-render-raster"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "flate2",
  "gif",
@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "pyplotrs-render-svg"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "base64",
  "png",
@@ -588,7 +588,7 @@ dependencies = [
 
 [[package]]
 name = "pyplotrs-text"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "pyplotrs-core",
  "rustybuzz",
