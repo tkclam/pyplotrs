@@ -44,16 +44,23 @@ nav:
   - From matplotlib: migrating-from-matplotlib.md
   - User guide:
       - Figures & axes: guide/figure-and-axes.md
+      - Layout: guide/layout.md
       - Plot types: guide/plot-types.md
+      - Scales & ticks: guide/scales-and-ticks.md
       - Styling & themes: guide/styling-and-themes.md
       - Colormaps & images: guide/colormaps-and-images.md
       - Math & annotations: guide/math-and-annotations.md
+      - Polar plots: guide/polar.md
       - 3D plots: guide/3d.md
       - Animation: guide/animation.md
       - Saving figures: guide/saving.md
+      - Performance: guide/performance.md
   - Gallery: gallery/index.md
   - API reference:
       - Figure & Axes: api/figure.md
+      - Scales: api/scales.md
+      - Tick formatters: api/ticker.md
+      - Normalizations: api/norms.md
       - Colormaps: api/colormaps.md
       - Palettes: api/palettes.md
       - Color science: api/color.md
