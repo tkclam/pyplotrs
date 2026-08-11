@@ -87,11 +87,27 @@ def resolved_font_name() -> str:
     return _core.resolved_font_name()
 
 
+def resolved_font_variants() -> list[tuple[str, str]]:
+    """What each body face resolves to here, as ``[(selector, font name), ...]``
+    for ``body``, ``body-bold``, ``body-italic`` and ``body-bolditalic``.
+
+    Font matching is approximate: a family with no italic face resolves to its
+    regular one, so asking for italic can quietly give you upright text. This
+    makes that visible - two selectors reporting the same name means the host
+    has no distinct face for one of them::
+
+        pyplotrs.resolved_font_variants()
+        # [('body', 'ArialMT'), ('body-bold', 'Arial-BoldMT'), ...]
+    """
+    return _core.resolved_font_variants()
+
+
 __all__ = [
     "Axes", "Axes3D", "Figure", "GridSpec", "PolarAxes", "subplots", "subplot_mosaic", "figure",
     "colormaps", "Colormap", "get_cmap", "palettes", "color",
     "themes", "Theme", "norms", "scales", "ticker",
     "Animation", "animate",
     "set_font_family", "get_font_family", "resolved_font_name",
+    "resolved_font_variants",
     "set_unicode_minus", "get_unicode_minus",
 ]

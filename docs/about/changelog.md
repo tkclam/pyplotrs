@@ -58,6 +58,11 @@ All notable changes to pyplotrs are documented here. The format is based on
   stays selectable in PDF/SVG.
 - `legend(ncol=, title=, frameon=, fontsize=)` and
   `colorbar(orientation=, shrink=, ticks=, format=)`.
+- `resolved_font_variants()` is exported from the package (it was only reachable
+  through the private core module, while the docs and this changelog already
+  named it). It reports what each body face - regular, bold, italic, bold-italic
+  - resolved to on this host, which is how you tell a real italic face from an
+  approximate match that came back upright.
 
 ### Changed
 
