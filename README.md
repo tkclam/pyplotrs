@@ -1,6 +1,18 @@
 # pyplotrs
 
+[![CI](https://github.com/tkclam/pyplotrs/actions/workflows/CI.yml/badge.svg)](https://github.com/tkclam/pyplotrs/actions/workflows/CI.yml)
+[![PyPI](https://img.shields.io/pypi/v/pyplotrs.svg)](https://pypi.org/project/pyplotrs/)
+[![Python versions](https://img.shields.io/pypi/pyversions/pyplotrs.svg)](https://pypi.org/project/pyplotrs/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/tkclam/pyplotrs/blob/main/LICENSE)
+[![Docs](https://img.shields.io/badge/docs-tkclam.github.io-blue)](https://tkclam.github.io/pyplotrs/)
+
 **A blazingly fast, publication-quality plotting library for Python, powered by Rust.**
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tkclam/pyplotrs/main/docs/gallery/images/subplots.png"
+       alt="A four-panel pyplotrs figure: damped sinusoids with a legend, a categorical bar chart, a histogram, and a scatter plot"
+       width="720">
+</p>
 
 `pyplotrs` (pronounced *py-plotters*) is a from-scratch plotting library with a
 clean, modern Python API and a Rust rendering core. It is built for one thing

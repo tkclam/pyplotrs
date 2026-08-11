@@ -1,0 +1,39 @@
+version: 2
+updates:
+  # The workflows reference ~10 actions by floating major tag. Dependabot both
+  # keeps them current and surfaces the changelog for a major bump, which is
+  # what `run-on-arch-action@v2` needed - it sat two majors behind and asked for
+  # a distro image that only exists in v3.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
+
+  # ~110 crates compile into every wheel. Grouped so a routine week is one PR
+  # rather than fifteen.
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "deps"
+    groups:
+      rust-dependencies:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Vendored and patched under vendor/krilla-0.8.2; a bump here would be
+      # silently ignored by [patch.crates-io]. Upgrades are done by hand, see
+      # that directory's PYPLOTRS_PATCH.md.
+      - dependency-name: krilla
+
+  # Only the optional extras have Python dependencies; the package itself has
+  # none at runtime.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "deps"

@@ -1,0 +1,35 @@
+name: Feature request
+description: A plot type, an argument, or a behavior that is missing
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening: some things are [deliberately out of
+        scope](https://tkclam.github.io/pyplotrs/migrating-from-matplotlib/#what-is-not-here)
+        — the pyplot state machine, interactive backends and widgets,
+        `rcParams`, and the artist tree. pyplotrs makes files, not windows.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to draw
+      description: >-
+        The figure you want, not the API you imagine for it — there may already
+        be a way.
+    validations:
+      required: true
+
+  - type: textarea
+    id: matplotlib
+    attributes:
+      label: How you would do it in matplotlib
+      description: If there is a direct equivalent, the code helps a lot.
+      render: python
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API
+      description: Optional.
+      render: python

@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use pyplotrs in work you publish, please cite it."
+title: pyplotrs
+abstract: >-
+  A publication-quality plotting library for Python with a Rust rendering core.
+  Produces PDF whose text stays embedded, selectable and editable rather than
+  outlined, alongside SVG, PNG and self-contained HTML.
+type: software
+authors:
+  # Replace `alias` with `given-names`/`family-names` if you would rather be
+  # cited under your legal name; CFF accepts either.
+  - alias: tkclam
+    email: thomas.lam@epfl.ch
+repository-code: "https://github.com/tkclam/pyplotrs"
+url: "https://tkclam.github.io/pyplotrs/"
+license: MIT
+keywords:
+  - plotting
+  - visualization
+  - scientific-visualization
+  - publication-figures
+  - rust
+  - python

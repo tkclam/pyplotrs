@@ -33,7 +33,8 @@ license-files = [
     "python/pyplotrs/_vendor/MATHJAX-LICENSE.txt",
     "python/pyplotrs/_vendor/MATHJAX-NOTICE.md",
 ]
-authors = [{ name = "The pyplotrs authors" }]
+authors = [{ name = "tkclam", email = "thomas.lam@epfl.ch" }]
+maintainers = [{ name = "tkclam", email = "thomas.lam@epfl.ch" }]
 keywords = [
     "plotting", "visualization", "graphics", "matplotlib", "charts",
     "pdf", "svg", "publication", "figures", "rust",

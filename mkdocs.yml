@@ -3,7 +3,7 @@ site_description: A blazingly fast, publication-quality plotting library for Pyt
 site_url: https://tkclam.github.io/pyplotrs/
 repo_url: https://github.com/tkclam/pyplotrs
 repo_name: tkclam/pyplotrs
-copyright: Copyright &copy; 2026 The pyplotrs authors
+copyright: Copyright &copy; 2026 tkclam
 
 theme:
   name: material
@@ -67,8 +67,10 @@ nav:
       - Themes: api/themes.md
       - Animation: api/animation.md
   - About:
-      - License: about/license.md
       - Changelog: about/changelog.md
+      - Contributing: about/contributing.md
+      - Security: about/security.md
+      - License: about/license.md
 
 plugins:
   - search

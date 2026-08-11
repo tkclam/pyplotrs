@@ -1,0 +1,64 @@
+name: Bug report
+description: A figure came out wrong, or a call raised something it should not
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. The two things that resolve most issues fastest
+        are the **output format** and a **runnable script** — the PDF, SVG, PNG
+        and HTML backends diverge, so which one you saved to is usually the
+        first question.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal script
+      description: >-
+        The smallest thing that reproduces it, runnable as-is. Please include
+        the `fig.save(...)` call.
+      render: python
+      placeholder: |
+        import pyplotrs as plt
+
+        fig, ax = plt.subplots()
+        ax.line([0, 1, 2], [0, 1, 4])
+        fig.save("out.pdf")
+    validations:
+      required: true
+
+  - type: dropdown
+    id: format
+    attributes:
+      label: Output format
+      multiple: true
+      options: ["pdf", "svg", "png", "html", "gif / apng", "not format-specific"]
+    validations:
+      required: true
+
+  - type: textarea
+    id: version
+    attributes:
+      label: Versions
+      description: "Paste the output of the command below."
+      render: shell
+      placeholder: |
+        python -c "import pyplotrs, sys, platform; print(pyplotrs.__version__, sys.version, platform.platform(), pyplotrs.resolved_font_name())"
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: >-
+        A screenshot or the saved file if it is a rendering problem; the full
+        traceback if it raised.
