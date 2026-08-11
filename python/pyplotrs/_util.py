@@ -43,6 +43,57 @@ def _as_seq(value, n: int) -> list[float]:
     return [float(v) for v in items]
 
 
+#: ``struct`` format codes for buffers that hold numbers, and so can go down
+#: the ``array("d", view)`` fast path. A buffer whose format is anything else -
+#: NumPy's ``1w`` for a ``<U*`` string array, ``O`` for an object array - is
+#: still a valid buffer, so a caller testing only ``ndim``/``c_contiguous``
+#: will happily hand it over and get an unreadable memoryview error back.
+_NUMERIC_BUFFER_FORMATS = frozenset(
+    "?bBhHiIlLqQnNefdg"
+)
+
+
+def _as_float64_buffer(values):
+    """Normalize an ndarray-like to something the buffer fast path can use.
+
+    Duck-typed on ``.dtype``/``.astype`` rather than importing NumPy, which
+    pyplotrs does not depend on. Three things are handled here because all
+    three otherwise fall off the fast path and into a Python loop, or fail
+    outright:
+
+    * a **masked array** carries its fill values under the mask, and the plain
+      buffer is those fill values - ``[1.0, 2.0, 999.0]`` for a masked third
+      element. ``filled(nan)`` routes them into the NaN-gap path lines and
+      markers already implement, which is what a reader expects to see.
+    * a **non-float64 dtype** (``float32``, ``int32``, ``bool``, ...) converts
+      in one C-level pass here rather than element by element downstream.
+    * a **non-contiguous** array (a strided slice, a transpose) is made
+      contiguous so the memcpy path applies instead of a per-element read.
+
+    Anything without a dtype - a list, a tuple, an ``array("d")``, a generator -
+    is returned untouched.
+    """
+    astype = getattr(values, "astype", None)
+    if astype is None or getattr(values, "dtype", None) is None:
+        return values
+    filled = getattr(values, "filled", None)
+    if filled is not None and getattr(values, "mask", None) is not None:
+        try:
+            values = filled(float("nan"))
+            astype = values.astype
+        except (TypeError, ValueError):
+            return values
+    try:
+        if values.dtype.kind not in "biuf":
+            return values  # str/object/datetime64: let the caller's fallback see it
+        out = astype("float64", copy=False)
+        if not getattr(out, "flags", None) or not out.flags["C_CONTIGUOUS"]:
+            out = out.copy(order="C")
+        return out
+    except (AttributeError, TypeError, ValueError):
+        return values
+
+
 def _to_f64(values) -> "array":
     """Coerce a numeric sequence to a contiguous ``array.array("d")``.
 
@@ -61,9 +112,19 @@ def _to_f64(values) -> "array":
     """
     if type(values) is array and values.typecode == "d":
         return values
+    values = _as_float64_buffer(values)
+    if type(values) is array and values.typecode == "d":
+        return values
     try:
         view = memoryview(values)
-    except TypeError:
+    # A NumPy array of strings, objects or datetime64 raises here rather than
+    # returning a buffer, and each dtype raises its own type: `<U8` gives
+    # NotImplementedError, `datetime64` gives ValueError, `object` gives
+    # NotImplementedError. Catching only TypeError let those escape as an
+    # unreadable "memoryview: unsupported format 1w" instead of falling through
+    # to the element-wise branch, which is what turns them into the categorical
+    # and date axes the docs promise.
+    except (TypeError, ValueError, NotImplementedError):
         pass
     else:
         if view.ndim == 1 and view.c_contiguous:
@@ -73,9 +134,13 @@ def _to_f64(values) -> "array":
                 return out
             # Some other contiguous numeric type (float32, int64, ...): one
             # C-level pass, still far cheaper than a Python comprehension.
+            # NotImplementedError joins the list because that is what a NumPy
+            # string or object buffer raises, and falling through to the
+            # element-wise branch gives a readable error (or a working
+            # conversion) instead of "memoryview: unsupported format 1w".
             try:
                 return array("d", view)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, NotImplementedError):
                 pass
     # A plain list/tuple/generator. `array("d", ...)` converts in C and raises
     # on the first non-number, which doubles as the "are these numeric?" test -
@@ -199,14 +264,21 @@ class _RangeAcc:
 def _to_f64_grid(data) -> tuple["array", int, int]:
     """Flatten a 2D grid to ``(values, nrows, ncols)`` in row-major order.
 
-    A contiguous 2D buffer (a NumPy array) is taken whole with a single cast -
-    no per-pixel Python. Otherwise each row is converted individually, which is
-    still one pass rather than the nested comprehension plus separate flatten
-    this replaces.
+    A contiguous 2D buffer (a NumPy array) is taken whole - no per-pixel
+    Python. Otherwise each row is converted individually, which is still one
+    pass rather than the nested comprehension plus separate flatten this
+    replaces.
+
+    The flatten goes through ``cast("B")``, not ``cast(fmt, (h*w,))``:
+    ``memoryview.cast`` requires a byte format on one side of every hop, so
+    reshaping float32 straight to 1-D float32 raises "cannot cast between two
+    non-byte formats". Going via bytes is legal for every format and is the
+    same memcpy.
     """
+    data = _as_float64_buffer(data)
     try:
         view = memoryview(data)
-    except TypeError:
+    except (TypeError, ValueError, NotImplementedError):
         view = None
     if view is not None and view.ndim == 2 and view.c_contiguous:
         h, w = view.shape
@@ -214,7 +286,7 @@ def _to_f64_grid(data) -> tuple["array", int, int]:
             out = array("d")
             out.frombytes(view.cast("B"))  # memcpy
         else:
-            out = array("d", view.cast(view.format, (h * w,)))
+            out = array("d", view.cast("B").cast(view.format))
         return out, h, w
 
     rows = list(data)

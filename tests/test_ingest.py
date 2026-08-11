@@ -20,9 +20,19 @@ import pytest
 
 import pyplotrs as plt
 from pyplotrs import _pyplotrs_core as _core
-from pyplotrs._util import _RangeAcc, _to_f64
+from pyplotrs._util import _RangeAcc, _to_f64, _to_f64_grid
 
-np = pytest.importorskip("numpy", reason="numpy is a test-only convenience")
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - exercised only on a numpy-less host
+    np = None
+
+#: Gate the handful of cases that genuinely need NumPy, rather than the module.
+#: A module-level ``importorskip`` used to sit here, which meant a CI job that
+#: installed only ``pyplotrs pytest`` silently skipped **all 26** tests in this
+#: file - including the 22 that use nothing but the standard library - and
+#: reported green. That is how the ``imshow`` dtype crash reached this audit.
+requires_numpy = pytest.mark.skipif(np is None, reason="numpy is a test-only convenience")
 
 
 # -- _to_f64 -----------------------------------------------------------------
@@ -34,13 +44,17 @@ np = pytest.importorskip("numpy", reason="numpy is a test-only convenience")
     pytest.param(lambda v: array("d", v), id="array-d"),
     pytest.param(lambda v: array("f", v), id="array-f32"),
     pytest.param(lambda v: array("q", [int(x) for x in v]), id="array-int64"),
-    pytest.param(lambda v: np.asarray(v, dtype=np.float64), id="numpy-f64"),
-    pytest.param(lambda v: np.asarray(v, dtype=np.float32), id="numpy-f32"),
-    pytest.param(lambda v: np.asarray(v, dtype=np.int64), id="numpy-int64"),
-    # A non-contiguous view: the buffer fast path must decline it and fall back
-    # rather than reading the underlying memory in the wrong order.
+    pytest.param(lambda v: np.asarray(v, dtype=np.float64), id="numpy-f64",
+                 marks=requires_numpy),
+    pytest.param(lambda v: np.asarray(v, dtype=np.float32), id="numpy-f32",
+                 marks=requires_numpy),
+    pytest.param(lambda v: np.asarray(v, dtype=np.int64), id="numpy-int64",
+                 marks=requires_numpy),
+    # A non-contiguous view: the fast path must not read the underlying memory
+    # in the wrong order. It is made contiguous on the way in rather than
+    # declined, so the memcpy still applies.
     pytest.param(lambda v: np.repeat(np.asarray(v, dtype=np.float64), 2)[::2],
-                 id="numpy-strided"),
+                 id="numpy-strided", marks=requires_numpy),
 ])
 def test_to_f64_accepts_every_sequence_form(make):
     values = [1.0, 2.0, 3.0, 4.0]
@@ -158,6 +172,7 @@ def _render(xs, ys, tmp_path, name):
     return out.read_bytes()
 
 
+@requires_numpy
 def test_list_numpy_and_array_render_identically(tmp_path):
     xs = [0.0, 1.0, 2.0, 3.0]
     ys = [0.0, 1.0, 4.0, 9.0]
@@ -173,10 +188,99 @@ def test_list_numpy_and_array_render_identically(tmp_path):
         )
 
 
+@requires_numpy
 def test_integer_input_renders_like_float(tmp_path):
     ints = _render(np.asarray([0, 1, 2, 3]), np.asarray([0, 1, 4, 9]), tmp_path, "int")
     floats = _render([0.0, 1.0, 2.0, 3.0], [0.0, 1.0, 4.0, 9.0], tmp_path, "flt")
     assert ints == floats
+
+
+# -- NumPy dtypes, array kinds and the 2D grid path --------------------------
+#
+# `_to_f64_grid` flattened a 2D buffer with `view.cast(fmt, (h*w,))`, and
+# `memoryview.cast` refuses to cast between two non-byte formats - so
+# `imshow`/`matshow` raised "cannot cast between two non-byte formats" for
+# every dtype except float64, int8 and uint8. float32 image data is the common
+# case, so this was reachable in the first five minutes of use.
+
+_DTYPES = ["float64", "float32", "float16", "int8", "uint8", "int16", "uint16",
+           "int32", "int64", "uint32", "uint64", "bool"]
+
+
+@requires_numpy
+@pytest.mark.parametrize("dtype", _DTYPES)
+@pytest.mark.parametrize("method", ["imshow", "matshow"])
+def test_2d_grid_accepts_every_numeric_dtype(tmp_path, dtype, method):
+    grid = np.arange(12).reshape(3, 4).astype(dtype)
+    fig, ax = plt.subplots(figsize=(160, 120))
+    getattr(ax, method)(grid)
+    fig.save(str(tmp_path / f"{method}-{dtype}.png"))
+
+
+@requires_numpy
+@pytest.mark.parametrize("dtype", _DTYPES)
+def test_grid_values_survive_the_dtype_conversion(dtype):
+    grid = np.arange(12).reshape(3, 4).astype(dtype)
+    flat, h, w = _to_f64_grid(grid)
+    assert (h, w) == (3, 4)
+    assert list(flat) == [float(v) for v in grid.ravel()]
+
+
+@requires_numpy
+@pytest.mark.parametrize("kind", ["transpose", "strided", "fortran"])
+def test_grid_accepts_non_contiguous_arrays(kind):
+    """A transpose or a strided slice must be read in *logical* order, not in
+    the order the bytes happen to sit in memory."""
+    base = np.arange(48).reshape(6, 8).astype("float32")
+    grid = {"transpose": base.T, "strided": base[::2, ::2],
+            "fortran": np.asfortranarray(base)}[kind]
+    flat, h, w = _to_f64_grid(grid)
+    assert (h, w) == grid.shape
+    assert list(flat) == [float(v) for v in grid.ravel()]
+
+
+@requires_numpy
+def test_masked_arrays_become_gaps_rather_than_fill_values():
+    """A masked array's raw buffer is its *fill* values, so taking the buffer
+    plots whatever sentinel happens to be under the mask - 999.0 here, drawn as
+    real data. Converting through ``filled(nan)`` sends them down the NaN-gap
+    path instead."""
+    out = _to_f64(np.ma.masked_array([1.0, 2.0, 999.0], mask=[0, 0, 1]))
+    assert out[0] == 1.0 and out[1] == 2.0
+    assert math.isnan(out[2]), "the masked element should read as a gap, not 999.0"
+
+
+@requires_numpy
+@pytest.mark.parametrize("dtype", ["float32", "int32", "int64", "uint8"])
+def test_non_float64_dtypes_render_like_float64(tmp_path, dtype):
+    xs, ys = [0, 1, 2, 3], [0, 1, 4, 9]
+    ref = _render(np.asarray(xs, "float64"), np.asarray(ys, "float64"), tmp_path, "ref")
+    got = _render(np.asarray(xs, dtype), np.asarray(ys, dtype), tmp_path, dtype)
+    assert got == ref
+
+
+@requires_numpy
+def test_string_arrays_reach_the_categorical_axis():
+    """A NumPy ``<U*`` array *is* buffer-backed, so a fast path testing only
+    ndim/contiguity took it and died on "unsupported format 1w" instead of
+    letting it become a categorical axis the way a list of strings does."""
+    fig, ax = plt.subplots()
+    ax.bar(np.array(["alpha", "beta", "gamma"]), np.array([3, 4, 2], dtype="int32"))
+    assert ax.get_xscale() == "categorical"
+    assert ax.get_xticklabels() == ["alpha", "beta", "gamma"]
+
+
+@requires_numpy
+def test_datetime64_arrays_reach_the_date_axis():
+    fig, ax = plt.subplots()
+    ax.line(np.arange("2020-01", "2020-06", dtype="datetime64[M]"), [1, 2, 3, 4, 5])
+    assert ax.get_xscale() == "date"
+    assert ax.get_xticklabels()[0].endswith("2020")
+
+
+@requires_numpy
+def test_object_arrays_of_numbers_still_convert():
+    assert list(_to_f64(np.array([1, 2, 3], dtype=object))) == [1.0, 2.0, 3.0]
 
 
 def test_nan_still_breaks_the_line_into_a_gap(tmp_path):

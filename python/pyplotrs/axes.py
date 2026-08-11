@@ -37,6 +37,7 @@ from ._const import (
     _TITLE_GAP,
 )
 from ._util import (
+    _NUMERIC_BUFFER_FORMATS,
     _RangeAcc,
     _as_seq,
     _auto_levels,
@@ -312,13 +313,24 @@ class Axes(_AxesBase):
         Only inputs that are *not* plain numbers pay for the datetime/string
         inspection below.
         """
-        # Buffer-backed numeric input can't be dates or strings - take the fast
-        # path before touching the sequence at all.
+        # Buffer-backed *numeric* input can't be dates or strings - take the
+        # fast path before touching the sequence at all. The format check is
+        # what makes that true: a NumPy `<U8` array is buffer-backed too, and
+        # so is anything with a struct format this module cannot read as a
+        # number, so testing only `ndim`/`c_contiguous` sent string arrays into
+        # `_to_f64` to die on "unsupported format 1w" instead of reaching the
+        # categorical branch below. `datetime64` does not even get that far -
+        # `memoryview()` itself raises ValueError for it.
         try:
             view = memoryview(values)
-        except TypeError:
+        except (TypeError, ValueError, NotImplementedError):
             view = None
-        if view is not None and view.ndim == 1 and view.c_contiguous:
+        if (
+            view is not None
+            and view.ndim == 1
+            and view.c_contiguous
+            and view.format in _NUMERIC_BUFFER_FORMATS
+        ):
             return _to_f64(values)
 
         if not isinstance(values, (list, tuple)):
