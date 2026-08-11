@@ -171,12 +171,40 @@ class PolarAxes(_AxesBase):
     def _draw(self, scene, layout, xr, yr, xticks, yticks) -> None:
         t = self._theme
         plot = layout.plot
-        # Reserve a ring inside the plot rect for the theta tick labels drawn just
-        # outside the outer circle, so the whole dial fits the cell.
-        label_pad = t.tick_label_size * 1.7
         cx = plot.x + plot.w / 2.0
         cy = plot.y + plot.h / 2.0
-        R = max(1.0, min(plot.w, plot.h) / 2.0 - label_pad)
+        spokes = (self._thetagrids_deg if self._thetagrids_deg is not None
+                  else [i * 45.0 for i in range(8)])
+
+        # Theta tick labels hang off the rim, so measure them before sizing the
+        # dial. A label centered a fixed distance outside `R` still crosses the
+        # circle whenever it is wider than that distance, so each one is pushed
+        # out by its own half-box along its spoke: for a box with half-extents
+        # (hw, hh) the support distance along direction `a` is
+        # hw*|cos a| + hh*|sin a|, which puts the *near* edge - not the center -
+        # `gap` clear of the rim, whatever the label says or which way it leans.
+        gap = t.tick_label_size * 0.5
+        labels = []
+        for deg in spokes:
+            a = self._theta_offset + self._theta_dir * math.radians(deg)
+            lab = _ticker.fix_minus(f"{deg:g}°")
+            asc, desc = _th(scene, lab, t.tick_label_size)
+            labels.append((a, lab, _tw(scene, lab, t.tick_label_size) / 2.0,
+                           (asc + desc) / 2.0, (asc - desc) / 2.0))
+
+        # The ring those labels need varies by direction, so solve for the
+        # largest radius whose labels still land inside the cell rather than
+        # reserving one worst-case pad all the way round.
+        half_w, half_h = plot.w / 2.0, plot.h / 2.0
+        R = min(half_w, half_h)
+        for a, _lab, hw, hh, _base in labels:
+            ca, sa = abs(math.cos(a)), abs(math.sin(a))
+            off = gap + hw * ca + hh * sa  # center sits at R + off along the spoke
+            if ca > 1e-9:  # (R + off)*ca + hw <= half_w
+                R = min(R, (half_w - hw - off * ca) / ca)
+            if sa > 1e-9:
+                R = min(R, (half_h - hh - off * sa) / sa)
+        R = max(1.0, R)
         rmin, rmax = self._rlimits()
         rspan = (rmax - rmin) or 1.0
 
@@ -186,8 +214,6 @@ class PolarAxes(_AxesBase):
             # Screen y grows downward, so negate sin to keep angles counter-clockwise.
             return (cx + rr * math.cos(a), cy - rr * math.sin(a))
 
-        spokes = (self._thetagrids_deg if self._thetagrids_deg is not None
-                  else [i * 45.0 for i in range(8)])
         if self._rticks is not None:
             rgrid = [(v, _ticker.fix_minus(f"{v:g}")) for v in self._rticks]
         else:
@@ -207,16 +233,12 @@ class PolarAxes(_AxesBase):
         rim = [to_dev(2.0 * math.pi * k / 128.0, rmax) for k in range(129)]
         scene.add_path(rim, stroke_color=t.spine_color, stroke_width=t.spine_width)
 
-        # 4. Theta tick labels just outside the rim, centred on their spoke.
-        for deg in spokes:
-            a = self._theta_offset + self._theta_dir * math.radians(deg)
-            lx = cx + (R + label_pad * 0.4) * math.cos(a)
-            ly = cy - (R + label_pad * 0.4) * math.sin(a)
-            lab = f"{deg:g}°"
-            w = _tw(scene, lab, t.tick_label_size)
-            asc, desc = _th(scene, lab, t.tick_label_size)
-            _text(scene, lx - w / 2.0, ly + (asc - desc) / 2.0, lab,
-                  t.tick_label_size, t.text_color)
+        # 4. Theta tick labels, each clear of the rim along its own spoke.
+        for a, lab, hw, hh, base in labels:
+            out = R + gap + hw * abs(math.cos(a)) + hh * abs(math.sin(a))
+            lx = cx + out * math.cos(a)
+            ly = cy - out * math.sin(a)
+            _text(scene, lx - hw, ly + base, lab, t.tick_label_size, t.text_color)
         # 5. Radial tick labels along the rlabel spoke.
         ra = self._theta_offset + self._theta_dir * math.radians(self._rlabel_deg)
         for rv, lab in rgrid:
