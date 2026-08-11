@@ -398,12 +398,20 @@ def write_markdown(rows, mark_rows, have_mpl: bool, path: str):
         f"{BENCH_DPI:.0f} dpi and figure size, on this machine. "
         "Regenerate with `.venv/bin/python benchmarks/matrix.py`.",
         "",
-        "Read the numbers with two caveats. For pyplotrs the timed region is "
+        "Read the numbers with three caveats. For pyplotrs the timed region is "
         "close to the whole pipeline - `line()` only records a mark, and layout, "
         "shaping and rendering all happen inside `save()` - whereas matplotlib "
         "has built its artists beforehand. Data ingestion is outside the timer "
         "for both, as is import time (`import pyplotrs` is ~12 ms against "
         "~237 ms for `matplotlib.pyplot`, which no row here reflects).",
+        "",
+        "A third caveat applies only to **PNG**: raster export in pyplotrs is "
+        "multi-threaded, both in rasterizing (an expensive canvas is split into "
+        "horizontal bands) and in encoding (scanline filtering and DEFLATE both "
+        "run in parallel). So the `png` rows scale with the core count of the "
+        f"machine that produced them - this run had {os.cpu_count()} - and will "
+        "read lower on a smaller one. PDF and SVG are single-threaded, so their "
+        "rows are machine-independent in a way the PNG rows are not.",
         "",
     ]
     if have_mpl:
@@ -464,8 +472,16 @@ def write_markdown(rows, mark_rows, have_mpl: bool, path: str):
             "needs a cmap-preserving font subsetter - a tracked future "
             "optimization, since the Typst `subsetter` drops the `cmap` that "
             "`<text>` relies on.",
-            "- **PNG** - resolution-bound for both; matplotlib's mature Agg "
-            "compresses dense overlapping output more tightly.",
+            "- **PNG** - it splits by content, and neither library wins "
+            "outright. pyplotrs is *smaller* on ordinary marks (line, contour, "
+            "streamplot, stackplot, matshow), where per-scanline adaptive "
+            "filtering suits large flat areas. It is *larger* wherever many "
+            "marks pile up and overlap - scatter, hexbin, eventplot, spy - "
+            "because matplotlib's mature Agg composites those into flatter, "
+            "more compressible pixels than a field of individually antialiased "
+            "sprites. A small, constant part of that gap (~30 bytes per 256 KB "
+            "chunk) is the price of compressing the image in parallel: each "
+            "chunk restarts DEFLATE's window and emits its own Huffman tables.",
             "",
             "See `benchmarks/benchmark.py` for the like-for-like single-panel head-to-head "
             "and the deterministic `--check` CI regression gate.",

@@ -5,17 +5,33 @@
 //! an accumulated [`Affine`] transform and an optional device-space clip
 //! [`Mask`] down the recursive walk; opacity groups are composited via an
 //! offscreen layer.
+//!
+//! Big rasters are drawn in **horizontal bands in parallel** (see
+//! [`render_pixmap`]): every band is a [`PixmapMut`] view over its own rows of
+//! one canvas allocation, and each replays the whole scene with the root
+//! transform shifted up by the band's top. Source-over compositing is
+//! per-pixel, so bands never interact and the decomposition is exact in the
+//! compositing sense; what it does perturb, very slightly, is antialiasing and
+//! image resampling at the seams - `banded_render_matches_single_band` measures
+//! by how much and says why. Because that difference is not quite nothing, the
+//! band count is a function of the canvas alone and never of the core count,
+//! and cheap scenes skip banding entirely and keep the exact single-pass path.
+
+mod png_encode;
+
+use std::collections::HashMap;
 
 use pyplotrs_core::kurbo::{Affine, PathEl, Point, Vec2};
 use pyplotrs_core::{
     Color, FillRule as CoreFillRule, Group, ImageNode, LineCap as CoreLineCap,
     LineJoin as CoreLineJoin, MarkerNode, Node, PathNode, Scene, Stroke as CoreStroke, TextNode,
 };
+use rayon::prelude::*;
 use skrifa::instance::Size as GlyphSize;
 use skrifa::outline::OutlinePen;
 use skrifa::{FontRef, GlyphId, MetadataProvider};
 use tiny_skia::{
-    FillRule, IntSize, LineCap, LineJoin, Mask, Paint, PathBuilder, Pixmap, PixmapPaint,
+    FillRule, IntSize, LineCap, LineJoin, Mask, Paint, PathBuilder, Pixmap, PixmapMut, PixmapPaint,
     PremultipliedColorU8, Stroke, StrokeDash, Transform,
 };
 
@@ -136,7 +152,7 @@ impl OutlinePen for GlyphPen {
     }
 }
 
-fn render_path(pixmap: &mut Pixmap, p: &PathNode, transform: Affine, clip: Option<&Mask>) {
+fn render_path(pixmap: &mut PixmapMut, p: &PathNode, transform: Affine, clip: Option<&Mask>) {
     let Some(path) = to_tiny_skia_path(&p.geometry) else {
         return;
     };
@@ -161,7 +177,7 @@ fn render_path(pixmap: &mut Pixmap, p: &PathNode, transform: Affine, clip: Optio
     }
 }
 
-fn render_text(pixmap: &mut Pixmap, text: &TextNode, transform: Affine, clip: Option<&Mask>) {
+fn render_text(pixmap: &mut PixmapMut, text: &TextNode, transform: Affine, clip: Option<&Mask>) {
     let paint = solid_paint(text.color);
     let ts = to_ts_transform(transform);
     for run in &text.runs {
@@ -196,7 +212,13 @@ const STAMP_MAX_PX: f32 = 96.0;
 /// mistake, and honouring it would abort the process instead of raising.
 const MAX_RASTER_BYTES: f64 = 4.0e9;
 
-fn render_markers(pixmap: &mut Pixmap, m: &MarkerNode, transform: Affine, clip: Option<&Mask>) {
+fn render_markers(
+    pixmap: &mut PixmapMut,
+    m: &MarkerNode,
+    transform: Affine,
+    clip: Option<&Mask>,
+    stamps: Option<&StampCache>,
+) {
     let Some(path) = to_tiny_skia_path(&m.marker) else {
         return;
     };
@@ -213,21 +235,38 @@ fn render_markers(pixmap: &mut Pixmap, m: &MarkerNode, transform: Affine, clip: 
     // scatter quick. Colormapped scatter takes the same route: its tiles hold
     // pure coverage and are tinted per point at blit time. Falls back to
     // per-point path filling for few/large markers or a degenerate transform.
-    if m.positions.len() >= STAMP_MIN_COUNT
-        && stamp_markers(
-            pixmap,
-            &path,
-            &fill_paint,
-            &stroke_paint,
-            fill_rule,
-            &m.positions,
-            m.colors.as_deref(),
-            transform,
-            clip,
-        )
-        .is_some()
-    {
-        return;
+    //
+    // When rendering in bands, `stamps` holds the tile set built once for the
+    // whole canvas (see [`StampCache`]); without it each call builds its own,
+    // which is what the single-band path does.
+    if m.positions.len() >= STAMP_MIN_COUNT {
+        let built;
+        let tiles = match stamps.and_then(|c| c.get(&stamp_key(m))) {
+            Some(t) => Some(t),
+            None if stamps.is_some() => None, // pre-pass judged it ineligible
+            None => {
+                built = build_stamp_tiles(
+                    &path,
+                    &fill_paint,
+                    &stroke_paint,
+                    fill_rule,
+                    m.colors.is_some(),
+                    transform,
+                );
+                built.as_ref()
+            }
+        };
+        if let Some(tiles) = tiles {
+            blit_stamps(
+                pixmap,
+                tiles,
+                &m.positions,
+                m.colors.as_deref(),
+                transform,
+                clip,
+            );
+            return;
+        }
     }
 
     for (i, pos) in m.positions.iter().enumerate() {
@@ -246,28 +285,50 @@ fn render_markers(pixmap: &mut Pixmap, m: &MarkerNode, transform: Affine, clip: 
     }
 }
 
-/// Stamp `path` at every position by pre-rasterizing it into `P x P` sub-pixel
-/// phase tiles and alpha-compositing the nearest-phase tile at each point.
-/// Returns `None` (so the caller falls back to per-point path filling) when the
-/// marker is too large or the tiles can't be allocated.
+/// One marker pre-rasterized at every sub-pixel phase, ready to be stamped.
 ///
-/// When `colors` is given (a colormapped scatter), the fill tiles are rasterized
+/// The tiles depend only on the marker outline and the **linear** part of the
+/// transform, never on the translation, so one set serves every position - and,
+/// because a band only shifts the translation, every band too.
+struct StampTiles {
+    tiles: Vec<Pixmap>,
+    /// Separate uniform-stroke tiles, used only for a tinted (colormapped)
+    /// marker where fill and stroke must stay separable. Empty otherwise.
+    stroke_tiles: Vec<Pixmap>,
+    tw: i32,
+    /// Tile-local pixel of the marker origin at phase 0.
+    anchor_x: f32,
+    anchor_y: f32,
+}
+
+/// Tile sets for the whole scene, built once before a banded render and shared
+/// by every band. Keyed by node identity: the scene is immutable for the
+/// duration of the render, so a `&MarkerNode`'s address uniquely names it. The
+/// key is the address as a `usize` rather than a raw pointer so the map stays
+/// `Sync` and can be shared across the band threads.
+type StampCache = HashMap<usize, StampTiles>;
+
+fn stamp_key(m: &MarkerNode) -> usize {
+    m as *const MarkerNode as usize
+}
+
+/// Rasterize `path` into `P x P` sub-pixel phase tiles. Returns `None` (so the
+/// caller falls back to per-point path filling) when the marker is too large or
+/// the tiles can't be allocated.
+///
+/// When `tinted` is set (a colormapped scatter), the fill tiles are rasterized
 /// in opaque white so their alpha channel is pure coverage, and each point tints
 /// that coverage with its own color at blit time. Fill and stroke are then
 /// blitted as two separate passes, which is exactly the order the per-point
 /// fallback draws them in, so the two paths agree.
-#[allow(clippy::too_many_arguments)]
-fn stamp_markers(
-    pixmap: &mut Pixmap,
+fn build_stamp_tiles(
     path: &tiny_skia::Path,
     fill_paint: &Option<Paint<'static>>,
     stroke_paint: &Option<(Paint<'static>, Stroke)>,
     fill_rule: FillRule,
-    positions: &[Point],
-    colors: Option<&[Color]>,
+    tinted: bool,
     transform: Affine,
-    clip: Option<&Mask>,
-) -> Option<()> {
+) -> Option<StampTiles> {
     // Linear part of the transform (translation dropped): it scales/rotates the
     // marker shape; per-instance translation comes from `positions`.
     let [a, b, c, d, _, _] = transform.as_coeffs();
@@ -282,13 +343,9 @@ fn stamp_markers(
     if tw <= 0 || th <= 0 || tw as f32 > STAMP_MAX_PX || th as f32 > STAMP_MAX_PX {
         return None;
     }
-    let anchor_x = -x0; // tile-local pixel of the marker origin at phase 0
+    let anchor_x = -x0;
     let anchor_y = -y0;
 
-    // With per-point colors the fill has to stay separable from the stroke, so
-    // build two tile sets: coverage-only fills (tinted at blit time) and the
-    // uniform stroke. Otherwise one combined tile per phase is enough.
-    let tinted = colors.is_some();
     let coverage_paint = tinted.then(|| solid_paint(Color::rgba(255, 255, 255, 255)));
 
     let p = STAMP_PHASES;
@@ -316,7 +373,25 @@ fn stamp_markers(
             tiles.push(tile);
         }
     }
+    Some(StampTiles {
+        tiles,
+        stroke_tiles,
+        tw,
+        anchor_x,
+        anchor_y,
+    })
+}
 
+/// Alpha-composite the nearest-phase tile at every position.
+fn blit_stamps(
+    pixmap: &mut PixmapMut,
+    t: &StampTiles,
+    positions: &[Point],
+    colors: Option<&[Color]>,
+    transform: Affine,
+    clip: Option<&Mask>,
+) {
+    let p = STAMP_PHASES;
     let pw = pixmap.width() as i32;
     let ph = pixmap.height() as i32;
     for (i, pos) in positions.iter().enumerate() {
@@ -326,26 +401,25 @@ fn stamp_markers(
         // integer destination, so the placement error stays <= 0.5/P px.
         let pi = (((cx - cx.floor()) * p as f32).round() as i32 % p).max(0);
         let pj = (((cy - cy.floor()) * p as f32).round() as i32 % p).max(0);
-        let dest_x = (cx - anchor_x - pi as f32 / p as f32).round() as i32;
-        let dest_y = (cy - anchor_y - pj as f32 / p as f32).round() as i32;
+        let dest_x = (cx - t.anchor_x - pi as f32 / p as f32).round() as i32;
+        let dest_y = (cy - t.anchor_y - pj as f32 / p as f32).round() as i32;
         let phase = (pj * p + pi) as usize;
         let tint = colors.map(|cs| cs.get(i).copied().unwrap_or(Color::rgba(0, 0, 0, 255)));
         blit_tile(
             pixmap,
             pw,
             ph,
-            &tiles[phase],
-            tw,
+            &t.tiles[phase],
+            t.tw,
             dest_x,
             dest_y,
             clip,
             tint,
         );
-        if let Some(st) = stroke_tiles.get(phase) {
-            blit_tile(pixmap, pw, ph, st, tw, dest_x, dest_y, clip, None);
+        if let Some(st) = t.stroke_tiles.get(phase) {
+            blit_tile(pixmap, pw, ph, st, t.tw, dest_x, dest_y, clip, None);
         }
     }
-    Some(())
 }
 
 /// Source-over alpha-composite a premultiplied `tile` onto `pixmap` at
@@ -364,7 +438,7 @@ fn stamp_markers(
 /// scan-converting the outline once per point.
 #[allow(clippy::too_many_arguments)]
 fn blit_tile(
-    pixmap: &mut Pixmap,
+    pixmap: &mut PixmapMut,
     pw: i32,
     ph: i32,
     tile: &Pixmap,
@@ -457,7 +531,7 @@ fn blit_tile(
     }
 }
 
-fn render_image(pixmap: &mut Pixmap, im: &ImageNode, transform: Affine, clip: Option<&Mask>) {
+fn render_image(pixmap: &mut PixmapMut, im: &ImageNode, transform: Affine, clip: Option<&Mask>) {
     let (w, h) = (im.data.width, im.data.height);
     let Some(size) = IntSize::from_wh(w, h) else {
         return;
@@ -487,7 +561,13 @@ fn render_image(pixmap: &mut Pixmap, im: &ImageNode, transform: Affine, clip: Op
     );
 }
 
-fn render_group(pixmap: &mut Pixmap, g: &Group, transform: Affine, clip: Option<&Mask>) {
+fn render_group(
+    pixmap: &mut PixmapMut,
+    g: &Group,
+    transform: Affine,
+    clip: Option<&Mask>,
+    stamps: Option<&StampCache>,
+) {
     let child_tf = transform * g.transform;
 
     // Resolve the effective clip: intersect this group's clip path (in the
@@ -513,11 +593,14 @@ fn render_group(pixmap: &mut Pixmap, g: &Group, transform: Affine, clip: Option<
     let effective_clip = new_clip.as_ref().or(clip);
 
     if g.opacity < 1.0 {
+        // Band-local layer: an opacity group composites per pixel, so doing it
+        // over the band's rows alone gives the same result as over the canvas.
         let Some(mut layer) = Pixmap::new(pixmap.width(), pixmap.height()) else {
             return;
         };
+        let mut layer_view = layer.as_mut();
         for child in &g.children {
-            render_node(&mut layer, child, child_tf, effective_clip);
+            render_node(&mut layer_view, child, child_tf, effective_clip, stamps);
         }
         let paint = PixmapPaint {
             opacity: g.opacity.clamp(0.0, 1.0),
@@ -526,24 +609,165 @@ fn render_group(pixmap: &mut Pixmap, g: &Group, transform: Affine, clip: Option<
         pixmap.draw_pixmap(0, 0, layer.as_ref(), &paint, Transform::identity(), None);
     } else {
         for child in &g.children {
-            render_node(pixmap, child, child_tf, effective_clip);
+            render_node(pixmap, child, child_tf, effective_clip, stamps);
         }
     }
 }
 
-fn render_node(pixmap: &mut Pixmap, node: &Node, transform: Affine, clip: Option<&Mask>) {
+fn render_node(
+    pixmap: &mut PixmapMut,
+    node: &Node,
+    transform: Affine,
+    clip: Option<&Mask>,
+    stamps: Option<&StampCache>,
+) {
     match node {
         Node::Path(p) => render_path(pixmap, p, transform, clip),
         Node::Text(t) => render_text(pixmap, t, transform, clip),
         Node::Image(im) => render_image(pixmap, im, transform, clip),
-        Node::Markers(m) => render_markers(pixmap, m, transform, clip),
-        Node::Group(g) => render_group(pixmap, g, transform, clip),
+        Node::Markers(m) => render_markers(pixmap, m, transform, clip, stamps),
+        Node::Group(g) => render_group(pixmap, g, transform, clip, stamps),
     }
+}
+
+/// Estimated rasterization work in a node tree, in scanline-touches.
+///
+/// Counting *primitives* is not enough to tell a slow raster from a fast one:
+/// a 99k-point scatter renders in 11 ms while an 11k-segment noisy polyline
+/// takes 900 ms, because a scan converter costs roughly (edges x scanlines each
+/// edge spans), and a scribble's segments each span most of the panel. So paths
+/// are weighted by the device height of their bounding box, which is what
+/// separates a busy figure from an expensive one by a wide enough margin to put
+/// a threshold between them. Only ever compared against [`BAND_MIN_WORK`].
+fn scene_work(nodes: &[Node], transform: Affine) -> u64 {
+    let mut work = 0u64;
+    for node in nodes {
+        work += match node {
+            Node::Path(p) => {
+                // `control_box` is the hull of the control points - a cheap
+                // over-estimate of the true bounds, which is all this needs.
+                let rows = (transform
+                    .transform_rect_bbox(p.geometry.control_box())
+                    .height())
+                .max(1.0) as u64;
+                p.geometry.elements().len() as u64 * rows
+            }
+            Node::Text(t) => t
+                .runs
+                .iter()
+                .map(|r| {
+                    let rows = (f64::from(r.size) * transform.as_coeffs()[3].abs()).max(1.0) as u64;
+                    r.glyphs.len() as u64 * rows
+                })
+                .sum(),
+            // A stamped marker blits its whole sprite, so it costs per pixel
+            // rather than per scanline. Left undiscounted against the path
+            // terms: it errs towards banding marker-heavy scenes, which is the
+            // safe direction, since stamping comes out bit-identical banded.
+            Node::Markers(m) => {
+                let b = transform.transform_rect_bbox(m.marker.control_box());
+                let px = (b.width().max(1.0) * b.height().max(1.0)) as u64;
+                m.positions.len() as u64 * px
+            }
+            Node::Image(im) => {
+                // Device area the image covers, discounted: a pixel copy is far
+                // cheaper than scan-converting a path segment.
+                let r = transform.transform_rect_bbox(im.rect);
+                ((r.width() * r.height()).max(0.0) as u64) / 32
+            }
+            Node::Group(g) => scene_work(&g.children, transform * g.transform),
+        };
+    }
+    work
+}
+
+/// Build the shared marker tile sets for a banded render (see [`StampTiles`]).
+/// Mirrors the eligibility test in `render_markers`, so a node missing from the
+/// cache is exactly one the bands will draw per-point instead.
+fn build_stamp_cache(nodes: &[Node], transform: Affine, out: &mut StampCache) {
+    for node in nodes {
+        match node {
+            Node::Markers(m) if m.positions.len() >= STAMP_MIN_COUNT => {
+                let Some(path) = to_tiny_skia_path(&m.marker) else {
+                    continue;
+                };
+                let fill_paint = m.fill.map(solid_paint);
+                let stroke_paint = m
+                    .stroke
+                    .as_ref()
+                    .map(|s| (solid_paint(s.color), to_ts_stroke(s)));
+                if let Some(tiles) = build_stamp_tiles(
+                    &path,
+                    &fill_paint,
+                    &stroke_paint,
+                    to_ts_fill_rule(m.fill_rule),
+                    m.colors.is_some(),
+                    transform,
+                ) {
+                    out.insert(stamp_key(m), tiles);
+                }
+            }
+            Node::Group(g) => build_stamp_cache(&g.children, transform * g.transform, out),
+            _ => {}
+        }
+    }
+}
+
+/// Canvas area (device px) below which banding is never worth its overhead.
+const BAND_MIN_PIXELS: u64 = 250_000;
+/// Scene work (see [`scene_work`]) below which banding is never worth it.
+///
+/// Calibrated by measuring both sides. Ordinary figures score well under this -
+/// a two-line 400x300 pt plot is 78k at 100 dpi and 233k at 300 dpi, a
+/// four-panel figure 157k - and rasterize in under 10 ms, so there is nothing
+/// to win. The cases above it are the ones that hurt: a 99k-point scatter
+/// (1.1M) and an 11k-segment noisy polyline (9.3M, 0.92 s unbanded).
+///
+/// Keeping ordinary figures out is not only about overhead. Banding perturbs
+/// antialiasing slightly, and forcing it on for everything spends 10-65% of the
+/// golden suite's comparison tolerance - budget that exists to catch real
+/// regressions. Below this threshold the output stays byte-identical.
+const BAND_MIN_WORK: u64 = 400_000;
+/// Rows per band. Short enough that even a modest canvas yields more bands than
+/// there are cores (which is what lets rayon balance uneven ones - a band over
+/// a dense panel costs far more than one over white space), long enough that
+/// per-band setup stays amortized.
+const BAND_ROWS: u32 = 32;
+
+/// How many horizontal bands to split this render into. `1` means the exact
+/// serial path.
+///
+/// Deliberately a function of the canvas alone, **not** of the core count: the
+/// band count perturbs antialiasing and image resampling very slightly (see
+/// [`render_pixmap_banded`]), and a figure must not render differently on a
+/// different machine.
+fn band_count(width: u32, height: u32, work: u64) -> u32 {
+    let pixels = width as u64 * height as u64;
+    if pixels < BAND_MIN_PIXELS || work < BAND_MIN_WORK {
+        return 1;
+    }
+    height.div_ceil(BAND_ROWS).max(1)
 }
 
 /// Render `scene` to a [`Pixmap`] (RGBA8, white background unless
 /// `transparent`) at `scale` device-pixels per scene-point.
+///
+/// Expensive rasters are split into horizontal bands rendered in parallel; see
+/// the module docs. Small ones take the single-band path, which is
+/// byte-for-byte what this function did before banding existed.
 pub fn render_pixmap(scene: &Scene, scale: f64, transparent: bool) -> Result<Pixmap, String> {
+    render_pixmap_banded(scene, scale, transparent, None)
+}
+
+/// [`render_pixmap`], with the band count forced rather than chosen by
+/// [`band_count`]. Only the tests need this: it is how the banded output is
+/// checked against the single-band reference.
+fn render_pixmap_banded(
+    scene: &Scene,
+    scale: f64,
+    transparent: bool,
+    force_bands: Option<u32>,
+) -> Result<Pixmap, String> {
     // `scale` is device-pixels per scene-point (i.e. dpi / 72). Geometry,
     // glyph outlines, images and clips are all mapped by a single root scale,
     // so text is *re-rasterized* crisply at the target resolution rather than
@@ -571,20 +795,49 @@ pub fn render_pixmap(scene: &Scene, scale: f64, transparent: bool) -> Result<Pix
             MAX_RASTER_BYTES / 1e9
         ));
     }
-    let mut pixmap = Pixmap::new(width, height)
+    let size = IntSize::from_wh(width, height)
         .ok_or_else(|| format!("cannot allocate a {width} x {height} px raster"))?;
-    pixmap.fill(if transparent {
+    let mut data = vec![0u8; (width as usize) * (height as usize) * 4];
+
+    let background = if transparent {
         tiny_skia::Color::TRANSPARENT
     } else {
         tiny_skia::Color::WHITE
+    };
+    let root = Affine::scale(scale);
+
+    let bands = force_bands
+        .map(|b| b.clamp(1, height.max(1)))
+        .unwrap_or_else(|| band_count(width, height, scene_work(&scene.nodes, root)));
+    // The marker sprite tiles depend only on the linear part of the transform,
+    // which a band shift leaves alone - so build them once here rather than
+    // once per band.
+    let stamps = (bands > 1).then(|| {
+        let mut cache = StampCache::new();
+        build_stamp_cache(&scene.nodes, root, &mut cache);
+        cache
     });
 
-    let root = Affine::scale(scale);
-    for node in &scene.nodes {
-        render_node(&mut pixmap, node, root, None);
-    }
+    let band_rows = height.div_ceil(bands);
+    let stride = (width as usize) * 4;
+    data.par_chunks_mut(band_rows as usize * stride)
+        .enumerate()
+        .for_each(|(i, chunk)| {
+            let rows = (chunk.len() / stride) as u32;
+            let Some(mut view) = PixmapMut::from_bytes(chunk, width, rows) else {
+                return;
+            };
+            view.fill(background);
+            // Shift the scene up so this band's first row is device row 0.
+            let band_tf =
+                Affine::translate(Vec2::new(0.0, -((i as u32 * band_rows) as f64))) * root;
+            for node in &scene.nodes {
+                render_node(&mut view, node, band_tf, None, stamps.as_ref());
+            }
+        });
 
-    Ok(pixmap)
+    Pixmap::from_vec(data, size)
+        .ok_or_else(|| format!("cannot allocate a {width} x {height} px raster"))
 }
 
 /// Render `scene` to PNG-encoded bytes at `dpi` (dots per inch). The output
@@ -606,6 +859,9 @@ pub fn render_png(scene: &Scene, dpi: f64, transparent: bool) -> Result<Vec<u8>,
 /// everything) has premultiplied bytes equal to straight RGBA and is written
 /// directly; a `transparent` one is demultiplied first, since tiny-skia's
 /// internal buffer is premultiplied and PNG expects straight alpha.
+///
+/// Both halves of the encode - scanline filtering and DEFLATE - run in
+/// parallel; see [`png_encode`].
 fn encode_png_with_dpi(pixmap: Pixmap, dpi: f64, transparent: bool) -> Result<Vec<u8>, String> {
     let ppu = (dpi / 0.0254).round() as u32; // pixels per metre
     let (width, height) = (pixmap.width(), pixmap.height());
@@ -614,24 +870,7 @@ fn encode_png_with_dpi(pixmap: Pixmap, dpi: f64, transparent: bool) -> Result<Ve
     } else {
         pixmap.take()
     };
-    let mut out = Vec::new();
-    {
-        let mut encoder = png::Encoder::new(&mut out, width, height);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        encoder.set_pixel_dims(Some(png::PixelDimensions {
-            xppu: ppu,
-            yppu: ppu,
-            unit: png::Unit::Meter,
-        }));
-        let mut writer = encoder
-            .write_header()
-            .map_err(|e| format!("PNG header write failed: {e}"))?;
-        writer
-            .write_image_data(&data)
-            .map_err(|e| format!("PNG data write failed: {e}"))?;
-    }
-    Ok(out)
+    png_encode::encode_rgba8(&data, width, height, ppu)
 }
 
 /// Render a sequence of equally-sized scenes to an animated GIF.
@@ -654,11 +893,33 @@ pub fn render_gif(
     if scenes.is_empty() {
         return Err("animation needs at least one frame".to_string());
     }
+    // Frames are independent all the way through quantization - which is the
+    // expensive half - so render and quantize them in parallel and keep only
+    // the write ordered. `collect` preserves frame order.
     let pixmaps: Vec<Pixmap> = scenes
-        .iter()
+        .par_iter()
         .map(|s| render_pixmap(s, scale, false))
-        .collect::<Result<_, _>>()?;
+        .collect::<Result<_, String>>()?;
     let (w, h) = (pixmaps[0].width() as u16, pixmaps[0].height() as u16);
+    let frames: Vec<gif::Frame<'static>> = pixmaps
+        .par_iter()
+        .map(|pm| {
+            // `from_rgba_speed` asserts on a size mismatch; report it instead.
+            if (pm.width() as u16, pm.height() as u16) != (w, h) {
+                return Err(format!(
+                    "every animation frame must be {w} x {h} px, got {} x {}",
+                    pm.width(),
+                    pm.height()
+                ));
+            }
+            let mut rgba = pm.data().to_vec();
+            // speed 10: a balance between NeuQuant quality (1) and speed (30) —
+            // plots have few distinct colours so quantization is near-lossless.
+            let mut frame = gif::Frame::from_rgba_speed(w, h, &mut rgba, 10);
+            frame.delay = delay_cs;
+            Ok(frame)
+        })
+        .collect::<Result<_, String>>()?;
 
     let mut out = Vec::new();
     {
@@ -671,14 +932,9 @@ pub fn render_gif(
                 gif::Repeat::Finite(0)
             })
             .map_err(|e| format!("GIF repeat write failed: {e}"))?;
-        for pm in &pixmaps {
-            let mut rgba = pm.data().to_vec();
-            // speed 10: a balance between NeuQuant quality (1) and speed (30) —
-            // plots have few distinct colours so quantization is near-lossless.
-            let mut frame = gif::Frame::from_rgba_speed(w, h, &mut rgba, 10);
-            frame.delay = delay_cs;
+        for frame in &frames {
             encoder
-                .write_frame(&frame)
+                .write_frame(frame)
                 .map_err(|e| format!("GIF frame write failed: {e}"))?;
         }
     }
@@ -707,10 +963,11 @@ pub fn render_apng(
     } else {
         72.0
     };
+    // Frames are independent; render them in parallel, write them in order.
     let pixmaps: Vec<Pixmap> = scenes
-        .iter()
+        .par_iter()
         .map(|s| render_pixmap(s, dpi / 72.0, false))
-        .collect::<Result<_, _>>()?;
+        .collect::<Result<_, String>>()?;
     let (w, h) = (pixmaps[0].width(), pixmaps[0].height());
     let ppu = (dpi / 0.0254).round() as u32;
 
@@ -900,6 +1157,167 @@ mod tests {
         assert!(
             avg < 2.0,
             "tinted stamp vs per-path avg diff too high: {avg:.3}/255"
+        );
+    }
+
+    /// A scene touching every node kind banding has to carry across a seam:
+    /// stroked and filled paths, text, an image, stamped markers, a clip group
+    /// and a nested opacity group.
+    fn mixed_scene() -> Scene {
+        let mut scene = Scene::new(Size::new(200.0, 160.0));
+
+        let mut wave = pyplotrs_core::kurbo::BezPath::new();
+        wave.move_to((5.0, 80.0));
+        for i in 1..400 {
+            let x = 5.0 + i as f64 * 0.475;
+            wave.line_to((x, 80.0 + 60.0 * (x * 0.21).sin()));
+        }
+        let mut g = Group::new();
+        g.clip = Some(ClipPath::rect(Rect::new(2.0, 2.0, 198.0, 158.0)));
+        g.children = vec![
+            Node::Path(PathNode {
+                geometry: Rect::new(10.0, 10.0, 190.0, 150.0).to_path(0.05),
+                fill: Some(Color::rgba(240, 245, 250, 255)),
+                fill_rule: FillRule::NonZero,
+                stroke: None,
+            }),
+            Node::Image(pyplotrs_core::ImageNode {
+                data: pyplotrs_core::ImageData::from_rgba8(
+                    (0..32 * 24 * 4)
+                        .map(|i| if i % 4 == 3 { 255 } else { (i % 251) as u8 })
+                        .collect(),
+                    32,
+                    24,
+                ),
+                rect: Rect::new(20.0, 20.0, 100.0, 90.0),
+            }),
+            Node::Path(PathNode {
+                geometry: wave,
+                fill: None,
+                fill_rule: FillRule::NonZero,
+                stroke: Some(pyplotrs_core::Stroke::new(Color::rgb(200, 40, 40), 1.7)),
+            }),
+            Node::Markers(MarkerNode {
+                marker: marker_path(),
+                fill: Some(Color::rgb(0, 110, 200)),
+                fill_rule: FillRule::NonZero,
+                stroke: Some(pyplotrs_core::Stroke::new(Color::rgb(255, 255, 255), 0.8)),
+                positions: positions(),
+                colors: None,
+            }),
+        ];
+
+        let mut faded = Group::new();
+        faded.opacity = 0.45;
+        faded.children = vec![Node::Markers(MarkerNode {
+            marker: marker_path(),
+            fill: Some(Color::rgb(20, 160, 90)),
+            fill_rule: FillRule::NonZero,
+            stroke: None,
+            positions: positions().iter().map(|p| Point::new(p.y, p.x)).collect(),
+            colors: Some(
+                (0..positions().len())
+                    .map(|i| Color::rgba((i * 3 % 256) as u8, 120, 200, 255))
+                    .collect(),
+            ),
+        })];
+        g.children.push(Node::Group(faded));
+
+        scene.push(g);
+        scene
+    }
+
+    /// Rendering in bands must agree with rendering in one pass. It cannot be
+    /// bit-exact, for two reasons found by measuring each node kind separately:
+    ///
+    /// - **Stroked and filled outlines.** tiny-skia's antialiasing takes a
+    ///   different code path once a path is no longer wholly inside the clip
+    ///   (`path_contained_in_clip` in its scan converter), so a shape crossing a
+    ///   seam picks up sub-pixel coverage differences (worst seen: 14/255 on a
+    ///   handful of pixels).
+    /// - **Images.** A band shifts the transform, and tiny-skia inverts it in
+    ///   `f32` to sample the pattern, so a destination row whose source
+    ///   coordinate sits almost exactly on a source-pixel boundary can round to
+    ///   the neighbouring row. That costs one destination row per seam, and the
+    ///   error is bounded by how much adjacent source rows differ - a few units
+    ///   out of 255 for the colormapped images plots actually contain.
+    ///
+    /// Filled paths, stamped markers and opacity groups come out bit-identical.
+    /// This test pins the total: comfortably sub-perceptual, and not growing
+    /// without bound as bands multiply.
+    #[test]
+    fn banded_render_matches_single_band() {
+        let scene = mixed_scene();
+        let reference = render_pixmap_banded(&scene, 2.0, false, Some(1)).unwrap();
+        for bands in [2u32, 3, 7, 16, 64] {
+            let banded = render_pixmap_banded(&scene, 2.0, false, Some(bands)).unwrap();
+            assert_eq!(
+                (banded.width(), banded.height()),
+                (reference.width(), reference.height())
+            );
+            let (avg, non_white) = avg_and_content(&banded, &reference);
+            assert!(
+                non_white > 5000,
+                "expected substantial content, got {non_white}px"
+            );
+            assert!(
+                avg < 0.5,
+                "{bands} bands differ from a single band by {avg:.4}/255 on average"
+            );
+        }
+    }
+
+    /// The band count must depend on the canvas alone. If it were derived from
+    /// the core count, the same figure would render differently on a different
+    /// machine - the AA and resampling differences above are small, but they
+    /// are not nothing, and reproducibility is the point of the golden suite.
+    #[test]
+    fn band_count_is_machine_independent() {
+        let heavy = (2000u32, 1500u32, 500_000u64);
+        let expected = band_count(heavy.0, heavy.1, heavy.2);
+        assert!(expected > 1);
+        // Re-derive it under pools of different sizes; nothing may change.
+        for threads in [1usize, 3, 32] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap();
+            let got = pool.install(|| band_count(heavy.0, heavy.1, heavy.2));
+            assert_eq!(got, expected, "band count changed with {threads} threads");
+        }
+    }
+
+    /// The band decomposition is fixed, so a banded render must be repeatable
+    /// byte for byte - the golden suite compares whole PNG files.
+    #[test]
+    fn banded_render_is_deterministic() {
+        let scene = mixed_scene();
+        let a = render_pixmap_banded(&scene, 2.0, false, Some(16)).unwrap();
+        for _ in 0..4 {
+            let b = render_pixmap_banded(&scene, 2.0, false, Some(16)).unwrap();
+            assert_eq!(a.data(), b.data(), "banded render is not deterministic");
+        }
+    }
+
+    /// Ordinary figures must keep the exact single-pass path: banding trades a
+    /// little antialiasing fidelity for speed, and there is nothing to win on a
+    /// raster that takes a millisecond.
+    #[test]
+    fn small_figures_are_not_banded() {
+        // A typical single-panel figure at 200 dpi: ~1 Mpx, a few hundred
+        // primitives.
+        assert_eq!(
+            band_count(1000, 722, 400),
+            1,
+            "typical figure must not band"
+        );
+        assert_eq!(band_count(1556, 1167, 5_000), 1, "golden-sized figure");
+        // Too small to matter however busy it is.
+        assert_eq!(band_count(300, 200, 10_000_000), 1, "tiny canvas");
+        // A big, busy raster is what banding is for.
+        assert!(
+            band_count(2000, 1500, 500_000) > 1,
+            "a heavy raster must band"
         );
     }
 

@@ -1509,24 +1509,37 @@ impl Scene {
         title: Option<&str>,
         alt: Option<&str>,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        let bytes = if tagged {
-            pyplotrs_render_pdf::render_pdf_tagged(&self.inner, title, alt.unwrap_or("figure"))
-        } else {
-            pyplotrs_render_pdf::render_pdf(&self.inner)
-        }
-        .map_err(PyValueError::new_err)?;
+        // The renderers touch no Python objects, so the GIL is dead weight for
+        // the whole of a render - and holding it serializes figures that a
+        // caller deliberately farmed out to a thread pool. See `to_png`.
+        let bytes = py
+            .detach(|| {
+                if tagged {
+                    pyplotrs_render_pdf::render_pdf_tagged(
+                        &self.inner,
+                        title,
+                        alt.unwrap_or("figure"),
+                    )
+                } else {
+                    pyplotrs_render_pdf::render_pdf(&self.inner)
+                }
+            })
+            .map_err(PyValueError::new_err)?;
         Ok(PyBytes::new(py, &bytes))
     }
 
     /// Render to an SVG document string (real `<text>` elements).
-    fn to_svg(&self) -> String {
-        pyplotrs_render_svg::render_svg(&self.inner)
+    fn to_svg(&self, py: Python<'_>) -> String {
+        py.detach(|| pyplotrs_render_svg::render_svg(&self.inner))
     }
 
     /// Render to PNG bytes at `dpi` dots per inch (the PNG carries a `pHYs`
     /// chunk recording its physical size). PDF/SVG are resolution-independent
     /// and ignore dpi. `transparent` drops the white page fill for an alpha
     /// channel instead.
+    ///
+    /// The GIL is released for the render, so exporting a batch of figures from
+    /// a `ThreadPoolExecutor` actually runs them concurrently.
     #[pyo3(signature = (dpi=200.0, transparent=false))]
     fn to_png<'py>(
         &self,
@@ -1534,7 +1547,8 @@ impl Scene {
         dpi: f64,
         transparent: bool,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        let bytes = pyplotrs_render_raster::render_png(&self.inner, dpi, transparent)
+        let bytes = py
+            .detach(|| pyplotrs_render_raster::render_png(&self.inner, dpi, transparent))
             .map_err(PyValueError::new_err)?;
         Ok(PyBytes::new(py, &bytes))
     }
@@ -1777,10 +1791,13 @@ fn scenes_to_gif<'py>(
         return Err(PyValueError::new_err("animation needs at least one frame"));
     }
     // `guards` keeps each Scene borrowed; `refs` borrows from `guards`; both
-    // outlive the render call, so no copying or unsafe is needed.
+    // outlive the render call, so no copying or unsafe is needed. Only `refs`
+    // crosses into the GIL-free region - a `PyRef` may not, and does not need
+    // to, since the borrow it holds is what keeps the scenes alive.
     let guards: Vec<PyRef<Scene>> = scenes.iter().map(|s| s.borrow(py)).collect();
     let refs: Vec<&CoreScene> = guards.iter().map(|g| &g.inner).collect();
-    let bytes = pyplotrs_render_raster::render_gif(&refs, scale, delay_cs, infinite)
+    let bytes = py
+        .detach(|| pyplotrs_render_raster::render_gif(&refs, scale, delay_cs, infinite))
         .map_err(PyValueError::new_err)?;
     Ok(PyBytes::new(py, &bytes))
 }
@@ -1803,7 +1820,8 @@ fn scenes_to_apng<'py>(
     }
     let guards: Vec<PyRef<Scene>> = scenes.iter().map(|s| s.borrow(py)).collect();
     let refs: Vec<&CoreScene> = guards.iter().map(|g| &g.inner).collect();
-    let bytes = pyplotrs_render_raster::render_apng(&refs, dpi, delay_num, delay_den, infinite)
+    let bytes = py
+        .detach(|| pyplotrs_render_raster::render_apng(&refs, dpi, delay_num, delay_den, infinite))
         .map_err(PyValueError::new_err)?;
     Ok(PyBytes::new(py, &bytes))
 }
