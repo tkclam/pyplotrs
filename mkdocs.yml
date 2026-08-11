@@ -40,6 +40,8 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Quickstart: quickstart.md
+  - Tutorial: tutorial.md
+  - From matplotlib: migrating-from-matplotlib.md
   - User guide:
       - Figures & axes: guide/figure-and-axes.md
       - Plot types: guide/plot-types.md

@@ -68,10 +68,19 @@ for building from source.
 
 ## Documentation
 
-Full docs, a [quickstart](https://tkclam.github.io/pyplotrs/quickstart/), a
-[user guide](https://tkclam.github.io/pyplotrs/guide/figure-and-axes/), and a
-[gallery](https://tkclam.github.io/pyplotrs/gallery/) live at
-**<https://tkclam.github.io/pyplotrs/>**.
+Full docs live at **<https://tkclam.github.io/pyplotrs/>**:
+
+- [Quickstart](https://tkclam.github.io/pyplotrs/quickstart/) — zero to a saved
+  figure
+- [Tutorial](https://tkclam.github.io/pyplotrs/tutorial/) — one publication
+  figure, built step by step
+- [Coming from matplotlib](https://tkclam.github.io/pyplotrs/migrating-from-matplotlib/)
+  — the differences, with a translation table
+- [User guide](https://tkclam.github.io/pyplotrs/guide/figure-and-axes/) —
+  layout, plot types, scales, themes, 3D, saving
+- [Gallery](https://tkclam.github.io/pyplotrs/gallery/) — every figure with
+  runnable source
+- [API reference](https://tkclam.github.io/pyplotrs/api/figure/)
 
 To build the docs locally:
 
