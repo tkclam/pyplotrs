@@ -163,16 +163,23 @@ def test_3d_methods_that_referenced_undefined_helpers(method, tmp_path):
 
 # -- FFI boundary hardening --------------------------------------------------
 
-def test_degenerate_figure_size_raises_valueerror(tmp_path):
+@pytest.mark.parametrize("figsize", [
+    (0, 0), (0, 4), (-3, -2), (3, 0), (float("nan"), 4), (3, float("inf")),
+])
+def test_degenerate_figure_size_raises_valueerror(figsize):
     """A zero-size figure used to unwind out of Rust as ``PanicException``.
 
     That derives from ``BaseException``, so ``except Exception`` did not catch
-    it and the user got a Rust panic dump instead of a diagnosis.
+    it and the user got a Rust panic dump instead of a diagnosis. It became a
+    ``ValueError`` at ``save`` time - but only for ``.pdf``: the same figure
+    saved to ``.png`` wrote an 89-byte 1x1 image and said nothing, because the
+    check lived in one backend rather than at the seam every backend shares.
+
+    It is now rejected by ``subplots()`` itself, which is where the wrong
+    argument was actually passed, and covers NaN and infinity too.
     """
-    fig, ax = plt.subplots(figsize=(0, 0))
-    ax.line([0, 1], [0, 1])
-    with pytest.raises(ValueError, match="must be positive"):
-        fig.save(str(tmp_path / "zero.pdf"))
+    with pytest.raises(ValueError, match="positive, finite"):
+        plt.subplots(figsize=figsize)
 
 
 def test_absurd_raster_size_raises_instead_of_aborting(tmp_path):

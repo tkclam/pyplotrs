@@ -147,3 +147,127 @@ def test_no_public_call_raises_baseexception_only():
                 f"{type(exc).__module__}.{type(exc).__name__} escapes "
                 f"`except Exception`: {exc}"
             )
+
+
+# -- degenerate numbers that used to be accepted silently --------------------
+
+@pytest.mark.parametrize("dpi", [0, -5, -0.1, float("nan"), float("inf")])
+def test_non_positive_dpi_raises(tmp_path, dpi):
+    """`dpi=-5` rendered at 72 dpi and said nothing, so you got a small figure
+    with no indication the argument had been discarded. The *upper* bound was
+    already guarded with a good message, so only the bottom was open."""
+    fig, ax = plt.subplots()
+    ax.line([0, 1], [0, 1])
+    with pytest.raises(ValueError, match="positive, finite"):
+        fig.save(str(tmp_path / "f.png"), dpi=dpi)
+
+
+def test_a_sane_dpi_still_works(tmp_path):
+    fig, ax = plt.subplots()
+    ax.line([0, 1], [0, 1])
+    for dpi in (72, 100.0, 300, 600):
+        out = tmp_path / f"d{dpi}.png"
+        fig.save(str(out), dpi=dpi)
+        assert out.stat().st_size > 0
+
+
+@pytest.mark.parametrize("linestyle", ["dashdotted", "densely dashed", "- -", "Solid", ""])
+def test_unknown_linestyle_raises(linestyle):
+    """An unrecognized name drew a solid line. `"dashdotted"` is a real
+    matplotlib spelling, so this was silently wrong rather than merely
+    unsupported."""
+    _fig, ax = plt.subplots()
+    with pytest.raises(ValueError, match="unknown linestyle"):
+        ax.line([0, 1], [0, 1], linestyle=linestyle)
+        _render(ax)
+
+
+def _render(ax):
+    """Force the draw pass, where style lookups happen."""
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as d:
+        ax._figure.save(str(Path(d) / "f.png"))
+
+
+@pytest.mark.parametrize("style", ["solid", "-", "dashed", "--", "dotted", ":",
+                                   "dashdot", "-.", "none", None])
+def test_known_linestyles_are_all_accepted(style):
+    _fig, ax = plt.subplots()
+    ax.line([0, 1], [0, 1], linestyle=style)
+    _render(ax)
+
+
+@pytest.mark.parametrize("marker", ["*", ".", ",", "p", "h", "circle", "O"])
+def test_unknown_marker_raises(marker):
+    """An unrecognized shape fell through to the circle branch, so `marker="*"`
+    - which matplotlib draws as a star - silently drew a dot."""
+    _fig, ax = plt.subplots()
+    with pytest.raises(ValueError, match="unknown marker"):
+        ax.scatter([0, 1], [0, 1], marker=marker)
+
+
+@pytest.mark.parametrize("marker", ["o", "s", "^", "v", "D", "+", "x"])
+def test_known_markers_are_all_accepted(marker):
+    _fig, ax = plt.subplots()
+    ax.scatter([0, 1], [0, 1], marker=marker)
+    _render(ax)
+
+
+@pytest.mark.parametrize("bins", [0, -3])
+def test_hist_rejects_a_non_positive_bin_count(bins):
+    _fig, ax = plt.subplots()
+    with pytest.raises(ValueError, match="bins"):
+        ax.hist([1.0, 2.0, 3.0], bins=bins)
+
+
+# -- reprs -------------------------------------------------------------------
+#
+# Not cosmetic: pyplotrs asks you to hold objects rather than call into a state
+# machine, so the notebook and the REPL are the primary surface, and every one
+# of these printed `<pyplotrs.scales.LogScale object at 0x7f...>`.
+
+def test_no_public_object_reprs_as_a_bare_address():
+    from pyplotrs import norms, scales, ticker
+
+    fig, ax = plt.subplots(2, 2)
+    objects = [
+        fig, ax[0][0], fig.add_gridspec(2, 2),
+        plt.subplots(projection="3d")[1], plt.subplots(projection="polar")[1],
+        plt.themes.default, plt.themes.default.with_(title_size=14),
+        plt.get_cmap("viridis"),
+        scales.LinearScale(), scales.LogScale(), scales.SymlogScale(),
+        scales.LogitScale(), scales.CategoricalScale(["a", "b"]), scales.DateScale(),
+        norms.Normalize(0, 1), norms.LogNorm(), norms.TwoSlopeNorm(0.0),
+        norms.BoundaryNorm([0, 1, 2]),
+        ticker.ScalarFormatter(), ticker.PercentFormatter(), ticker.EngFormatter(),
+        ticker.LogFormatter(), ticker.DateFormatter("%Y"),
+        ticker.FixedFormatter(["a"]), ticker.StrMethodFormatter("{x}"),
+        ticker.FuncFormatter(str),
+    ]
+    bare = [type(o).__name__ for o in objects if " object at 0x" in repr(o)]
+    assert not bare, f"these still repr as a bare address: {bare}"
+
+
+def test_the_theme_repr_names_a_builtin_and_stays_short():
+    """The dataclass-generated repr was ~1000 characters of raw RGBA tuples."""
+    assert repr(plt.themes.nature) == "<Theme 'nature'>"
+    derived = repr(plt.themes.default.with_(title_size=14))
+    assert "derived" in derived and len(derived) < 100, derived
+
+
+def test_the_figure_repr_reports_its_shape():
+    fig, axs = plt.subplots(2, 3, figsize=(400, 300))
+    axs[0][0].line([1, 2], [1, 2])
+    text = repr(fig)
+    assert "2x3" in text and "6 axes" in text and "1 mark" in text, text
+
+
+def test_the_axes_repr_reports_its_title_and_marks():
+    _fig, ax = plt.subplots()
+    ax.set(title="Damped sinusoids")
+    ax.line([1, 2], [1, 2])
+    ax.scatter([1], [1])
+    text = repr(ax)
+    assert "Damped sinusoids" in text and "2 marks" in text, text

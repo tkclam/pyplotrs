@@ -16,6 +16,7 @@ from typing import Sequence
 from . import _pyplotrs_core as _core
 from . import scales as _scales
 from . import ticker as _ticker
+from ._util import _auto_repr
 
 
 def _as_f64(values) -> "array":
@@ -35,6 +36,10 @@ _Tick = tuple[float, str]
 class Normalize:
     """Linear normalization between ``vmin`` and ``vmax`` (clamped to ``[0, 1]``).
     ``vmin``/``vmax`` left ``None`` are filled from the data by :meth:`autoscale`."""
+
+    def __repr__(self) -> str:
+        return _auto_repr(self)
+
 
     #: Rust ``apply_scale`` selector, mirroring :attr:`pyplotrs.scales.Scale.code`.
     #: When set, bulk color mapping runs in Rust via ``_core.map_colors``;

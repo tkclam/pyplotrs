@@ -347,6 +347,13 @@ class Figure:
         ``save("*.html")`` for the interactive 3D viewer)."""
         return self._build_scene().to_png(_INLINE_DPI)
 
+    def __repr__(self) -> str:
+        w, h = self.size_pt
+        panels = len(self.axes)
+        marks = sum(len(getattr(a, a._MARKS_ATTR, ())) for a in self.axes)
+        return (f"<Figure {w:.0f}x{h:.0f}pt, {self.nrows}x{self.ncols} grid, "
+                f"{panels} axes, {marks} mark{'' if marks == 1 else 's'}>")
+
     def save(self, path: str, *, dpi: float = 200.0, tagged: bool = False,
              transparent: bool = False, title: str | None = None,
              alt: str | None = None) -> None:
@@ -378,6 +385,14 @@ class Figure:
         same auto-derived ``title``/``alt`` label the page and the inline SVG
         (``role="img"``), and ``title``/``alt`` may be overridden here too."""
         path_str = str(path)
+        # `dpi=-5`, `dpi=0` and `dpi=nan` all rendered silently - the negative
+        # and the zero fell through to a 72 dpi default deep in the raster
+        # path, so you got a small figure and no indication the argument had
+        # been discarded. The 4 GB upper bound was already guarded with a good
+        # message, so only the bottom was open.
+        dpi = float(dpi)
+        if not dpi > 0.0 or dpi != dpi or dpi == float("inf"):
+            raise ValueError(f"dpi must be a positive, finite number; got {dpi!r}")
         ext = path_str.rsplit(".", 1)[-1].lower() if "." in path_str else ""
         if ext in ("html", "htm"):
             auto_title, auto_alt = self._accessible_text()
@@ -513,6 +528,9 @@ class GridSpec:
     def __init__(self, nrows: int, ncols: int) -> None:
         self.nrows = nrows
         self.ncols = ncols
+
+    def __repr__(self) -> str:
+        return f"<GridSpec {self.nrows}x{self.ncols}>"
 
     def __getitem__(self, key) -> tuple[int, int, int, int]:
         return self._resolve(key)

@@ -19,6 +19,8 @@ from __future__ import annotations
 import math
 from typing import Callable, ClassVar
 
+from ._util import _auto_repr
+
 __all__ = [
     "Formatter", "ScalarFormatter", "FuncFormatter", "StrMethodFormatter",
     "PercentFormatter", "EngFormatter", "LogFormatter", "FixedFormatter",
@@ -62,6 +64,10 @@ def _fmt_g(value: float) -> str:
 class Formatter:
     """Base formatter: subclasses implement :meth:`__call__`. Calling a formatter
     with a tick value (and optional integer position) returns its label."""
+
+    def __repr__(self) -> str:
+        return _auto_repr(self)
+
 
     def __call__(self, value: float, pos: int | None = None) -> str:
         return fix_minus(_fmt_g(value))

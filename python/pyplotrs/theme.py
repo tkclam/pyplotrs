@@ -197,6 +197,21 @@ def parse_color(color, palette: tuple[RGBA, ...]) -> RGBA:
 class Theme:
     """An immutable set of style choices. Use :meth:`with_` to derive variants."""
 
+    def __repr__(self) -> str:
+        """A one-line summary, not the whole field list.
+
+        The dataclass-generated repr is ~1000 characters of raw RGBA tuples -
+        it fills a notebook cell and answers nothing. What a reader wants from
+        a theme at a glance is which one it is and the two things most likely
+        to have been derived: the base font size and the palette length.
+        """
+        for name, preset in _PRESETS.items():
+            if self == preset:
+                return f"<Theme {name!r}>"
+        return (f"<Theme derived: title_size={self.title_size:g}, "
+                f"{len(self.palette)} palette colors>")
+
+
     palette: tuple[RGBA, ...] = _OKABE_ITO
     text_color: RGBA = (0, 0, 0, 255)
     spine_color: RGBA = (0, 0, 0, 255)

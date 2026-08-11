@@ -102,6 +102,12 @@ class Colormap:
             r, g, b = tbl[int(t * 255.0 + 0.5)]
         return (r, g, b, 255)
 
+    def __repr__(self) -> str:
+        lo, hi = self._table[0], self._table[-1]
+        return (f"<Colormap {self.name!r} "
+                f"#{lo[0]:02x}{lo[1]:02x}{lo[2]:02x} -> "
+                f"#{hi[0]:02x}{hi[1]:02x}{hi[2]:02x}>")
+
     def reversed(self) -> "Colormap":
         return Colormap(self.name + "_r", table=tuple(reversed(self._table)))
 

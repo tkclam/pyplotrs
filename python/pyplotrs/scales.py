@@ -22,6 +22,7 @@ import math
 from typing import Sequence
 
 from . import _pyplotrs_core as _core
+from ._util import _auto_repr
 from .ticker import fix_minus
 
 Tick = tuple[float, str]
@@ -56,6 +57,13 @@ class Scale:
     ``add_markers_xform``), which apply it per point in Rust — see
     ``apply_scale`` in ``crates/pyplotrs-py/src/lib.rs``.
     """
+
+    def __repr__(self) -> str:
+        # Every subclass gets this: the scale's own name plus whatever
+        # parameters it was constructed with (`base`, `linthresh`, the
+        # categorical mapping's size).
+        return _auto_repr(self)
+
 
     #: Human-readable scale name, mirroring matplotlib's ``set_xscale`` strings.
     name = "scale"

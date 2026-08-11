@@ -35,6 +35,7 @@ from ._const import (
     _TITLE_GAP,
 )
 from ._draw import (
+    _check_marker,
     _colorbar_ticks,
     _colormap_lut,
     _dash_for,
@@ -102,6 +103,10 @@ class Mappable:
     resolve.
     """
 
+    def __repr__(self) -> str:
+        return (f"<Mappable cmap={self.cmap.name!r} "
+                f"vmin={self.vmin:g} vmax={self.vmax:g}>")
+
     def __init__(self, ax: "Axes", cmap, vmin: float, vmax: float, norm=None) -> None:
         self.ax = ax
         self.cmap = cmap
@@ -121,6 +126,25 @@ class _AxesBase:
     hardcoded swatch size survived: a fix applied to one copy silently missed
     the others.
     """
+
+    def __repr__(self) -> str:
+        """``<Axes 'Title' 12 marks xlim=(0, 10)>`` rather than an address.
+
+        Inherited by `Axes3D` and `PolarAxes`, which report their own class
+        name and their own mark list through `_MARKS_ATTR`.
+        """
+        bits = [type(self).__name__]
+        title = getattr(self, "_title", None)
+        if title:
+            bits.append(repr(title))
+        n = len(getattr(self, self._MARKS_ATTR, ()))
+        bits.append(f"{n} mark{'' if n == 1 else 's'}")
+        for axis in ("x", "y"):
+            pinned = getattr(self, f"_{axis}lim", None)
+            if pinned:
+                bits.append(f"{axis}lim=({pinned[0]:g}, {pinned[1]:g})")
+        return f"<{' '.join(bits)}>"
+
 
     #: Where this axes class puts a legend when the caller doesn't say. 2D can
     #: search for a clear corner; 3D and polar fill their cell too densely for
@@ -395,6 +419,7 @@ class Axes(_AxesBase):
         faster vector export on dense data. Set ``False`` to keep every vertex
         exactly (e.g. when the polyline *is* the data being exported).
         """
+        _check_marker(marker)
         xs, ys = self._coords(xs, "x"), self._coords(ys, "y")
         _require_same_length("line", x=xs, y=ys)
         self._marks.append({
@@ -446,6 +471,7 @@ class Axes(_AxesBase):
         and ``norm`` (``vmin``/``vmax`` set the range; ``norm="log"`` or a
         :mod:`pyplotrs.norms` instance for non-linear). Returns a colorbar handle
         in that case, else ``self``."""
+        _check_marker(marker)
         xs = self._coords(xs, "x")
         ys = self._coords(ys, "y")
         _require_same_length("scatter", x=xs, y=ys)
@@ -507,11 +533,16 @@ class Axes(_AxesBase):
 
         The binning loop runs in Rust (``_core.histogram``), matching what
         ``hist2d`` already did."""
+        # `max(int(bins), 1)` used to silently promote 0 and negatives to a
+        # single bin, so `hist(data, bins=0)` drew one wide bar rather than
+        # complaining about the argument.
+        if int(bins) < 1:
+            raise ValueError(f"hist needs at least one bin; got bins={bins!r}")
         vals = _to_f64(data)
         if not len(vals):
             vals = array("d", (0.0, 1.0))
         span = (float(range[0]), float(range[1])) if range else None
-        edges, counts = _core.histogram(vals, max(int(bins), 1), span, bool(density))
+        edges, counts = _core.histogram(vals, int(bins), span, bool(density))
         self._marks.append({
             "zorder": float(zorder),
             "kind": "hist",
@@ -602,6 +633,7 @@ class Axes(_AxesBase):
                  linewidth: float | None = None, alpha: float = 1.0,
                  capsize: float = 3.0, linestyle: str = "solid", zorder: float = 0.0) -> "Axes":
         """Plot ``(xs, ys)`` with symmetric ``yerr``/``xerr`` error bars."""
+        _check_marker(marker)
         xs = [float(x) for x in xs]
         ys = [float(y) for y in ys]
         _require_same_length("errorbar", x=xs, y=ys)
@@ -848,6 +880,7 @@ class Axes(_AxesBase):
              label: str | None = None, zorder: float = 0.0) -> "Axes":
         """Stem plot: a vertical line from ``bottom`` to each ``(x, y)`` topped by
         a marker, with a baseline."""
+        _check_marker(marker)
         xs, ys = self._coords(xs, "x"), self._coords(ys, "y")
         _require_same_length("stem", x=xs, y=ys)
         self._marks.append({

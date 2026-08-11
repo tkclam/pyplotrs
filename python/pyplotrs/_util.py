@@ -16,15 +16,33 @@ from ._const import _DATA_PAD, _UNIT_TO_PT
 
 
 def _figsize_to_points(figsize, units: str) -> tuple[float, float]:
-    """Convert a ``(w, h)`` figure size in ``units`` to points."""
+    """Convert a ``(w, h)`` figure size in ``units`` to points.
+
+    A non-positive or non-finite size used to pass straight through, and
+    ``figsize=(0, 0)`` wrote an 89-byte 1x1 PNG rather than complaining - the
+    ``units`` name was the only thing checked here. The upper bound is guarded
+    with a good message down in the rasterizer, so this asymmetry was pure
+    omission.
+    """
     try:
         factor = _UNIT_TO_PT[units]
     except KeyError:
         raise ValueError(
             f"unknown units {units!r}; expected one of {sorted(_UNIT_TO_PT)}"
         )
-    w, h = figsize
-    return (float(w) * factor, float(h) * factor)
+    try:
+        w, h = figsize
+        w, h = float(w), float(h)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"figsize must be a (width, height) pair of numbers; got {figsize!r}"
+        )
+    for name, value in (("width", w), ("height", h)):
+        if not value > 0.0 or value != value or value == float("inf"):
+            raise ValueError(
+                f"figsize {name} must be a positive, finite number; got {value!r}"
+            )
+    return (w * factor, h * factor)
 
 
 def _with_alpha(color: tuple[int, int, int, int], alpha: float) -> tuple[int, int, int, int]:
@@ -886,3 +904,27 @@ def _patch_bbox(p: dict) -> tuple[list[float], list[float]]:
     if k == "arrow":
         return [p["x"], p["x"] + p["dx"]], [p["y"], p["y"] + p["dy"]]
     return [], []
+
+
+def _auto_repr(obj, *names: str, skip_none: bool = True) -> str:
+    """``ClassName(a=1, b='x')`` from the named attributes.
+
+    Used by the base classes in :mod:`~pyplotrs.scales`,
+    :mod:`~pyplotrs.norms` and :mod:`~pyplotrs.ticker` so their nineteen
+    subclasses all get a useful repr from three implementations. If no names
+    are given, every public attribute is shown in definition order.
+
+    The point is the notebook and the REPL. pyplotrs asks you to hold objects
+    rather than call into a state machine, so `<pyplotrs.scales.LogScale object
+    at 0x7f...>` is the wrong answer to the most common question about one of
+    them - which is "what is this, and what is it set to?"
+    """
+    if not names:
+        names = tuple(k for k in vars(obj) if not k.startswith("_"))
+    parts = []
+    for name in names:
+        value = getattr(obj, name, None)
+        if value is None and skip_none:
+            continue
+        parts.append(f"{name}={value!r}")
+    return f"{type(obj).__name__}({', '.join(parts)})"

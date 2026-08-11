@@ -8,6 +8,7 @@ from . import scales as _scales
 from . import ticker as _ticker
 from ._const import _TITLE_GAP
 from ._draw import (
+    _check_marker,
     _dash_for,
     _draw_legend_box,
     _draw_marker,
@@ -64,6 +65,7 @@ class PolarAxes(_AxesBase):
              marker: str | None = None, markersize: float = 5.0,
              zorder: float = 0.0) -> "PolarAxes":
         """Line through polar points ``(theta, r)`` (``theta`` in radians)."""
+        _check_marker(marker)
         self._marks.append({
             "zorder": float(zorder),
             "kind": "line",
@@ -86,6 +88,7 @@ class PolarAxes(_AxesBase):
 
         ``markersize`` is a diameter in points; ``size`` is the matplotlib-style
         area in pt² (see :meth:`Axes.scatter`)."""
+        _check_marker(marker)
         self._marks.append({
             "zorder": float(zorder),
             "kind": "scatter",

@@ -21,6 +21,7 @@ from ._const import (
     _TITLE_GAP,
 )
 from ._draw import (
+    _check_marker,
     _dash_for,
     _draw_legend_box,
     _draw_marker,
@@ -102,6 +103,7 @@ class Axes3D(_AxesBase):
 
         ``markersize`` is a diameter in points; ``size`` is the matplotlib-style
         area in pt² (see :meth:`Axes.scatter`)."""
+        _check_marker(marker)
         self._marks3.append({
             "kind": "scatter",
             "xs": [float(x) for x in xs],

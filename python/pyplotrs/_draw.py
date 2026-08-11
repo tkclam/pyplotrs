@@ -123,7 +123,20 @@ def _rgba_values(values, cmap, norm) -> list[tuple[int, int, int, int]]:
 
 
 def _dash_for(style) -> list[float] | None:
-    return _DASH_PATTERNS.get(style, None)
+    """The dash pattern for ``style``, or ``None`` for a solid stroke.
+
+    An unknown name used to fall through this ``.get`` default and draw a solid
+    line, so ``linestyle="dashdotted"`` - a real matplotlib spelling - drew the
+    wrong thing and said nothing. Since solid and "no pattern" share the same
+    ``None``, the lookup could not distinguish "solid" from "never heard of
+    it"; the membership test can.
+    """
+    if style not in _DASH_PATTERNS:
+        known = sorted(repr(k) for k in _DASH_PATTERNS if k is not None)
+        raise ValueError(
+            f"unknown linestyle {style!r}; expected one of {', '.join(known)}"
+        )
+    return _DASH_PATTERNS[style]
 
 
 def _draws_line(style) -> bool:
@@ -165,6 +178,30 @@ def _draw_hatch(scene, dev: list[tuple[float, float]], pattern: str, color,
     scene.end_group()
 
 
+#: Every marker `_draw_marker` knows how to draw. Kept beside it rather than in
+#: `_const` so that adding a branch below without adding it here is an obvious
+#: omission rather than an edit in another file.
+_MARKER_SHAPES = frozenset({"o", "s", "^", "v", "D", "+", "x"})
+
+
+def _check_marker(shape) -> None:
+    """Reject an unknown marker name at the *call*, not at `save`.
+
+    `_draw_marker` guards itself too, but `scatter` never reaches it: markers
+    are instanced in Rust (one stamp plus a placement per point), so an unknown
+    name silently became a circle there. Validating where the argument arrives
+    also means the traceback points at the caller's line rather than at a draw
+    pass thousands of marks later.
+    """
+    if shape is None:
+        return
+    if shape not in _MARKER_SHAPES:
+        raise ValueError(
+            f"unknown marker {shape!r}; expected one of "
+            f"{', '.join(repr(s) for s in sorted(_MARKER_SHAPES))}"
+        )
+
+
 def _draw_marker(scene, cx: float, cy: float, d: float, shape: str,
                  facecolor, edgecolor=None, edgewidth: float = 1.0) -> None:
     """Draw a single marker of diameter ``d`` centered at ``(cx, cy)``.
@@ -172,7 +209,16 @@ def _draw_marker(scene, cx: float, cy: float, d: float, shape: str,
     Filled shapes: ``o`` circle, ``s`` square, ``^`` triangle-up,
     ``v`` triangle-down, ``D`` diamond. Stroke-only shapes: ``+`` plus,
     ``x`` cross.
+
+    An unrecognized shape used to fall through to the circle branch, so
+    ``marker="*"`` - which matplotlib draws as a star - silently drew a dot,
+    and so did every typo. Rejecting it names the accepted set instead.
     """
+    if shape not in _MARKER_SHAPES:
+        raise ValueError(
+            f"unknown marker {shape!r}; expected one of "
+            f"{', '.join(repr(s) for s in sorted(_MARKER_SHAPES))}"
+        )
     r = d / 2.0
     if shape in ("+", "x"):
         # A stroke-only marker needs ink even when the caller supplied neither
