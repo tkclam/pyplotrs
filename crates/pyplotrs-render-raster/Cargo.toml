@@ -12,8 +12,16 @@ license.workspace = true
 [dependencies]
 pyplotrs-core = { path = "../pyplotrs-core" }
 tiny-skia = "0.12"
-skrifa = "0.43"
+# 0.42, matching what krilla (and its `subsetter`) pull in, so one font
+# rasterization stack is compiled into the wheel instead of two. Requesting
+# "0.43" here did not unify: cargo treats 0.42 and 0.43 as incompatible
+# under semver-for-0.x, so the extension carried both, along with duplicate
+# `read-fonts` and `font-types`. Bump this together with krilla's.
+skrifa = "0.42"
 png = "0.18"
 gif = "0.14"
 rayon = "1.10"
 flate2 = "1.0"
+
+[lints]
+workspace = true

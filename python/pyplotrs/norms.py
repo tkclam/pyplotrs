@@ -18,6 +18,18 @@ from . import scales as _scales
 from . import ticker as _ticker
 from ._util import _auto_repr
 
+#: The public surface of this module. Without it, `from ... import *`
+#: and every editor's completion list also offer `Sequence`, `math` and
+#: `annotations` - names that are imported here, not exported from here.
+__all__ = [
+    "BoundaryNorm",
+    "LogNorm",
+    "Normalize",
+    "TwoSlopeNorm",
+    "get",
+]
+
+
 
 def _as_f64(values) -> "array":
     """Coerce to a contiguous ``array("d")`` so the Rust reductions can read it

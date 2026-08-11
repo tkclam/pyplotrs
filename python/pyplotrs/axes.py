@@ -67,6 +67,7 @@ from ._util import (
     _is_2d,
     _is_uniform,
     _level_edges,
+    _matplotlib_hint,
     _patch_bbox,
     _RangeAcc,
     _require_same_length,
@@ -78,41 +79,11 @@ from ._util import (
     _to_f64_grid,
     _with_alpha,
 )
+from .mappable import Mappable
 from .theme import Theme
 
 #: Alias so methods taking a ``range=`` keyword can still reach the builtin.
 _irange = range
-
-
-class Mappable:
-    """The colormapped-mark handle that ``Figure.colorbar`` takes.
-
-    Returned by every mark that maps values through a colormap -
-    ``Axes.imshow``, ``Axes.scatter`` with ``c=``,
-    ``Axes.pcolormesh``, ``Axes.hexbin``, ``Axes.hist2d``,
-    ``Axes.contourf`` - and carrying the colormap and value range the
-    colorbar needs to draw a matching scale::
-
-        im = ax.imshow(field, cmap="magma")
-        fig.colorbar(im, label="intensity")
-
-    You rarely construct one; you hold the value a mark hands back and pass it
-    on. It is named in the signature of a public method, so it is public
-    itself: it was spelled ``_Mappable`` until 0.1.0, which made
-    ``Figure.colorbar``'s own annotation refer to a name no importer could
-    resolve.
-    """
-
-    def __repr__(self) -> str:
-        return (f"<Mappable cmap={self.cmap.name!r} "
-                f"vmin={self.vmin:g} vmax={self.vmax:g}>")
-
-    def __init__(self, ax: "Axes", cmap, vmin: float, vmax: float, norm=None) -> None:
-        self.ax = ax
-        self.cmap = cmap
-        self.vmin = vmin
-        self.vmax = vmax
-        self.norm = norm  # None => linear; else a pyplotrs.norms.Normalize
 
 
 class _AxesBase:
@@ -337,6 +308,21 @@ class Axes(_AxesBase):
         self._is_twin: bool = False  # a twin skips its own facecolor/grid
 
     # -- styling helpers ----------------------------------------------------
+
+
+    def __getattr__(self, name: str):
+        """Turn a matplotlib method name into the one line that replaces it.
+
+        Only reached when normal lookup fails, so it costs nothing on the happy
+        path. It deliberately does **not** alias: `plot` stays `line`, and the
+        `set_*` family stays folded into `set()`, because those renames are the
+        API's argument. What changes is that the error explains itself instead
+        of being a bare "no attribute 'plot'".
+        """
+        hint = _matplotlib_hint(type(self).__name__, name)
+        if hint is not None:
+            raise AttributeError(hint)
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
 
     def _coords(self, values, axis: str) -> "array":
         """Coerce plot coordinates to a contiguous ``array("d")``.

@@ -12,3 +12,6 @@ license.workspace = true
 [dependencies]
 pyplotrs-core = { path = "../pyplotrs-core" }
 rustybuzz = "0.20"
+
+[lints]
+workspace = true

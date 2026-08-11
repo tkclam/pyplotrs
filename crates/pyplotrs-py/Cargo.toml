@@ -29,3 +29,6 @@ pyo3 = { version = "0.28", features = ["extension-module"] }
 # fontconfig directories/aliases on Unix so the Arial->Helvetica lookup finds
 # whatever the OS exposes; `memmap` avoids reading every system font into RAM.
 fontdb = { version = "0.23", default-features = false, features = ["fontconfig", "memmap"] }
+
+[lints]
+workspace = true

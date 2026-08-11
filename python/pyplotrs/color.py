@@ -30,6 +30,29 @@ from typing import Literal
 from . import _pyplotrs_core as _core
 from .colormaps import get_cmap
 
+#: The public surface of this module. Without it, `from ... import *`
+#: and every editor's completion list also offer `Sequence`, `math` and
+#: `annotations` - names that are imported here, not exported from here.
+__all__ = [
+    "cvd_safe_report",
+    "distance",
+    "from_cam16ucs",
+    "from_lab",
+    "from_linear",
+    "from_oklab",
+    "from_oklch",
+    "from_xyz",
+    "perceptual_uniformity",
+    "simulate_cvd",
+    "to_cam16ucs",
+    "to_lab",
+    "to_linear",
+    "to_oklab",
+    "to_oklch",
+    "to_xyz",
+]
+
+
 _RGB = tuple[int, int, int]
 _Triple = tuple[float, float, float]
 CvdKind = Literal["protanopia", "deuteranopia", "tritanopia"]

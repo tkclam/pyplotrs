@@ -136,7 +136,15 @@ fn raw_vmetrics_cache() -> &'static RawVMetricsCache {
 /// a positive magnitude.
 pub fn font_vmetrics(font: &FontData, size: f32) -> VMetrics {
     let key = font.key() as usize;
-    let mut cache = raw_vmetrics_cache().lock().unwrap();
+    // `unwrap_or_else(|e| e.into_inner())`, not `unwrap()`: a mutex is poisoned
+    // when a thread panics while holding it, and every later lock then fails -
+    // so one unrelated panic anywhere would turn this memoization cache into a
+    // permanently broken process. What it guards is a cache with no invariant a
+    // panic could leave half-updated, so recovering the guard is strictly better
+    // than propagating the poison.
+    let mut cache = raw_vmetrics_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     if cache.len() >= MAX_VMETRICS_ENTRIES && !cache.contains_key(&key) {
         cache.clear();
     }
@@ -183,7 +191,10 @@ mod tests {
                 "metrics should still be correct after a clear"
             );
         }
-        let entries = raw_vmetrics_cache().lock().unwrap().len();
+        let entries = raw_vmetrics_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .len();
         assert!(
             entries <= MAX_VMETRICS_ENTRIES,
             "cache holds {entries} entries, above the {MAX_VMETRICS_ENTRIES} ceiling"
@@ -202,7 +213,10 @@ mod tests {
         let key = font.key() as usize;
         let first = font_vmetrics(&font, 10.0);
         assert!(
-            raw_vmetrics_cache().lock().unwrap().contains_key(&key),
+            raw_vmetrics_cache()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key(&key),
             "the first lookup did not populate the cache"
         );
         for _ in 0..50 {

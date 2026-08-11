@@ -235,7 +235,7 @@ fn resolve_from_host(families: &[String], face: FaceStyle) -> ResolvedFace {
 /// match. The resolved font is embedded into saved figures, so the choice
 /// never affects how a saved file views on another machine.
 fn resolve_body(face: FaceStyle) -> ResolvedFace {
-    let mut guard = BODY_CACHE.lock().unwrap();
+    let mut guard = BODY_CACHE.lock().unwrap_or_else(|e| e.into_inner());
     let cache = guard.get_or_insert_with(HashMap::new);
     if let Some(hit) = cache.get(&face) {
         return hit.clone();
@@ -1858,12 +1858,12 @@ fn scenes_to_apng<'py>(
 /// empty list restores the default (`Arial`, `Helvetica`, `Liberation Sans`).
 #[pyfunction]
 fn set_sans_serif(families: Vec<String>) {
-    *SANS_SERIF.lock().unwrap() = if families.is_empty() {
+    *SANS_SERIF.lock().unwrap_or_else(|e| e.into_inner()) = if families.is_empty() {
         None
     } else {
         Some(families)
     };
-    *BODY_CACHE.lock().unwrap() = None;
+    *BODY_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 /// The currently configured preferred sans-serif families, in order. When

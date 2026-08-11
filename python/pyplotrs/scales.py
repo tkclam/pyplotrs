@@ -25,6 +25,25 @@ from . import _pyplotrs_core as _core
 from ._util import _auto_repr
 from .ticker import fix_minus
 
+#: The public surface of this module. Without it, `from ... import *`
+#: and every editor's completion list also offer `Sequence`, `math` and
+#: `annotations` - names that are imported here, not exported from here.
+__all__ = [
+    "CategoricalScale",
+    "DateScale",
+    "LinearScale",
+    "LogScale",
+    "LogitScale",
+    "Scale",
+    "SymlogScale",
+    "date2num",
+    "get",
+    "is_datetime_like",
+    "nice_ticks",
+    "num2date",
+]
+
+
 Tick = tuple[float, str]
 
 # Symlog parameters — must stay numerically identical to the Rust constants in

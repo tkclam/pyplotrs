@@ -271,3 +271,73 @@ def test_the_axes_repr_reports_its_title_and_marks():
     ax.scatter([1], [1])
     text = repr(ax)
     assert "Damped sinusoids" in text and "2 marks" in text, text
+
+
+# -- arriving from matplotlib ------------------------------------------------
+#
+# pyplotrs renames deliberately: `plot` is `line`, and the whole `set_*` family
+# folds into one `set()`. Those are the API's argument, so the names are *not*
+# aliased. But `AttributeError: 'Axes' object has no attribute 'plot'` tells a
+# matplotlib user nothing, and that is the first thing most of them type.
+
+@pytest.mark.parametrize("name,expected", [
+    ("plot", "ax.line"),
+    ("set_xlabel", "ax.set(xlabel"),
+    ("set_title", "ax.set(title"),
+    ("set_xlim", "ax.set(xlim"),
+    ("set_xscale", "ax.set(xscale"),
+    ("grid", "ax.set(grid"),
+])
+def test_matplotlib_axes_names_explain_themselves(name, expected):
+    _fig, ax = plt.subplots()
+    with pytest.raises(AttributeError) as excinfo:
+        getattr(ax, name)
+    message = str(excinfo.value)
+    assert expected in message, message
+    assert "migrating-from-matplotlib" in message
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("savefig", "fig.save"),
+    ("tight_layout", "layout is solved once"),
+    ("show", "pyplotrs makes files, not windows"),
+    ("gca", "there is no current figure"),
+])
+def test_matplotlib_figure_names_explain_themselves(name, expected):
+    fig, _ax = plt.subplots()
+    with pytest.raises(AttributeError) as excinfo:
+        getattr(fig, name)
+    assert expected in str(excinfo.value)
+
+
+def test_the_names_are_not_silently_aliased():
+    """The point is to explain the rename, not undo it. If `ax.plot` started
+    working, the one-name-per-concept rule would be decorative."""
+    _fig, ax = plt.subplots()
+    for name in ("plot", "set_xlabel", "set_title"):
+        assert not hasattr(ax, name), f"{name} should not exist, only explain"
+
+
+def test_an_ordinary_typo_still_gets_an_ordinary_error():
+    """The hook must not swallow every failed lookup into a matplotlib lecture."""
+    _fig, ax = plt.subplots()
+    missing = "definitely_not_a_method"  # via a variable: `ax.<literal>` is a
+    with pytest.raises(AttributeError) as excinfo:  # "useless expression" to
+        getattr(ax, missing)                        # the linter, and B009 to
+    assert "matplotlib" not in str(excinfo.value)   # the other spelling.
+
+
+def test_the_hint_table_names_only_absent_methods():
+    """A name that pyplotrs actually implements must not be listed as missing -
+    the hint would be unreachable, and wrong if it ever were reached."""
+    from pyplotrs._util import _MATPLOTLIB_EQUIVALENTS
+
+    _fig, ax = plt.subplots()
+    wrong = [
+        name for name in _MATPLOTLIB_EQUIVALENTS
+        if hasattr(ax, name) or hasattr(_fig, name)
+    ]
+    assert not wrong, (
+        f"{wrong} are implemented, so their hint can never fire - drop them "
+        f"from the table rather than leaving a message that contradicts the API"
+    )

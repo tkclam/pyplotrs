@@ -13,3 +13,6 @@ license.workspace = true
 pyplotrs-core = { path = "../pyplotrs-core" }
 base64 = "0.22"
 png = "0.18"
+
+[lints]
+workspace = true

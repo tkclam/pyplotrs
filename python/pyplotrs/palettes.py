@@ -24,6 +24,15 @@ from __future__ import annotations
 
 from . import _pyplotrs_core as _core
 
+#: The public surface of this module. Without it, `from ... import *`
+#: and every editor's completion list also offer `Sequence`, `math` and
+#: `annotations` - names that are imported here, not exported from here.
+__all__ = [
+    "available",
+    "get",
+]
+
+
 _RGBA = tuple[int, int, int, int]
 
 

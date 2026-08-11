@@ -900,14 +900,30 @@ pub fn render_gif(
         .par_iter()
         .map(|s| render_pixmap(s, scale, false))
         .collect::<Result<_, String>>()?;
-    let (w, h) = (pixmaps[0].width() as u16, pixmaps[0].height() as u16);
+    // GIF stores dimensions as u16, so anything past 65535 px cannot be
+    // represented at all. Checked *before* the truncation below, because the
+    // truncation is what made the old size check unable to fire: it compared
+    // `pm.width() as u16` against a `w` that was already `as u16`, so a 70000
+    // px frame and a 4464 px frame both read as 4464 and matched. The
+    // mismatch then reached `from_rgba_speed`, which asserts - a panic across
+    // the FFI boundary, from a figure size the caller chose.
+    let (full_w, full_h) = (pixmaps[0].width(), pixmaps[0].height());
+    if full_w > u16::MAX as u32 || full_h > u16::MAX as u32 {
+        return Err(format!(
+            "a GIF frame can be at most {max} x {max} px; this animation is \
+             {full_w} x {full_h}. Reduce the figure size or the dpi, or save \
+             an APNG (`.png`), which has no such limit.",
+            max = u16::MAX
+        ));
+    }
+    let (w, h) = (full_w as u16, full_h as u16);
     let frames: Vec<gif::Frame<'static>> = pixmaps
         .par_iter()
         .map(|pm| {
             // `from_rgba_speed` asserts on a size mismatch; report it instead.
-            if (pm.width() as u16, pm.height() as u16) != (w, h) {
+            if (pm.width(), pm.height()) != (full_w, full_h) {
                 return Err(format!(
-                    "every animation frame must be {w} x {h} px, got {} x {}",
+                    "every animation frame must be {full_w} x {full_h} px, got {} x {}",
                     pm.width(),
                     pm.height()
                 ));

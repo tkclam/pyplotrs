@@ -10,3 +10,6 @@ publish = false
 license.workspace = true
 
 [dependencies]
+
+[lints]
+workspace = true

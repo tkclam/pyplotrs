@@ -41,9 +41,10 @@ from ._draw import (
     _th,
     _tw,
 )
-from ._util import _figsize_to_points
-from .axes import Axes, Mappable
+from ._util import _figsize_to_points, _matplotlib_hint
+from .axes import Axes
 from .axes3d import Axes3D
+from .mappable import Mappable
 from .polar import PolarAxes
 from .theme import Theme
 
@@ -346,6 +347,21 @@ class Figure:
         polar and 3D figures alike (3D shows its projected static view; use
         ``save("*.html")`` for the interactive 3D viewer)."""
         return self._build_scene().to_png(_INLINE_DPI)
+
+
+    def __getattr__(self, name: str):
+        """Turn a matplotlib method name into the one line that replaces it.
+
+        Only reached when normal lookup fails, so it costs nothing on the happy
+        path. It deliberately does **not** alias: `plot` stays `line`, and the
+        `set_*` family stays folded into `set()`, because those renames are the
+        API's argument. What changes is that the error explains itself instead
+        of being a bare "no attribute 'plot'".
+        """
+        hint = _matplotlib_hint(type(self).__name__, name)
+        if hint is not None:
+            raise AttributeError(hint)
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
 
     def __repr__(self) -> str:
         w, h = self.size_pt

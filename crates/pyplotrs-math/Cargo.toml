@@ -18,3 +18,6 @@ pyplotrs-text = { path = "../pyplotrs-text" }
 # default) gates the `math` module. It is already in the build tree via
 # rustybuzz, so this adds no new compiled dependency.
 ttf-parser = "0.25"
+
+[lints]
+workspace = true

@@ -29,6 +29,13 @@ repository = "https://github.com/tkclam/pyplotrs"
 # number is a fact rather than a hope. `docs/installation.md` quotes it.
 rust-version = "1.92"
 
+# There is no `unsafe` anywhere in the workspace today. `forbid` (not `deny`)
+# means a future block cannot be waved through with a local `#[allow]` either -
+# it has to be an explicit, reviewable change to this file. Free to add now,
+# expensive to add after the first one lands.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
 [profile.release]
 lto = true
 codegen-units = 1

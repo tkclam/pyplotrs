@@ -928,3 +928,58 @@ def _auto_repr(obj, *names: str, skip_none: bool = True) -> str:
             continue
         parts.append(f"{name}={value!r}")
     return f"{type(obj).__name__}({', '.join(parts)})"
+
+
+#: matplotlib method names, mapped to what to do instead.
+#:
+#: pyplotrs renames deliberately - `plot` is `line` because a "plot" is the
+#: whole figure, and `set_xlabel`/`set_title`/... collapse into one `set()` -
+#: so these are *not* aliases. Making them work would undo the decision. What
+#: they do is replace `AttributeError: 'Axes' object has no attribute 'plot'`,
+#: which tells a matplotlib user nothing, with the one line they need.
+_MATPLOTLIB_EQUIVALENTS = {
+    # marks
+    "plot": "ax.line(x, y)",
+    # setters -> one `set`
+    "set_xlabel": 'ax.set(xlabel="...")',
+    "set_ylabel": 'ax.set(ylabel="...")',
+    "set_zlabel": 'ax.set(zlabel="...")',
+    "set_title": 'ax.set(title="...")',
+    "set_xlim": "ax.set(xlim=(lo, hi))",
+    "set_ylim": "ax.set(ylim=(lo, hi))",
+    "set_zlim": "ax.set(zlim=(lo, hi))",
+    "set_xscale": 'ax.set(xscale="log")',
+    "set_yscale": 'ax.set(yscale="log")',
+    "set_xticks": "ax.set(xticks=[...])",
+    "set_yticks": "ax.set(yticks=[...])",
+    "set_xticklabels": "ax.set(xticklabels=[...])",
+    "set_yticklabels": "ax.set(yticklabels=[...])",
+    "set_aspect": 'ax.set(aspect="equal")',
+    "set_facecolor": "a Theme: plt.subplots(theme=plt.themes.default.with_(...))",
+    "grid": "ax.set(grid=True)",
+    "tick_params": "ax.set(tick_direction=..., tick_length=...)",
+    # figure-level
+    "savefig": 'fig.save("out.pdf")',
+    "tight_layout": "nothing - layout is solved once, before anything is drawn",
+    "subplots_adjust": "nothing - layout is solved once, before anything is drawn",
+    "add_axes": "fig.add_gridspec(...) + fig.add_subplot(gs[...])",
+    "gca": "the axes `subplots()` returned - there is no current figure",
+    "gcf": "the figure `subplots()` returned - there is no current figure",
+    "show": "fig.save(...) - pyplotrs makes files, not windows",
+    "clf": "build a new Figure; they are cheap and hold no global state",
+    "cla": "build a new Figure; they are cheap and hold no global state",
+    "draw": "nothing - drawing happens inside save()",
+    "close": "nothing - a Figure is an ordinary object and is garbage collected",
+}
+
+
+def _matplotlib_hint(owner: str, name: str) -> str | None:
+    """The `AttributeError` message for a matplotlib name, or ``None``."""
+    equivalent = _MATPLOTLIB_EQUIVALENTS.get(name)
+    if equivalent is None:
+        return None
+    return (
+        f"{owner!r} object has no attribute {name!r}. pyplotrs is not a "
+        f"matplotlib drop-in; the equivalent is:\n    {equivalent}\n"
+        f"See https://tkclam.github.io/pyplotrs/migrating-from-matplotlib/"
+    )
