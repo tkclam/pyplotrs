@@ -2,6 +2,11 @@
 name = "pyplotrs-text"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
+# Internal to the pyplotrs workspace: these crates depend on each other by
+# path, and the root patches crates.io with a vendored krilla, so a
+# published copy could not resolve. `cargo publish` refuses outright.
+publish = false
 license.workspace = true
 
 [dependencies]

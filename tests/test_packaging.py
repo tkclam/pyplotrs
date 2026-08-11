@@ -277,3 +277,74 @@ def test_py_typed_is_next_to_the_installed_package():
     assert (installed / "py.typed").is_file(), (
         f"py.typed is missing from the installed package at {installed}"
     )
+
+
+# -- version identity --------------------------------------------------------
+
+def test_the_package_reports_a_version():
+    import pyplotrs
+
+    assert hasattr(pyplotrs, "__version__"), "pyplotrs.__version__ must exist"
+    assert pyplotrs.__version__ != "0.0.0+unknown", (
+        "the version fell back to the source-tree placeholder, which means the "
+        "distribution metadata was not found - the package is not installed"
+    )
+    assert "__version__" in pyplotrs.__all__
+
+
+@requires_toml
+def test_the_python_version_comes_from_cargo():
+    """One source of truth. `pyproject.toml` used to carry an independent
+    literal with nothing comparing the two, so they could silently disagree and
+    the release job's tag check would validate only one of them."""
+    import pyplotrs
+
+    cargo = tomllib.loads((ROOT / "Cargo.toml").read_text())
+    workspace_version = cargo["workspace"]["package"]["version"]
+    assert pyplotrs.__version__ == workspace_version, (
+        f"pyplotrs.__version__ is {pyplotrs.__version__!r} but "
+        f"Cargo.toml says {workspace_version!r}"
+    )
+    assert "version" in _pyproject()["project"].get("dynamic", []), (
+        "pyproject must take `version` from Cargo, not restate it"
+    )
+    assert "version" not in _pyproject()["project"], (
+        "a static `version` in [project] shadows the dynamic one"
+    )
+
+
+@requires_toml
+def test_every_crate_inherits_the_workspace_msrv():
+    """A `rust-version` no crate inherits is inert: `cargo metadata` reports
+    null for all ten and cargo enforces nothing, which is how the declaration
+    came to be wrong by twelve minor versions without anyone noticing."""
+    declared = tomllib.loads(
+        (ROOT / "Cargo.toml").read_text())["workspace"]["package"]["rust-version"]
+    missing = []
+    for manifest in sorted((ROOT / "crates").glob("*/Cargo.toml")):
+        text = manifest.read_text()
+        if "rust-version.workspace = true" not in text:
+            missing.append(manifest.parent.name)
+    assert not missing, (
+        f"these crates do not inherit rust-version = {declared!r}: {missing}"
+    )
+
+
+@requires_toml
+def test_the_documented_msrv_matches_the_declared_one():
+    declared = tomllib.loads(
+        (ROOT / "Cargo.toml").read_text())["workspace"]["package"]["rust-version"]
+    install_doc = (ROOT / "docs" / "installation.md").read_text()
+    assert declared in install_doc, (
+        f"docs/installation.md does not mention the declared MSRV {declared!r}"
+    )
+
+
+@requires_toml
+def test_no_crate_can_be_published_to_crates_io():
+    """They depend on each other by path and the root patches crates.io with a
+    vendored krilla, so a published copy could not resolve for anyone."""
+    for manifest in sorted((ROOT / "crates").glob("*/Cargo.toml")):
+        assert "publish = false" in manifest.read_text(), (
+            f"{manifest.parent.name} is missing `publish = false`"
+        )

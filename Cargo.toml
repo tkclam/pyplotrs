@@ -18,7 +18,16 @@ exclude = ["vendor/krilla-0.8.2"]
 version = "0.0.1"
 edition = "2021"
 license = "MIT"
-rust-version = "1.80"
+repository = "https://github.com/tkclam/pyplotrs"
+# The floor is set by krilla, the PDF backend, which declares 1.92; the next
+# constraints down are 1.85 (kurbo, read-fonts, indexmap, hashbrown) and 1.83
+# (pyo3). It was declared as 1.80 and was wrong by twelve minor versions -
+# and inert besides, because no member crate inherited it, so
+# `cargo metadata` reported `null` for all ten and cargo enforced nothing.
+# Every crate now sets `rust-version.workspace = true`, and CI's `msrv` job
+# reads this value and runs `cargo check` on exactly that toolchain, so the
+# number is a fact rather than a hope. `docs/installation.md` quotes it.
+rust-version = "1.92"
 
 [profile.release]
 lto = true

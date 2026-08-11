@@ -1,3 +1,32 @@
+"""pyplotrs - publication-quality static figures, with a Rust rendering core.
+
+Every figure is an explicit object; there is no current-figure state and no
+``pyplot`` module-level drawing surface, so two figures (or two threads) never
+interfere::
+
+    import pyplotrs as plt
+
+    fig, ax = plt.subplots()
+    ax.line([0, 1, 2, 3], [0, 1, 4, 9], label="y = x^2")
+    ax.set(title="Hello", xlabel="x", ylabel="y")
+    ax.legend()
+    fig.save("hello.pdf")   # editable, selectable text
+
+Saving picks the backend from the extension: ``.pdf`` (embedded, subset fonts -
+the text stays real), ``.svg``, ``.png`` (at ``dpi=``), ``.html``
+(self-contained). In a notebook a :class:`Figure` renders itself inline.
+
+Start at :func:`subplots`; :class:`Axes` carries the marks, :class:`Figure` the
+layout and output. :mod:`~pyplotrs.themes`, :mod:`~pyplotrs.colormaps`,
+:mod:`~pyplotrs.scales`, :mod:`~pyplotrs.ticker` and :mod:`~pyplotrs.norms`
+hold the styling and axis vocabulary.
+
+Full documentation: https://tkclam.github.io/pyplotrs/
+"""
+
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
+
 from . import _pyplotrs_core as _core
 from . import color, colormaps, norms, palettes, scales, ticker
 from . import theme as themes
@@ -15,6 +44,15 @@ from .figure import (
     subplots,
 )
 from .theme import Theme
+
+try:
+    #: The installed version, read from the distribution metadata rather than
+    #: hardcoded, so it cannot drift from what was actually built. The single
+    #: source is `[workspace.package].version` in Cargo.toml; maturin copies it
+    #: into the wheel metadata, and this reads it back.
+    __version__ = _pkg_version("pyplotrs")
+except PackageNotFoundError:  # pragma: no cover - running from a source tree
+    __version__ = "0.0.0+unknown"
 
 
 def figure(figsize: tuple[float, float] = DEFAULT_FIGSIZE, *, theme=None,
@@ -107,6 +145,7 @@ def resolved_font_variants() -> list[tuple[str, str]]:
 
 
 __all__ = [
+    "__version__",
     "Axes", "Axes3D", "Figure", "GridSpec", "Mappable", "PolarAxes",
     "subplots", "subplot_mosaic", "figure",
     "colormaps", "Colormap", "get_cmap", "palettes", "color",

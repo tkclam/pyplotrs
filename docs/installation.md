@@ -36,9 +36,16 @@ print(plt.resolved_font_name())   # the body font resolved on this machine
 
 ## From source
 
-Building from source needs a **Rust toolchain** (1.80+) and
+Building from source needs a **Rust toolchain (1.92 or newer)** and
 [maturin](https://www.maturin.rs/). The project uses
 [uv](https://docs.astral.sh/uv/) in development, but any PEP 517 frontend works.
+
+!!! note "What a source build actually does"
+    It compiles ~110 crates with `lto = true` and `codegen-units = 1`, which
+    takes a few minutes and needs network access to fetch the registry the
+    first time. The build is entirely offline afterwards. You only need any of
+    this on a platform with no wheel — `pip install pyplotrs` downloads a
+    pre-built one on Linux, macOS and Windows, x86-64 and arm64.
 
 === "pip"
 

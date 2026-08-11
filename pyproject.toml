@@ -4,7 +4,12 @@ build-backend = "maturin"
 
 [project]
 name = "pyplotrs"
-version = "0.0.1"
+# Taken from `[workspace.package].version` in Cargo.toml, which is the single
+# source of truth. It used to be duplicated here as an independent literal with
+# nothing comparing the two, so a release could ship a wheel whose Python
+# metadata and Rust crates disagreed - and the release workflow, which checks
+# the git tag against the version, would have been checking only one of them.
+dynamic = ["version"]
 description = "A blazingly fast, publication-quality plotting library for Python, powered by Rust"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -34,14 +39,29 @@ keywords = [
     "pdf", "svg", "publication", "figures", "rust",
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    # 3, not 4: nothing has been released yet, the API is explicitly unstable
+    # below 1.0, and claiming Beta on a first upload is a promise about
+    # stability that has no evidence behind it.
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Developers",
     "Topic :: Scientific/Engineering :: Visualization",
+    "Topic :: Scientific/Engineering",
     "Topic :: Multimedia :: Graphics",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Rust",
-    "Operating System :: OS Independent",
+    # Not "OS Independent": that is the pure-Python marker, and this ships a
+    # compiled extension with a wheel per platform.
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
     "Typing :: Typed",
 ]
 
@@ -50,6 +70,7 @@ Homepage = "https://github.com/tkclam/pyplotrs"
 Documentation = "https://tkclam.github.io/pyplotrs/"
 Repository = "https://github.com/tkclam/pyplotrs"
 Issues = "https://github.com/tkclam/pyplotrs/issues"
+Changelog = "https://tkclam.github.io/pyplotrs/about/changelog/"
 
 [project.optional-dependencies]
 # Documentation build: `mkdocs build` renders the site under docs/.
