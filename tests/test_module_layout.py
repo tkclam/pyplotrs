@@ -18,7 +18,8 @@ import pathlib
 
 import pytest
 
-PKG = pathlib.Path(__file__).resolve().parent.parent / "python" / "pyplotrs"
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+PKG = ROOT / "python" / "pyplotrs"
 
 #: No module in the drawing layer should get near the old figure.py again.
 #: `axes.py` is the legitimately large one - it is the whole 2D mark surface -
@@ -98,3 +99,109 @@ def test_the_drawing_layer_never_imports_figure(name):
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "_figure":
             pytest.fail(f"{name}.py imports _figure.py")
+
+
+# -- syntax the declared floor can actually parse ----------------------------
+
+def test_no_source_file_uses_post_39_syntax():
+    """`requires-python = ">=3.9"` has to be true of the *syntax*, not just the
+    APIs.
+
+    The `checks` job runs 3.11 and the wheel jobs run a prebuilt wheel, so a
+    3.12-only construct in the source tree would only surface for a user
+    building from an sdist on 3.9 - the platform with no wheel, i.e. the one
+    least able to diagnose it.
+
+    Caught here rather than by review because the failure is a `SyntaxError` at
+    *import*, so a single one takes the whole module with it. This suite had
+    one: an f-string whose expression contained a backslash, legal only from
+    3.12 (PEP 701).
+    """
+    import re
+
+    offenders = []
+    roots = [PKG, ROOT / "tests", ROOT / "examples", ROOT / "tools", ROOT / "benchmarks"]
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*.py")):
+            if "_vendor" in path.parts:
+                continue
+            for lineno, line in enumerate(path.read_text().splitlines(), 1):
+                if 'f"' not in line and "f'" not in line:
+                    continue
+                for expr in re.findall(r"\{([^{}]*)\}", line):
+                    if "\\" in expr:
+                        offenders.append(
+                            f"{path.relative_to(ROOT)}:{lineno} - backslash in an "
+                            f"f-string expression needs 3.12"
+                        )
+    assert not offenders, "\n".join(offenders)
+
+
+def test_the_package_compiles_under_the_declared_floor():
+    """Compile every shipped module with the oldest feature set we claim.
+
+    `ast.parse(feature_version=...)` rejects syntax newer than the given minor
+    version, so this catches match statements, `except*` and the f-string
+    relaxations without needing a 3.9 interpreter on the machine. It covers the
+    *package* only: tests and dev tools are run by the developer, not by a user
+    on the floor version.
+    """
+    import ast
+
+    floor = (3, 9)
+    offenders = []
+    for path in sorted(PKG.rglob("*.py")):
+        if "_vendor" in path.parts:
+            continue
+        try:
+            ast.parse(path.read_text(), filename=str(path), feature_version=floor)
+        except SyntaxError as exc:
+            offenders.append(
+                f"{path.relative_to(ROOT)}:{exc.lineno} - {exc.msg} "
+                f"(needs newer than {floor[0]}.{floor[1]})"
+            )
+    assert not offenders, (
+        "pyproject declares requires-python >= 3.9:\n" + "\n".join(offenders)
+    )
+
+
+def test_annotations_are_never_evaluated_at_import_on_the_floor_version():
+    """PEP 604 (`int | None`) is 3.10 syntax *when evaluated*.
+
+    It parses fine on 3.9 - annotations are only a syntax error at runtime, when
+    the interpreter builds the object - so `ast.parse` above cannot see this.
+    What makes it safe is `from __future__ import annotations`, which turns every
+    annotation into a string that is never evaluated.
+
+    Every module in the package has that import except `__init__.py`, which is
+    also the only one a user imports directly, so this checks the pairing rather
+    than assuming it: a module either has the future import, or it uses no
+    PEP 604 union anywhere.
+    """
+    import ast
+
+    offenders = []
+    for path in sorted(PKG.rglob("*.py")):
+        if "_vendor" in path.parts:
+            continue
+        tree = ast.parse(path.read_text(), filename=str(path))
+        deferred = any(
+            isinstance(node, ast.ImportFrom)
+            and node.module == "__future__"
+            and any(alias.name == "annotations" for alias in node.names)
+            for node in tree.body
+        )
+        if deferred:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+                # A `|` between names/subscripts in an annotation position.
+                if isinstance(node.left, (ast.Name, ast.Subscript, ast.Constant)):
+                    offenders.append(
+                        f"{path.relative_to(ROOT)}:{node.lineno} - PEP 604 union "
+                        f"without `from __future__ import annotations` is a "
+                        f"TypeError on Python 3.9"
+                    )
+    assert not offenders, "\n".join(offenders)
