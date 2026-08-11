@@ -34,4 +34,4 @@ for f in ../../../examples/*.py; do python "$f"; done
 | `subplots.py` | Shared-axis small multiples + figure legend |
 | `math_labels.py` | LaTeX `$...$` math in titles/labels/legend |
 | `annotations.py` | Text and callout-arrow annotations |
-| `animation_wave.py` | Animated GIF (travelling wave) |
+| `animation_wave.py` | Animated GIF (traveling wave) |

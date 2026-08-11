@@ -22,7 +22,7 @@ hidden "current figure" — `fig` and `ax` are ordinary objects you hold onto.
 ## Adding marks
 
 An `Axes` carries a vocabulary of *marks*. Calls are chainable and the palette
-cycles automatically, so each series gets a distinct, colorblind-safe colour:
+cycles automatically, so each series gets a distinct, colorblind-safe color:
 
 ```python
 import math

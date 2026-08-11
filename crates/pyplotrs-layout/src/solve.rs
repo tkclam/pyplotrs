@@ -83,7 +83,7 @@ pub struct FigureSpec {
     /// (in `cells` order). `None` = a plain uniform grid (the default).
     pub spans: Option<Vec<(usize, usize, usize, usize)>>,
     /// Relative column widths, one per column. `None` = all equal. Values are
-    /// normalised, so `[2.0, 1.0]` and `[0.5, 0.25]` mean the same thing; the
+    /// normalized, so `[2.0, 1.0]` and `[0.5, 0.25]` mean the same thing; the
     /// ratios apply to the *cell* including its label bands, matching
     /// matplotlib's `width_ratios`.
     pub width_ratios: Option<Vec<f64>>,
@@ -340,7 +340,7 @@ mod tests {
         assert!((b.x - a.x1() - 12.0).abs() < 1e-9, "gutter changed");
     }
 
-    /// Ratios are normalised, so only their proportions matter.
+    /// Ratios are normalized, so only their proportions matter.
     #[test]
     fn width_ratios_are_scale_invariant() {
         let a = solve(&spec_with_ratios(Some(vec![3.0, 1.0])));

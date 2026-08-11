@@ -85,10 +85,10 @@ pub struct Frame {
     pub yspan: f64,
     pub zmin: f64,
     pub zspan: f64,
-    /// Device centre of the plot rect.
+    /// Device center of the plot rect.
     pub ccx: f64,
     pub ccy: f64,
-    /// Centre of the projected cube's screen bbox.
+    /// Center of the projected cube's screen bbox.
     pub scx: f64,
     pub scy: f64,
     /// Screen-to-device scale (already includes the cube fill factor).

@@ -15,13 +15,13 @@ import pyplotrs as plt
 from pyplotrs.theme import parse_color
 
 
-# -- colour parsing ----------------------------------------------------------
+# -- color parsing ----------------------------------------------------------
 
 def test_float_rgb_is_not_truncated_to_black():
-    """``(0.2, 0.4, 0.6)`` is matplotlib's colour convention: floats in 0-1.
+    """``(0.2, 0.4, 0.6)`` is matplotlib's color convention: floats in 0-1.
 
     pyplotrs took byte tuples and ran them through ``int()``, so every float
-    colour silently collapsed to black with no error - the worst kind of bug for
+    color silently collapsed to black with no error - the worst kind of bug for
     someone porting a script over.
     """
     palette = plt.themes.default.palette
@@ -117,7 +117,7 @@ def test_errorbar_draws_line_and_markers_on_a_log_axis(tmp_path):
 def test_errorbar_respects_log_positions(tmp_path):
     """The connecting line must be drawn through log-transformed positions, not
     linear ones. On a log axis with decade-spaced data the polyline is straight,
-    so its midpoint sits at the vertical centre of the plot area."""
+    so its midpoint sits at the vertical center of the plot area."""
     fig, ax = plt.subplots(figsize=(300, 300))
     ax.errorbar([1, 10, 100], [1, 10, 100], yerr=[0.1, 1, 10])
     ax.set(xscale="log", yscale="log")
@@ -182,7 +182,7 @@ def test_absurd_raster_size_raises_instead_of_aborting(tmp_path):
 
     Rust's allocator *aborts the process* on OOM rather than returning, so the
     size has to be rejected before allocation - ``Pixmap::new`` returning
-    ``None`` is not a defence that can be relied on.
+    ``None`` is not a defense that can be relied on.
     """
     fig, ax = plt.subplots(figsize=(4000, 3000), units="in")
     ax.line([0, 1], [0, 1])
@@ -192,7 +192,7 @@ def test_absurd_raster_size_raises_instead_of_aborting(tmp_path):
 
 def test_empty_animation_raises():
     """Caught in Python before it reaches Rust; the Rust-side empty-frames check
-    is defence in depth for any other caller of the encoder."""
+    is defense in depth for any other caller of the encoder."""
     with pytest.raises(ValueError, match="positive int"):
         plt.animate(lambda i: plt.subplots()[0], 0)
 
@@ -292,7 +292,7 @@ def test_degenerate_band_draws_nothing(tmp_path):
 def test_hexbin_output_is_reproducible(tmp_path):
     """`hexbin` binned into two `HashMap`s and emitted them in iteration order,
     which Rust randomizes per process. The same data therefore drew its
-    hexagons in a different order on every run, and since neighbours share an
+    hexagons in a different order on every run, and since neighbors share an
     edge, the pixels on that edge changed too - so a figure was not
     reproducible and could not be golden-tested.
 
@@ -365,7 +365,7 @@ def test_data_extent_defaults_are_pinned():
 def test_bar_leaves_a_gap_between_category_slots():
     """The default above, checked where it is visible rather than in a
     signature: three categories one unit apart, so a bar spans half the gap
-    between neighbours and half the slot stays empty."""
+    between neighbors and half the slot stays empty."""
     fig, ax = plt.subplots(figsize=(300, 200))
     ax.bar(["a", "b", "c"], [1.0, 2.0, 3.0])
     mark = ax._marks[0]
@@ -457,7 +457,7 @@ def test_secondary_axis_reserves_a_band(method, loc, tmp_path):
     """The band is real: adding a secondary axis has to grow the reserved band
     on the side it sits on, which is what costs it plot area. Without this,
     "the ticks are on the canvas" could be satisfied by an axis that draws over
-    its neighbours and still renders.
+    its neighbors and still renders.
 
     `loc` maps to the band it shares: top -> title, bottom -> x ticks,
     left -> y ticks, right -> the colorbar/twin column.

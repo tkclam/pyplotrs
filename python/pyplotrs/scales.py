@@ -9,7 +9,7 @@ they only ever see an affine map over *transformed* space (see
 ``Axes._draw``/``_draw_mark`` in :mod:`pyplotrs.figure`).
 
 :class:`LinearScale` is the default and is bit-for-bit identical to the previous
-linear-only behaviour (its ``transform`` is the identity and its ``ticks`` defer
+linear-only behavior (its ``transform`` is the identity and its ``ticks`` defer
 to the Rust ``nice_ticks`` locator). Nonlinear scales (log, symlog, ...) override
 ``transform``/``inverse``/``ticks`` and set ``is_identity = False`` so the figure
 knows to pre-transform mark coordinates before the affine fast path.

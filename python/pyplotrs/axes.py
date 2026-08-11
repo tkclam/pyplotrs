@@ -1,6 +1,6 @@
 """The 2D :class:`Axes`: a coordinate system plus a stack of marks.
 
-Also holds :class:`_AxesBase` - the contract every axes kind shares (colour
+Also holds :class:`_AxesBase` - the contract every axes kind shares (color
 cycling, the mark ordering rule, legends, the ``get_*`` readers) - and
 :class:`_Mappable`, the handle a colormapped mark returns for
 :meth:`Figure.colorbar`.
@@ -89,10 +89,10 @@ class _Mappable:
 
 
 class _AxesBase:
-    """State and behaviour every axes class shares.
+    """State and behavior every axes class shares.
 
     ``Axes``, ``Axes3D`` and ``PolarAxes`` are separate coordinate systems, but
-    they are all "a theme, a colour cycle and a stack of labelled marks". That
+    they are all "a theme, a color cycle and a stack of labeled marks". That
     much used to be written out three times - ``_next_color`` byte-identically,
     ``legend`` differing only in its default position, and the legend-entry
     normalization twice over - which is how the ``barh`` legend crash and the
@@ -144,9 +144,9 @@ class _AxesBase:
         return sorted(seq, key=lambda m: m.get("zorder", 0.0))
 
     def _mark_color(self, color, alpha: float = 1.0):
-        """The resolved colour for a mark, with ``alpha`` folded in.
+        """The resolved color for a mark, with ``alpha`` folded in.
 
-        Folding opacity into the colour here is what lets every mark take an
+        Folding opacity into the color here is what lets every mark take an
         ``alpha`` without each draw branch having to know about it - the IR
         carries RGBA throughout, so there is nothing else to plumb.
         """
@@ -172,7 +172,7 @@ class _AxesBase:
         return self._title
 
     def get_legend_handles_labels(self) -> tuple[list[dict], list[str]]:
-        """``(handles, labels)`` for the labelled marks, in draw order.
+        """``(handles, labels)`` for the labeled marks, in draw order.
 
         A handle is the mark's own dict: pyplotrs has no Artist objects, and
         the mark *is* what the legend key gets drawn from."""
@@ -182,7 +182,7 @@ class _AxesBase:
     def legend(self, *, loc: str | None = None, ncol: int = 1,
                title: str | None = None, frameon: bool = True,
                fontsize: float | None = None):
-        """Enable an auto-legend over this axes' labelled marks.
+        """Enable an auto-legend over this axes' labeled marks.
 
         ``loc`` is ``best`` / ``upper right`` / ``upper left`` / ``lower right``
         / ``lower left`` / ``upper center`` / ``lower center``; ``None`` uses
@@ -203,12 +203,12 @@ class _AxesBase:
         return self
 
     def _legend_entries(self) -> list[dict]:
-        """The labelled marks to draw legend keys for.
+        """The labeled marks to draw legend keys for.
 
         3D and polar marks carry projection-specific fields, so they are
         normalized here into the line/scatter shapes the shared glyph drawer
         understands. Colormapped kinds (surface, trisurf, contour3d) carry no
-        single data colour, so they store a representative swatch colour (their
+        single data color, so they store a representative swatch color (their
         colormap's midpoint, or the middle level) at mark-construction time for
         exactly this purpose. :class:`Axes` overrides this to pass its marks
         through untouched, since its glyph drawer has real branches for
@@ -419,7 +419,7 @@ class Axes(_AxesBase):
             "xs": xs,
             "ys": ys,
             "label": label,
-            # A colormapped scatter's per-point colours replace this, but it is
+            # A colormapped scatter's per-point colors replace this, but it is
             # still the legend swatch and the fallback, so it must follow the theme.
             "color": (self._mark_color(color, alpha) if c is None
                       else self._theme.text_color),
@@ -446,7 +446,7 @@ class Axes(_AxesBase):
         may be strings (categories), which set a categorical x-axis.
 
         ``width`` is a **data extent** in x units, not a stroke width: at the
-        default 0.5 a bar fills half the gap to its neighbour. This is narrower
+        default 0.5 a bar fills half the gap to its neighbor. This is narrower
         than matplotlib's 0.8 on purpose - the gap is what makes bars read as
         discrete categories at the default single-column figure size."""
         xs = self._coords(x, "x")
@@ -582,7 +582,7 @@ class Axes(_AxesBase):
         return self
 
     def _map_colors(self, values, cmap, norm, vmin, vmax):
-        """``(colormap, norm, rgba_per_value)`` for the per-element coloured
+        """``(colormap, norm, rgba_per_value)`` for the per-element colored
         types (hexbin, pcolormesh). The mapping itself runs in Rust - see
         :func:`_rgba_values`."""
         vals = _to_f64(values)
@@ -741,7 +741,7 @@ class Axes(_AxesBase):
             "origin": origin,
             "alpha": float(alpha),
             "label": label,
-            # A colormapped mark has no single colour, so its legend key is the
+            # A colormapped mark has no single color, so its legend key is the
             # colormap's midpoint - the one swatch that reads as "this map".
             "color": _with_alpha(cm(0.5), alpha),
         })
@@ -949,7 +949,7 @@ class Axes(_AxesBase):
             "kind": "contour", "segs": segs, "xcoords": xc, "ycoords": yc,
             "colors": lcolors, "label": label,
             "linewidth": self._theme.line_width if linewidth is None else float(linewidth),
-            # Legend key: the middle level's colour stands for the line set.
+            # Legend key: the middle level's color stands for the line set.
             "color": lcolors[len(lcolors) // 2] if lcolors else self._theme.palette[0],
             "extent": (min(xc), max(xc), min(yc), max(yc)),
         })
@@ -1373,7 +1373,7 @@ class Axes(_AxesBase):
 
         ``ha`` is ``left``/``center``/``right``; ``va`` is
         ``baseline``/``bottom``/``center``/``top``. ``s`` may contain ``$...$``
-        math. ``color`` defaults to the theme text colour. ``weight`` is
+        math. ``color`` defaults to the theme text color. ``weight`` is
         ``normal`` or ``bold`` and ``style`` is ``normal`` or ``italic``; both
         select a real face of the body family, so the glyphs are genuinely bold
         or italic rather than synthetically slanted.
@@ -1955,7 +1955,7 @@ class Axes(_AxesBase):
         proj = _Proj(sx, sy, (ax_c, bx_c, ay_c, by_c),
                      self._xscale.code, self._yscale.code)
 
-        # Theme: locals shadow the module defaults (sizes/colours) for this axes.
+        # Theme: locals shadow the module defaults (sizes/colors) for this axes.
         t = self._theme
         _TICK_LABEL_SIZE = t.tick_label_size
         _AXIS_LABEL_SIZE = t.axis_label_size
@@ -2235,7 +2235,7 @@ class Axes(_AxesBase):
             child._draw(scene, _layout_cell(cell, bands), cxr, cyr, cxt, cyt)
 
     def _draw_side_label(self, scene, band, plot, text, right: bool) -> None:
-        """A rotated axis label centred in ``band``, reading top-to-bottom on the
+        """A rotated axis label centered in ``band``, reading top-to-bottom on the
         right (matching a twinx's y label) and bottom-to-top on the left
         (matching the primary y label)."""
         t = self._theme
@@ -2723,7 +2723,7 @@ class Axes(_AxesBase):
             return
 
         # Strip aligned vertically with the plot area, `shrink`ed about its
-        # centre so a short bar stays opposite the middle of the data.
+        # center so a short bar stays opposite the middle of the data.
         strip_x = band.x + _CBAR_GAP
         strip_h = plot.h * shrink
         strip_y = plot.y + (plot.h - strip_h) / 2.0
@@ -2834,7 +2834,7 @@ class Axes(_AxesBase):
     # -- legend -------------------------------------------------------------
 
     def _legend_entries(self) -> list[dict]:
-        """Labelled 2D marks, passed through with their kind intact so the glyph
+        """Labeled 2D marks, passed through with their kind intact so the glyph
         drawer can pick a swatch for bar/hist/fill and a rule for lines.
 
         A pie is the one mark whose labels are per-*wedge* rather than

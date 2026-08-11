@@ -33,8 +33,8 @@ _OKABE_ITO: tuple[RGBA, ...] = (
     (0, 0, 0, 255),        # C7 black
 )
 
-# Print-safe categorical greys (distinguishable on white without colour); pair
-# with distinct line styles / markers for fully grey-scale-robust figures.
+# Print-safe categorical grays (distinguishable on white without color); pair
+# with distinct line styles / markers for fully grayscale-robust figures.
 _GREYS: tuple[RGBA, ...] = (
     (0, 0, 0, 255),
     (120, 120, 120, 255),
@@ -45,7 +45,7 @@ _GREYS: tuple[RGBA, ...] = (
 )
 
 
-#: The CSS Color Module Level 4 named colours, which are also matplotlib's
+#: The CSS Color Module Level 4 named colors, which are also matplotlib's
 #: ``xkcd``-free named set. Kept as a plain dict so no table is built at import.
 _CSS_COLORS: dict[str, tuple[int, int, int]] = {
     "aliceblue": (240, 248, 255), "antiquewhite": (250, 235, 215),
@@ -157,15 +157,15 @@ def _is_unit_float_tuple(values) -> bool:
 
 
 def parse_color(color, palette: tuple[RGBA, ...]) -> RGBA:
-    """Resolve a colour spec to RGBA against ``palette``.
+    """Resolve a color spec to RGBA against ``palette``.
 
     Accepts, in order:
 
-    * ``"C0".."Cn"`` - index ``palette`` (cycling). This is the one place colour
-      strings are interpreted, so ``"C3"`` means *this theme's* fourth colour,
+    * ``"C0".."Cn"`` - index ``palette`` (cycling). This is the one place color
+      strings are interpreted, so ``"C3"`` means *this theme's* fourth color,
       not a fixed global one.
     * ``"#rgb"``, ``"#rgba"``, ``"#rrggbb"``, ``"#rrggbbaa"`` hex.
-    * A CSS colour name (``"red"``, ``"steelblue"``), case-insensitive.
+    * A CSS color name (``"red"``, ``"steelblue"``), case-insensitive.
     * A 3- or 4-component tuple. **All-float tuples in 0-1 are treated as
       matplotlib-style fractions** and scaled to bytes; anything else is taken as
       literal 0-255 bytes. Alpha follows the same convention as its tuple.
@@ -241,7 +241,7 @@ class Theme:
         return self.axes_facecolor if self.axes_facecolor is not None else (255, 255, 255, 255)
 
     def resolve(self, color) -> RGBA:
-        """Resolve a colour spec against this theme's palette (see
+        """Resolve a color spec against this theme's palette (see
         :func:`parse_color`)."""
         return parse_color(color, self.palette)
 
@@ -267,7 +267,7 @@ nature = Theme(
     line_width=1.2,
 )
 
-#: Print-safe grey-scale preset: monochrome palette, black spines/text.
+#: Print-safe grayscale preset: monochrome palette, black spines/text.
 grayscale = Theme(
     palette=_GREYS,
     spine_color=(0, 0, 0, 255),

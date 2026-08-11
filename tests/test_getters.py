@@ -110,7 +110,7 @@ def test_legend_handles_and_labels():
     fig, ax = plt.subplots()
     ax.line([0, 1], [0, 1], label="one")
     ax.scatter([0], [0], label="two")
-    ax.line([0, 1], [1, 0])  # unlabelled, must not appear
+    ax.line([0, 1], [1, 0])  # unlabeled, must not appear
     handles, labels = ax.get_legend_handles_labels()
     assert labels == ["one", "two"]
     assert [h["kind"] for h in handles] == ["line", "scatter"]

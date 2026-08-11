@@ -137,9 +137,9 @@ def test_alpha_reaches_the_marks_colour(name, call):
     through the draw branches - but it does have to actually be folded in."""
     fig, ax = plt.subplots()
     call(ax, 0.4)
-    colours = [m["color"] for m in ax._marks if "color" in m]
-    assert colours, f"{name} recorded no colour"
-    assert all(c[3] < 255 for c in colours), f"{name} ignored alpha: {colours}"
+    colors = [m["color"] for m in ax._marks if "color" in m]
+    assert colors, f"{name} recorded no color"
+    assert all(c[3] < 255 for c in colors), f"{name} ignored alpha: {colors}"
 
 
 def test_alpha_of_one_leaves_the_colour_untouched():
@@ -192,8 +192,8 @@ def test_colour_cycle_advances_once_per_mark():
     fig, ax = plt.subplots()
     for _ in range(3):
         ax.line([0, 1], [0, 1])
-    colours = [m["color"] for m in ax._marks]
-    assert len(set(colours)) == 3, f"cycle did not advance: {colours}"
+    colors = [m["color"] for m in ax._marks]
+    assert len(set(colors)) == 3, f"cycle did not advance: {colors}"
 
 
 def test_explicit_colour_does_not_consume_the_cycle():
@@ -297,7 +297,7 @@ def test_explicit_loc_is_still_honoured(tmp_path):
     "_SUPTITLE_SIZE",
 ])
 def test_style_constants_do_not_shadow_the_theme(name):
-    """`figure.py` used to carry its own copies of the theme's palette, colours
+    """`figure.py` used to carry its own copies of the theme's palette, colors
     and type scale, which draw methods shadowed with theme-derived locals. Any
     method that forgot to re-shadow silently drew the module default instead -
     that is how the hardcoded legend swatch size and the white histogram edges
@@ -317,11 +317,11 @@ def test_polar_rim_follows_the_theme(tmp_path):
     out = tmp_path / "p.svg"
     fig.save(str(out))
     svg = out.read_text().lower()
-    assert "#c81e1e" in svg, "polar rim ignored the theme's spine colour"
+    assert "#c81e1e" in svg, "polar rim ignored the theme's spine color"
 
 
 def test_colormapped_scatter_placeholder_follows_the_theme():
-    """Its per-point colours replace this, but it is still the legend swatch."""
+    """Its per-point colors replace this, but it is still the legend swatch."""
     theme = plt.themes.default.with_(text_color=(10, 20, 30, 255))
     fig, ax = plt.subplots(theme=theme)
     ax.scatter([0, 1], [0, 1], c=[0.0, 1.0])
@@ -490,7 +490,7 @@ def test_pie_wedges_become_one_legend_entry_each():
     assert [e["label"] for e in ax._legend_entries()] == ["a", "b", "c"]
 
 
-# -- the contract, checked by behaviour rather than by signature --------------
+# -- the contract, checked by behavior rather than by signature --------------
 #
 # Every audit so far has found the same bug: a contract that held for the marks
 # it was written against and silently missed the ones added afterwards. Phase 5
@@ -600,9 +600,9 @@ def test_alpha_is_applied_not_merely_accepted(name, tmp_path):
     """Render at two alphas and compare bytes.
 
     Accepting the keyword proves nothing: the colormapped kinds have no single
-    colour to fold it into, so it has to ride their LUT or their colour list,
+    color to fold it into, so it has to ride their LUT or their color list,
     and a mark that takes `alpha` and drops it looks identical to one that
-    honours it until you actually rasterize both.
+    honors it until you actually rasterize both.
     """
     def render(a):
         fig, ax = plt.subplots(figsize=(180, 140))

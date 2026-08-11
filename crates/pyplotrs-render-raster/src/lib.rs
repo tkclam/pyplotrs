@@ -209,7 +209,7 @@ const STAMP_MAX_PX: f32 = 96.0;
 
 /// Largest raster we will try to allocate, in bytes (4 GB - about a 32000 x
 /// 32000 px image). Past this the request is almost certainly a units or dpi
-/// mistake, and honouring it would abort the process instead of raising.
+/// mistake, and honoring it would abort the process instead of raising.
 const MAX_RASTER_BYTES: f64 = 4.0e9;
 
 fn render_markers(
@@ -784,7 +784,7 @@ fn render_pixmap_banded(
     // Bound the raster *before* allocating. A big figure at a big dpi is an
     // easy mistake (a 4000x3000 in poster at 2400 dpi asks for 276 TB), and
     // Rust's allocator aborts the process on OOM rather than returning - so
-    // `Pixmap::new` returning `None` is not a defence we can rely on. Check the
+    // `Pixmap::new` returning `None` is not a defense we can rely on. Check the
     // arithmetic in f64 to avoid overflowing the multiply itself.
     let bytes = (width as f64) * (height as f64) * 4.0;
     if bytes > MAX_RASTER_BYTES {
@@ -843,7 +843,7 @@ fn render_pixmap_banded(
 /// Render `scene` to PNG-encoded bytes at `dpi` (dots per inch). The output
 /// carries a `pHYs` chunk recording its physical size, so consumers such as
 /// LaTeX `\includegraphics` place it at the intended dimensions. `transparent`
-/// drops the white page fill in favour of an alpha channel.
+/// drops the white page fill in favor of an alpha channel.
 pub fn render_png(scene: &Scene, dpi: f64, transparent: bool) -> Result<Vec<u8>, String> {
     let dpi = if dpi.is_finite() && dpi > 0.0 {
         dpi
@@ -877,7 +877,7 @@ fn encode_png_with_dpi(pixmap: Pixmap, dpi: f64, transparent: bool) -> Result<Ve
 ///
 /// `scale` is device-pixels per scene-point (dpi/72); `delay_cs` is the
 /// per-frame delay in centiseconds (GIF's native unit); `infinite` selects
-/// looping vs. play-once. Each frame is quantized to its own ≤256-colour
+/// looping vs. play-once. Each frame is quantized to its own ≤256-color
 /// palette via NeuQuant (`gif`'s `from_rgba_speed`). All frames share frame 0's
 /// canvas size — the caller (Python `Animation`) guarantees a uniform figsize.
 ///
@@ -914,7 +914,7 @@ pub fn render_gif(
             }
             let mut rgba = pm.data().to_vec();
             // speed 10: a balance between NeuQuant quality (1) and speed (30) —
-            // plots have few distinct colours so quantization is near-lossless.
+            // plots have few distinct colors so quantization is near-lossless.
             let mut frame = gif::Frame::from_rgba_speed(w, h, &mut rgba, 10);
             frame.delay = delay_cs;
             Ok(frame)
@@ -943,7 +943,7 @@ pub fn render_gif(
 
 /// Render a sequence of equally-sized scenes to an animated PNG (APNG).
 ///
-/// Unlike GIF, APNG keeps full 8-bit-per-channel colour (no palette
+/// Unlike GIF, APNG keeps full 8-bit-per-channel color (no palette
 /// quantization), so it's the high-fidelity animation format. `delay_num`/
 /// `delay_den` give the per-frame delay as a fraction of a second; `infinite`
 /// loops forever (`num_plays = 0`) vs. play-once (`num_plays = 1`). The output
@@ -1101,7 +1101,7 @@ mod tests {
     }
 
     /// The same invariant for a *colormapped* scatter, where the tiles carry
-    /// coverage only and each point tints them. Without this, the tinting maths
+    /// coverage only and each point tints them. Without this, the tinting math
     /// (premultiplying by the point's color and its alpha) could be wrong in a
     /// way no other test would notice - the previous code sidestepped the whole
     /// fast path here and filled one path per point.
@@ -1238,7 +1238,7 @@ mod tests {
     /// - **Images.** A band shifts the transform, and tiny-skia inverts it in
     ///   `f32` to sample the pattern, so a destination row whose source
     ///   coordinate sits almost exactly on a source-pixel boundary can round to
-    ///   the neighbouring row. That costs one destination row per seam, and the
+    ///   the neighboring row. That costs one destination row per seam, and the
     ///   error is bounded by how much adjacent source rows differ - a few units
     ///   out of 255 for the colormapped images plots actually contain.
     ///

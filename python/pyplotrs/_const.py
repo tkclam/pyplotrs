@@ -1,4 +1,4 @@
-"""Shared spacing, colour and unit constants for the figure layer.
+"""Shared spacing, color and unit constants for the figure layer.
 
 One definition each, imported by every module that draws. Phase 5 deleted a
 second copy of these that shadowed `theme.py`; keeping them in one module

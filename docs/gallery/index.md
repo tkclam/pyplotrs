@@ -176,7 +176,7 @@ PNG into the current directory.)
 
 ### Animation
 
-![travelling wave](images/animation_wave.gif){ width="420" }
+![traveling wave](images/animation_wave.gif){ width="420" }
 
 ```python
 --8<-- "examples/animation_wave.py"

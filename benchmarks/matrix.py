@@ -111,7 +111,7 @@ def _build_pyplotrs(mark: str, n: int, nrows: int, ncols: int):
 #: Untimed warm-up saves before measuring, then the number of measured repeats
 #: (the minimum is reported). Both libraries do first-call work that has nothing
 #: to do with the workload - matplotlib builds its font cache, pyplotrs resolves
-#: and memoises the system font - and charging that to whichever cell happens to
+#: and memoizes the system font - and charging that to whichever cell happens to
 #: run first is how the old single-shot harness produced a "27x" headline that
 #: was really a warm-up artifact.
 WARMUP = 1

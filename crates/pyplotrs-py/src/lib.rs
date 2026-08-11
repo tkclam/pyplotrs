@@ -81,7 +81,7 @@ fn bundled_faces() -> [(FaceStyle, &'static [u8], &'static str); 4] {
     ]
 }
 
-/// System font database, built once. We load the host's fonts (honouring its
+/// System font database, built once. We load the host's fonts (honoring its
 /// fontconfig setup on Unix) and also register the bundled Liberation Sans, so
 /// the preferred-family lookup can always find a metric-compatible sans-serif
 /// even on a machine with no fonts of its own.
@@ -137,7 +137,7 @@ fn default_sans_serif() -> Vec<String> {
 }
 
 /// User-configured preferred sans-serif families (matplotlib's
-/// `rcParams["font.sans-serif"]` analogue). `None` means "use the default"
+/// `rcParams["font.sans-serif"]` analog). `None` means "use the default"
 /// ([`default_sans_serif`]). Each name is tried in order against the host's
 /// installed fonts; the bundled Liberation Sans is always the final fallback.
 static SANS_SERIF: Mutex<Option<Vec<String>>> = Mutex::new(None);
@@ -180,7 +180,7 @@ impl FaceStyle {
     }
 }
 
-/// Memoised resolution of each body face: the resolved family name plus its
+/// Memoized resolution of each body face: the resolved family name plus its
 /// bytes, keyed by [`FaceStyle`]. Cleared whenever the preferred families change.
 static BODY_CACHE: Mutex<Option<HashMap<FaceStyle, ResolvedFace>>> = Mutex::new(None);
 
@@ -229,7 +229,7 @@ fn resolve_from_host(families: &[String], face: FaceStyle) -> ResolvedFace {
         .unwrap_or_else(|| bundled_body(face))
 }
 
-/// Resolve the body font (family name + bytes), memoised. Walks the preferred
+/// Resolve the body font (family name + bytes), memoized. Walks the preferred
 /// families (default: Arial, Helvetica, then bundled Liberation Sans) against
 /// the host's installed fonts, falling back to the bundled font when none
 /// match. The resolved font is embedded into saved figures, so the choice
@@ -1641,7 +1641,7 @@ fn cube_screen_bbox(elev: f64, azim: f64) -> (f64, f64, f64, f64) {
 /// Project data-space vertices to device space through the 3D camera, in one
 /// pass. Returns `(device_x, device_y, depth)`, parallel to the inputs.
 ///
-/// This is the 3D analogue of `add_line_xform`'s in-Rust transform. Projecting
+/// This is the 3D analog of `add_line_xform`'s in-Rust transform. Projecting
 /// in Python cost a camera call, three dot products and a device map per
 /// vertex, which was about a quarter of a 3D save and the reason `line3d` was
 /// the last workload still losing to matplotlib.
@@ -1803,7 +1803,7 @@ fn scenes_to_gif<'py>(
 }
 
 /// Encode a sequence of equally-sized [`Scene`]s as an animated PNG (full
-/// colour, no palette quantization). `delay_num`/`delay_den` give the per-frame
+/// color, no palette quantization). `delay_num`/`delay_den` give the per-frame
 /// delay in seconds; `infinite` loops forever vs. plays once.
 #[pyfunction]
 #[pyo3(signature = (scenes, dpi, delay_num, delay_den, infinite=true))]

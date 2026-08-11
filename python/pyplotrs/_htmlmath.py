@@ -11,13 +11,13 @@ How it fits together:
   ``Scene`` in :class:`_MathCapture`. That proxy forwards every call verbatim
   **except** ``add_math`` for a ``$``-bearing string: it records the run's TeX,
   its final left-edge/baseline, its measured box ``(width, ascent, depth)``, its
-  colour, and the *composed* group transform in effect (so rotated axis/colorbar
+  color, and the *composed* group transform in effect (so rotated axis/colorbar
   labels are reproduced) -- and then **drops** the baked glyphs. Because the math
   glyph runs are never added, the bundled STIX math font is not embedded in the
   SVG either, so the SVG stays small.
 - :func:`figure_to_math_html` lays the figure's SVG at a fixed pixel size (1 SVG
   user unit = 1 CSS px) and places one absolutely-positioned ``<div>`` per math
-  run, centred on the exact ink box pyplotrs reserved, rotated by the captured
+  run, centered on the exact ink box pyplotrs reserved, rotated by the captured
   transform. MathJax (SVG output, fonts embedded) typesets those divs.
 - The whole MathJax library is inlined, so the page is fully offline.
 
@@ -92,7 +92,7 @@ class _MathCapture:
 
 def _mathjax_bundle() -> str:
     """The inlined MathJax library, cached. Any literal ``</script`` inside JS
-    string/regex literals is neutralised (``<\\/script`` is identical in JS) so
+    string/regex literals is neutralized (``<\\/script`` is identical in JS) so
     the inline ``<script>`` cannot be closed early."""
     global _bundle_cache
     if _bundle_cache is None:
@@ -101,7 +101,7 @@ def _mathjax_bundle() -> str:
     return _bundle_cache
 
 
-# Recognise pyplotrs' own ``$...$`` delimiter; don't auto-typeset the page (we
+# Recognize pyplotrs' own ``$...$`` delimiter; don't auto-typeset the page (we
 # typeset only our overlay divs, never the baked SVG text); SVG output with
 # fonts inlined keeps the file offline.
 _MATHJAX_CONFIG = (
@@ -121,10 +121,10 @@ _TYPESET = (
 
 
 def _overlay_div(p: dict) -> str:
-    """One absolutely-positioned MathJax div, centred on the pyplotrs ink box."""
+    """One absolutely-positioned MathJax div, centered on the pyplotrs ink box."""
     a, d, w = p["a"], p["d"], p["w"]
     A, B, C, D, E, F = p["xf"]
-    # Centre of the ink box in the run's *local* coords, then to absolute px.
+    # Center of the ink box in the run's *local* coords, then to absolute px.
     cxl = p["x"] + w / 2.0
     cyl = p["baseline"] + (d - a) / 2.0
     cx = A * cxl + C * cyl + E

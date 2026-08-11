@@ -194,7 +194,7 @@ class PolarAxes(_AxesBase):
             rgrid = list(_scales.nice_ticks(rmin, rmax, 5))
         rgrid = [(v, lab) for (v, lab) in rgrid if rmin < v <= rmax + 1e-9]
 
-        # 1. Radial spokes (theta gridlines) from the centre to the rim.
+        # 1. Radial spokes (theta gridlines) from the center to the rim.
         for deg in spokes:
             x1, y1 = to_dev(math.radians(deg), rmax)
             scene.add_path([(cx, cy), (x1, y1)], stroke_color=t.grid_color,
@@ -248,7 +248,7 @@ class PolarAxes(_AxesBase):
             _text(scene, plot.x + (plot.w - tw) / 2.0, layout.title.y + a, self._title,
                   t.title_size, t.text_color)
 
-        # 8. Auto-legend for labelled marks, inset in the plot rect.
+        # 8. Auto-legend for labeled marks, inset in the plot rect.
         if self._legend is not None:
             entries = self._legend_entries()
             if entries:

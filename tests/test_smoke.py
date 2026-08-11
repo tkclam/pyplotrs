@@ -181,7 +181,7 @@ def test_2d_mark_renders_with_legend(name, tmp_path, figure_factory):
 def test_transparent_png_drops_the_white_page_fill(tmp_path, figure_factory):
     """``save(path, transparent=True)`` should leave the page background at
     alpha 0 rather than opaque white, while an opaque save keeps it white -
-    and colours drawn over either must come out identical (the transparent
+    and colors drawn over either must come out identical (the transparent
     path demultiplies tiny-skia's premultiplied buffer before PNG-encoding)."""
     from conftest import read_png
 

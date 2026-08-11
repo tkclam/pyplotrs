@@ -1,8 +1,8 @@
 """Normalizations: map data values into ``[0, 1]`` for colormap lookup.
 
-A :class:`Normalize` (and its subclasses) is the colorbar/colormap analogue of a
+A :class:`Normalize` (and its subclasses) is the colorbar/colormap analog of a
 :class:`~pyplotrs.scales.Scale`: ``norm(value)`` returns the position in ``[0, 1]``
-a value occupies on the color axis, and ``norm.colorbar_ticks()`` locates labelled
+a value occupies on the color axis, and ``norm.colorbar_ticks()`` locates labeled
 ticks for a colorbar. Used by :meth:`pyplotrs.Axes.scatter` (``c=``) and
 :meth:`pyplotrs.Axes.imshow` (``norm=``).
 """
@@ -38,7 +38,7 @@ class Normalize:
     ``vmin``/``vmax`` left ``None`` are filled from the data by :meth:`autoscale`."""
 
     #: Rust ``apply_scale`` selector, mirroring :attr:`pyplotrs.scales.Scale.code`.
-    #: When set, bulk colour mapping runs in Rust via ``_core.map_colors``;
+    #: When set, bulk color mapping runs in Rust via ``_core.map_colors``;
     #: ``None`` means this norm has no Rust equivalent and each value must go
     #: through ``__call__`` in Python. Must name a branch ``apply_scale`` handles.
     code: str | None = "linear"

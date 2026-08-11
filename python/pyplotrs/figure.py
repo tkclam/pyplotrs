@@ -54,7 +54,7 @@ def _svg_to_html(svg: str, title: str, alt: str) -> str:
     The SVG is *inlined* (not referenced via ``<img>``), so the result is a
     single portable file that keeps real, selectable ``<text>`` and its embedded
     fonts; raster images inside the scene are already base64 data URIs, so the
-    page fetches nothing when viewed. The figure is centred and shrinks to fit
+    page fetches nothing when viewed. The figure is centered and shrinks to fit
     narrow viewports while never upscaling past its natural point size."""
     body = svg
     if body.startswith("<?xml"):  # the XML prolog is meaningless once inlined
@@ -122,7 +122,7 @@ class Figure:
         self.theme: Theme = _theme.get(theme)
         self.suptitle: str | None = None
         self._legend: dict | None = None
-        # Relative column widths / row heights. Normalised in the Rust solver, so
+        # Relative column widths / row heights. Normalized in the Rust solver, so
         # only the proportions matter; `None` means an even grid.
         self._width_ratios = None if width_ratios is None else [float(v) for v in width_ratios]
         self._height_ratios = (
@@ -200,7 +200,7 @@ class Figure:
         return self
 
     def _figure_legend_entries(self) -> list[dict]:
-        """Labelled marks across every axes, de-duplicated by label so a series
+        """Labeled marks across every axes, de-duplicated by label so a series
         shared between panels appears once in the figure legend.
 
         Routed through each axes' own ``_legend_entries``, so 3D and polar
@@ -225,7 +225,7 @@ class Figure:
 
         ``orientation="horizontal"`` puts the bar beneath the plot instead, in
         its own reserved band below the x-axis label. ``shrink`` scales the
-        strip's length as a fraction of the plot extent, centred. ``ticks``
+        strip's length as a fraction of the plot extent, centered. ``ticks``
         pins the tick values and ``format`` accepts anything
         :mod:`pyplotrs.ticker` does - a formatter, a ``"{x:.2f}"`` template, or
         a callable."""
@@ -354,7 +354,7 @@ class Figure:
         (``.pdf``, ``.svg``, ``.png``, or ``.html``/``.htm``).
 
         ``transparent=True`` drops the white page fill from ``.png`` output in
-        favour of an alpha channel. ``.pdf``/``.svg``/``.html`` paint no page
+        favor of an alpha channel. ``.pdf``/``.svg``/``.html`` paint no page
         background to begin with, so they are already "transparent" and ignore
         this flag.
 

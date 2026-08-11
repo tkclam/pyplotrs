@@ -8,7 +8,7 @@ rasterized and encoded to an animated **GIF** or **APNG**.
 --8<-- "examples/animation_wave.py"
 ```
 
-![travelling wave](../gallery/images/animation_wave.gif){ width="420" }
+![traveling wave](../gallery/images/animation_wave.gif){ width="420" }
 
 ## How it works
 
@@ -32,8 +32,8 @@ def render(i):
     return fig
 
 anim = plt.animate(render, frames=60, fps=24)
-anim.save("out.gif")     # 256-colour, broadly viewable
-anim.save("out.apng")    # full 8-bit colour, higher fidelity
+anim.save("out.gif")     # 256-color, broadly viewable
+anim.save("out.apng")    # full 8-bit color, higher fidelity
 ```
 
 Every frame must share the same figure size (the animation canvas is fixed).

@@ -3,7 +3,7 @@
 ## Themes
 
 A [`Theme`][pyplotrs.theme.Theme] bundles every *style* choice — palette, type
-scale, spines, grid, default line weights, legend colours. There is **no global
+scale, spines, grid, default line weights, legend colors. There is **no global
 "current theme"**: you pass a theme to `subplots` (or `Figure`) and it flows to
 every axes.
 
@@ -79,7 +79,7 @@ The default palette is **Okabe-Ito**, a colorblind-safe categorical set.
 
 For body text pyplotrs prefers the host's **Arial**, then **Helvetica**, before
 falling back to the bundled **Liberation Sans** (Arial-metric-compatible). It is
-matplotlib's `font.sans-serif` behaviour, and configurable:
+matplotlib's `font.sans-serif` behavior, and configurable:
 
 ```python
 import pyplotrs as plt

@@ -91,8 +91,8 @@ def _colormap_lut(cmap, alpha: float = 1.0) -> bytes:
     gradient, so building it once and reusing it still matters.
 
     ``alpha`` scales every entry's alpha channel, which is how the colormapped
-    marks (image / contourf) honour a mark-level ``alpha``: they have no single
-    colour to fold it into the way :meth:`_AxesBase._mark_color` does, so it
+    marks (image / contourf) honor a mark-level ``alpha``: they have no single
+    color to fold it into the way :meth:`_AxesBase._mark_color` does, so it
     rides the LUT instead and the Rust per-pixel loop needs no new argument. It
     is part of the cache key, so a translucent image cannot poison the opaque
     table (or vice versa).
@@ -177,9 +177,9 @@ def _draw_marker(scene, cx: float, cy: float, d: float, shape: str,
     r = d / 2.0
     if shape in ("+", "x"):
         # A stroke-only marker needs ink even when the caller supplied neither
-        # colour. This read `_BLACK`, which only ever existed as a *local*
+        # color. This read `_BLACK`, which only ever existed as a *local*
         # inside `Axes._draw`, so the branch raised `NameError`; nothing
-        # reached it because `scatter` resolves a colour first, but any other
+        # reached it because `scatter` resolves a color first, but any other
         # caller would have. A module constant would just re-create the
         # shadowing trap, so the floor is spelled out here.
         col = edgecolor or facecolor or (0, 0, 0, 255)
@@ -222,7 +222,7 @@ def _place_text(scene, dx: float, dy: float, s: str, size: float, color,
 
     ``rotation`` is degrees counter-clockwise about the anchor. It is applied
     as a group transform rather than anything text-specific: the IR already
-    carries an affine per group and all three backends honour it, so rotated
+    carries an affine per group and all three backends honor it, so rotated
     labels stay real selectable text in PDF and SVG instead of becoming paths.
     """
     tw = _tw(scene, s, size, font)
@@ -352,7 +352,7 @@ def _draw_legend_glyph(scene, m: dict, x0: float, x1: float, cy: float,
     cx = (x0 + x1) / 2.0
     if kind in _LEGEND_SWATCH_KINDS:
         h = size * 0.85
-        # Only the kinds that keep ``alpha`` beside an unfolded colour need it
+        # Only the kinds that keep ``alpha`` beside an unfolded color need it
         # applied here; the rest already carry it inside their RGBA, and
         # ``image`` stores an ``alpha`` for its LUT that must not double-apply.
         fill = (_with_alpha(color, m["alpha"]) if kind in ("fill", "broken_barh")

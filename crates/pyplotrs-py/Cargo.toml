@@ -20,7 +20,7 @@ pyplotrs-render-raster = { path = "../pyplotrs-render-raster" }
 pyplotrs-render-svg = { path = "../pyplotrs-render-svg" }
 pyo3 = { version = "0.28", features = ["extension-module"] }
 # Robust, cross-platform system-font discovery (same RazrFalcon ecosystem as
-# rustybuzz/ttf-parser already in the tree). `fontconfig` honours the host's
+# rustybuzz/ttf-parser already in the tree). `fontconfig` honors the host's
 # fontconfig directories/aliases on Unix so the Arial->Helvetica lookup finds
 # whatever the OS exposes; `memmap` avoids reading every system font into RAM.
 fontdb = { version = "0.23", default-features = false, features = ["fontconfig", "memmap"] }

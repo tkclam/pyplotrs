@@ -19,9 +19,9 @@ pub enum Draw {
     /// An editable text run (one or more shaped glyphs) at baseline `(x, y)`.
     Text { x: f32, y: f32, run: GlyphRun },
     /// A filled vector path (fraction bars, radical rule, stretchy glyph
-    /// outlines, accent dots), filled with the current text colour.
+    /// outlines, accent dots), filled with the current text color.
     Fill { path: BezPath },
-    /// A stroked vector path (accent marks), stroked with the text colour.
+    /// A stroked vector path (accent marks), stroked with the text color.
     Stroke { path: BezPath, width: f32 },
 }
 
@@ -198,7 +198,7 @@ fn atom_space(l: Class, r: Class, size: f32, level: usize) -> f32 {
     }
     let display_only = v < 0;
     if display_only && level > 0 {
-        return 0.0; // parenthesised entries vanish in script styles
+        return 0.0; // parenthesized entries vanish in script styles
     }
     // 1→thin(3mu), 2→med(4mu), 3→thick(5mu); 1mu = size/18.
     (v.unsigned_abs() as f32 + 2.0) * size / 18.0
@@ -684,7 +684,7 @@ impl<'a> Engine<'a> {
         }
         // named symbols
         if let Some((ch, class)) = tables::symbol(&name) {
-            // Big operators (∑ ∫ ∏ …) are centred on the math axis and enlarged
+            // Big operators (∑ ∫ ∏ …) are centered on the math axis and enlarged
             // in display style; everything else is an ordinary glyph.
             let layout = if class == Class::Op {
                 self.op_glyph(ch, size, disp)
@@ -896,7 +896,7 @@ impl<'a> Engine<'a> {
         }
     }
 
-    /// A big-operator glyph (∑ ∫ …), centred on the math axis and — in display
+    /// A big-operator glyph (∑ ∫ …), centered on the math axis and — in display
     /// style — grown to `displayOperatorMinHeight` via a vertical variant.
     fn op_glyph(&self, ch: char, size: f32, disp: bool) -> Layout {
         let axis = self.mf.axis_height(size);
@@ -911,7 +911,7 @@ impl<'a> Engine<'a> {
         let vink = self.mf.ink(vgid, size);
         let adv = self.mf.advance(vgid, size);
         let italic = self.mf.italic(vgid, size);
-        let s = (vink.y0 + vink.y1) / 2.0 - axis; // centre the glyph on the axis
+        let s = (vink.y0 + vink.y1) / 2.0 - axis; // center the glyph on the axis
         let ascent = (vink.y1 - s).max(0.0);
         let depth = (s - vink.y0).max(0.0);
         let (draws, lead, trail) = if vgid != gid {
@@ -953,7 +953,7 @@ impl<'a> Engine<'a> {
     }
 
     /// Place scripts as over/under *limits* (display-style big operators and
-    /// `\limits`), centred above and below the nucleus.
+    /// `\limits`), centered above and below the nucleus.
     fn attach_limits(
         &self,
         nucleus: Layout,
@@ -1238,7 +1238,7 @@ impl<'a> Engine<'a> {
         hb.finish()
     }
 
-    /// A delimiter glyph grown to ~`target` height and centred on the math
+    /// A delimiter glyph grown to ~`target` height and centered on the math
     /// `axis`. A genuine size variant is emitted as a filled outline (no plain
     /// codepoint); the base glyph stays editable text.
     fn stretchy_delim(&self, ch: char, size: f32, target: f32, axis: f32) -> Layout {

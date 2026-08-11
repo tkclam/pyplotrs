@@ -75,7 +75,7 @@ for k, ax in enumerate(axs):
 ## Figure-level chrome
 
 A `Figure` can carry a super-title and a single shared legend that collects the
-labelled marks of every panel into a reserved column (so it never overlaps the
+labeled marks of every panel into a reserved column (so it never overlaps the
 data):
 
 ```python

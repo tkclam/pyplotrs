@@ -21,7 +21,7 @@ alongside the fonts here and are shipped in the source distribution.
 
 For body text, pyplotrs prefers the host's **Arial**, then **Helvetica**, before
 falling back to the bundled Liberation Sans (matplotlib's `font.sans-serif`
-behaviour; configurable via `pyplotrs.set_font_family([...])`). **Arial and
+behavior; configurable via `pyplotrs.set_font_family([...])`). **Arial and
 Helvetica are proprietary** typefaces (Monotype / Linotype) and are *not*
 bundled or redistributed by pyplotrs — they are only ever used when already
 present on the user's machine.

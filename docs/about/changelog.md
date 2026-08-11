@@ -85,7 +85,7 @@ All notable changes to pyplotrs are documented here. The format is based on
 - **`alpha` and `label` on every 3D mark** (`surface`, `bar3d`,
   `plot_wireframe`, `contour3d`, `plot_trisurf`, `quiver3d`, `voxels`), not
   just `scatter`/`plot`. Colormapped kinds (`surface`, `trisurf`, `contour3d`)
-  now carry a legend swatch colour (their colormap's midpoint, or the middle
+  now carry a legend swatch color (their colormap's midpoint, or the middle
   level).
 - `figure.py` split from one 5,307-line file into seven layered modules
   (`_const`/`_util`/`_draw`/`_layout`/`axes`/`axes3d`/`polar`/`figure`),
@@ -98,9 +98,9 @@ All notable changes to pyplotrs are documented here. The format is based on
   into a gap at non-finite points and markers there are skipped, matching
   matplotlib.
 - `Figure.save` matches the file extension case-insensitively (`.PNG`, `.PDF`, …).
-- Float RGB colours in 0-1 (matplotlib's convention, e.g. `(0.2, 0.4, 0.6)`) are
+- Float RGB colors in 0-1 (matplotlib's convention, e.g. `(0.2, 0.4, 0.6)`) are
   scaled correctly instead of being truncated to black. Hex (`"#ff0000"`) and CSS
-  colour names (`"steelblue"`) are now accepted anywhere a colour is.
+  color names (`"steelblue"`) are now accepted anywhere a color is.
 - `barh(label=...)` followed by `legend()` no longer raises `KeyError`.
 - `errorbar` on a log/symlog/logit axis draws its connecting line and markers;
   previously only the whiskers survived.
@@ -118,7 +118,7 @@ All notable changes to pyplotrs are documented here. The format is based on
   `legend()` raised `KeyError('color')`.
 - `aspect="equal"` computed its scale from signed spans, so a descending limit
   mirrored the other axis.
-- `+`/`x` markers with no explicit colour raised `NameError`.
+- `+`/`x` markers with no explicit color raised `NameError`.
 - `hexbin` was not reproducible between runs (iteration order of a `HashMap`
   leaking into drawn geometry).
 - `bar(width=)`/`barh(height=)`/`boxplot(widths=)` no longer shrink to the

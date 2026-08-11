@@ -129,7 +129,7 @@ def test_unsorted_line_renders_everywhere(ext, tmp_path):
 
 
 def test_line3d_alpha_reaches_the_colour():
-    """`Axes3D.plot` took an `alpha` and dropped it: the colour came from
+    """`Axes3D.plot` took an `alpha` and dropped it: the color came from
     `_next_color`, which does not fold opacity in."""
     fig, ax = plt.subplots(projection="3d")
     ax.plot([0, 1], [0, 1], [0, 1], alpha=0.4)
@@ -166,7 +166,7 @@ def test_colormapped_3d_mark_label_reaches_the_legend(kind, tmp_path):
     """`surface(..., label=...)` and `plot_trisurf(..., label=...)` followed by
     `legend()` raised `KeyError('color')`: the shared `_legend_entries` fell
     through to the branch that reads `m["color"]`, which colormapped 3D marks
-    never set. They now carry a swatch colour (the colormap's midpoint) for
+    never set. They now carry a swatch color (the colormap's midpoint) for
     exactly this."""
     k = 4
     X = [[-1.0 + 2.0 * j / (k - 1) for j in range(k)] for _ in range(k)]

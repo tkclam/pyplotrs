@@ -48,7 +48,7 @@ fig.save("figure.png", dpi=600)
 
 ## Transparent backgrounds
 
-`transparent=True` drops the white page fill from `.png` output in favour of an
+`transparent=True` drops the white page fill from `.png` output in favor of an
 alpha channel — useful for dropping a figure onto a colored slide or webpage
 background:
 

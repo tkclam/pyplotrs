@@ -219,7 +219,7 @@ def test_errorbar_autoscale_stays_two_sided():
     assert ylo <= 8.0 and yhi >= 12.0, "whiskers were not included in the y range"
 
 
-# -- colour mapping ----------------------------------------------------------
+# -- color mapping ----------------------------------------------------------
 
 def test_map_colors_matches_the_python_reference():
     """The Rust mapper must agree with ``cmap(norm(v))`` value for value."""
@@ -250,7 +250,7 @@ def test_map_colors_leaves_out_of_domain_transparent():
     from pyplotrs._draw import _colormap_lut
 
     lut = _colormap_lut(colormaps.get_cmap("viridis"))
-    # Non-positive on a log scale, and a NaN, have no position on the colour axis.
+    # Non-positive on a log scale, and a NaN, have no position on the color axis.
     got = _core.map_colors(array("d", [-1.0, 0.0, float("nan")]), lut, 1.0, 10.0, "log")
     assert all(rgba == (0, 0, 0, 0) for rgba in got)
 
@@ -269,7 +269,7 @@ def test_colormap_lut_is_cached_and_stable():
 
 def test_norms_declare_a_rust_code_only_when_one_exists():
     """``code`` gates the Rust bulk path. A piecewise norm claiming a code would
-    silently render with the wrong colours."""
+    silently render with the wrong colors."""
     from pyplotrs import norms
 
     assert norms.Normalize().code == "linear"

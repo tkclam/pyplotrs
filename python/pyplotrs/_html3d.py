@@ -3,7 +3,7 @@
 A figure that has a 3D axes can't be frozen into a flat SVG and still rotate, so
 ``Figure.save("x.html")`` routes 3D figures here instead of the inline-SVG path.
 We ship the 3D scene (marks pre-normalized into the unit cube, ticks, theme
-colours) as JSON plus a small self-contained Canvas2D renderer that re-projects
+colors) as JSON plus a small self-contained Canvas2D renderer that re-projects
 on the client: drag to orbit, wheel to zoom, shift-drag to pan, double-click to
 reset. No dependencies, nothing fetched at view time — one portable file.
 
@@ -200,8 +200,8 @@ class Plot3D {
   }
 
   _labels(ctx, d, P, zb){
-    // Position a label centred at the projected anchor pushed `outward` px away
-    // from the cube centre. A $-bearing label is a pre-typeset overlay div
+    // Position a label centered at the projected anchor pushed `outward` px away
+    // from the cube center. A $-bearing label is a pre-typeset overlay div
     // (translated into place); a plain one is drawn on the canvas.
     const place = (anchor, text, size, outward, role) => {
       const p = P.projn(anchor); let vx = p[0]-P.center[0], vy = p[1]-P.center[1];

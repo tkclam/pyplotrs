@@ -3,7 +3,7 @@
 pyplotrs has no global "current figure" state, so an animation is just a *render
 callback* that returns a fully-built :class:`pyplotrs.Figure` for each frame. The
 frames are rasterized and encoded to an animated **GIF** (broadly viewable,
-256-colour per frame) or **APNG** (full 8-bit colour, higher fidelity), chosen
+256-color per frame) or **APNG** (full 8-bit color, higher fidelity), chosen
 by the output file extension::
 
     import pyplotrs, math
@@ -94,8 +94,8 @@ class Animation:
              fps: Optional[float] = None) -> None:
         """Render every frame and encode to ``path``.
 
-        The format is taken from the extension: ``.gif`` (256-colour, broadly
-        viewable) or ``.apng`` / ``.png`` (full-colour). ``dpi`` sets the raster
+        The format is taken from the extension: ``.gif`` (256-color, broadly
+        viewable) or ``.apng`` / ``.png`` (full-color). ``dpi`` sets the raster
         resolution; ``fps`` overrides the construction-time frame rate.
         """
         rate = self.fps if fps is None else float(fps)

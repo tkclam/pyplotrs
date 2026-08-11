@@ -123,7 +123,7 @@ class Axes3D(_AxesBase):
         ``depthsort`` controls how the line takes part in the painter's-order
         pass. With it on (the default) each **segment** is sorted separately,
         so the line occludes itself and interleaves correctly with surfaces and
-        points it passes through - which is what makes a knotted or spiralling
+        points it passes through - which is what makes a knotted or spiraling
         curve read as 3D at all. That costs one stroked path per segment, and
         on a long line the rasterizer notices.
 
@@ -213,7 +213,7 @@ class Axes3D(_AxesBase):
         self._marks3.append({
             "kind": "contour3d", "segs": segs, "gx": gx, "gy": gy, "levels": lvls,
             "colors": colors, "linewidth": float(linewidth), "label": label,
-            # Legend fallback: the middle level's colour stands for the line set.
+            # Legend fallback: the middle level's color stands for the line set.
             "color": colors[len(colors) // 2] if colors else _with_alpha((0, 0, 0, 255), alpha),
             "xflat": [v for row in gx for v in row],
             "yflat": [v for row in gy for v in row], "zflat": flat,
@@ -644,7 +644,7 @@ class Axes3D(_AxesBase):
             _text(scene, plot.x + (plot.w - tw) / 2.0, layout.title.y + a, self._title,
                   _TITLE_SIZE, _BLACK, title_font)
 
-        # Auto-legend for labelled line/scatter marks, inset in the plot rect.
+        # Auto-legend for labeled line/scatter marks, inset in the plot rect.
         if self._legend is not None:
             entries = self._legend_entries()
             if entries:
@@ -684,8 +684,8 @@ class Axes3D(_AxesBase):
         """Serialize this 3D axes into a JSON-able dict for the in-browser
         renderer (``_html3d``). Coordinates are pre-normalized into the
         ``[-0.5, 0.5]^3`` cube (same as :meth:`_draw`'s ``norm``) so the camera
-        is all the JS has to apply; surface face colours are pre-sampled from the
-        colormap (depth/order are recomputed per frame). Ticks and theme colours
+        is all the JS has to apply; surface face colors are pre-sampled from the
+        colormap (depth/order are recomputed per frame). Ticks and theme colors
         come along so the page reproduces the static look."""
         (xmin, xmax), (ymin, ymax), (zmin, zmax) = self._limits()
         xspan, yspan, zspan = (xmax - xmin) or 1.0, (ymax - ymin) or 1.0, (zmax - zmin) or 1.0

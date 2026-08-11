@@ -27,7 +27,7 @@ def figure(figsize: tuple[float, float] = DEFAULT_FIGSIZE, *, theme=None,
 def set_font_family(*families) -> None:
     """Set the preferred sans-serif family names for body text, tried in order.
 
-    pyplotrs' analogue of matplotlib's ``rcParams["font.sans-serif"]``. The
+    pyplotrs' analog of matplotlib's ``rcParams["font.sans-serif"]``. The
     default is ``Arial``, ``Helvetica``, ``Liberation Sans``: the host's Arial
     is used if installed, else Helvetica, else the bundled Liberation Sans
     (Arial-metric-compatible). Whichever is chosen is **embedded into every
@@ -57,7 +57,7 @@ def get_font_family() -> list[str]:
 def set_unicode_minus(on: bool = True) -> None:
     """Whether negative numeric labels are signed with U+2212 MINUS SIGN.
 
-    pyplotrs' analogue of matplotlib's ``rcParams["axes.unicode_minus"]``, and
+    pyplotrs' analog of matplotlib's ``rcParams["axes.unicode_minus"]``, and
     on by default for the same reason: the minus is drawn on the math axis at
     the width of a ``+``, where the ASCII hyphen-minus is a short, low
     word-joiner that leaves a tick column looking ragged.

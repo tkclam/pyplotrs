@@ -617,7 +617,7 @@ def _darker(color: tuple[int, int, int, int], factor: float = 0.65) -> tuple[int
 
     Used for the edges of 3D boxes (``bar3d``, ``voxels``), where an outline
     derived from the fill reads as shading and keeps a solid full of adjacent
-    boxes legible without introducing a second theme colour.
+    boxes legible without introducing a second theme color.
     """
     r, g, b, a = color
     return (int(r * factor), int(g * factor), int(b * factor), a)
