@@ -107,6 +107,24 @@ struct RawVMetrics {
 /// unambiguous.
 type RawVMetricsCache = Mutex<HashMap<usize, (Arc<Vec<u8>>, RawVMetrics)>>;
 
+/// Ceiling on live cache entries before the whole map is dropped.
+///
+/// Holding the `Arc` keeps the key unambiguous, but it also keeps the entire
+/// font file alive - and the entry count is not bounded by the number of
+/// *fonts*, it is bounded by the number of `Arc`s ever handed here.
+/// `set_sans_serif` clears the body-font cache, so the next resolve mints a
+/// fresh `Arc` over the same file at a new address, which is a new key and a
+/// new retained copy. Measured at ~0.44 MB per `set_font_family` + `save`
+/// cycle, monotonic: 300 cycles grew the process by 132 MB.
+///
+/// A process legitimately uses a handful of faces - four body variants plus a
+/// math face is a busy figure - so anything past this is churn rather than
+/// working set. Dropping the whole map rather than evicting one entry is
+/// deliberate: this is pure memoization, so the only cost of being wrong is
+/// re-parsing a font header, and a wholesale clear has no ordering to get
+/// subtly wrong.
+const MAX_VMETRICS_ENTRIES: usize = 64;
+
 fn raw_vmetrics_cache() -> &'static RawVMetricsCache {
     static CACHE: OnceLock<RawVMetricsCache> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -119,6 +137,9 @@ fn raw_vmetrics_cache() -> &'static RawVMetricsCache {
 pub fn font_vmetrics(font: &FontData, size: f32) -> VMetrics {
     let key = font.key() as usize;
     let mut cache = raw_vmetrics_cache().lock().unwrap();
+    if cache.len() >= MAX_VMETRICS_ENTRIES && !cache.contains_key(&key) {
+        cache.clear();
+    }
     let (_, raw) = cache.entry(key).or_insert_with(|| {
         let face = Face::from_slice(&font.data, font.index).expect("invalid font data");
         let raw = RawVMetrics {
@@ -134,5 +155,69 @@ pub fn font_vmetrics(font: &FontData, size: f32) -> VMetrics {
         ascent: raw.ascender * scale,
         descent: -raw.descender * scale,
         line_gap: raw.line_gap * scale,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The bundled Liberation Sans, so the parse in `font_vmetrics` succeeds.
+    fn liberation() -> Vec<u8> {
+        include_bytes!("../../../assets/fonts/LiberationSans-Regular.ttf").to_vec()
+    }
+
+    #[test]
+    fn the_vmetrics_cache_does_not_grow_without_bound() {
+        // Every iteration builds a *fresh* `Arc` over the same bytes, which is
+        // exactly what `set_sans_serif` causes: it clears the body-font cache,
+        // so the next resolve allocates a new buffer at a new address, which is
+        // a new key. Before the bound, each one retained a full copy of the
+        // font file forever - 0.44 MB a time, 132 MB over 300 figures.
+        let bytes = liberation();
+        for _ in 0..(MAX_VMETRICS_ENTRIES * 4) {
+            let font = FontData::from_bytes(bytes.clone(), 0);
+            let m = font_vmetrics(&font, 12.0);
+            assert!(
+                m.ascent > 0.0,
+                "metrics should still be correct after a clear"
+            );
+        }
+        let entries = raw_vmetrics_cache().lock().unwrap().len();
+        assert!(
+            entries <= MAX_VMETRICS_ENTRIES,
+            "cache holds {entries} entries, above the {MAX_VMETRICS_ENTRIES} ceiling"
+        );
+    }
+
+    #[test]
+    fn repeated_lookups_of_one_font_reuse_its_entry() {
+        // The cache has to still *work*: the common case is one `Arc` asked for
+        // metrics once per label band, many times per figure.
+        //
+        // Asserted as key presence rather than as a count. The cache is
+        // process-global and `cargo test` runs these concurrently, so any
+        // arithmetic on `len()` races with the bound test clearing the map.
+        let font = FontData::from_bytes(liberation(), 0);
+        let key = font.key() as usize;
+        let first = font_vmetrics(&font, 10.0);
+        assert!(
+            raw_vmetrics_cache().lock().unwrap().contains_key(&key),
+            "the first lookup did not populate the cache"
+        );
+        for _ in 0..50 {
+            let m = font_vmetrics(&font, 10.0);
+            assert_eq!(m.ascent, first.ascent, "a cached lookup changed the answer");
+            assert_eq!(m.descent, first.descent);
+        }
+    }
+
+    #[test]
+    fn metrics_scale_linearly_with_size() {
+        let font = FontData::from_bytes(liberation(), 0);
+        let a = font_vmetrics(&font, 10.0);
+        let b = font_vmetrics(&font, 20.0);
+        assert!((b.ascent - a.ascent * 2.0).abs() < 1e-3);
+        assert!((b.descent - a.descent * 2.0).abs() < 1e-3);
     }
 }

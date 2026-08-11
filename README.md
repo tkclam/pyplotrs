@@ -48,8 +48,9 @@ fig.save("hello.html")  # self-contained, selectable text
 - **Fast** — the hot per-point/per-pixel loops live in Rust. A million-point
   line exports to PDF in ~0.5 s and SVG in ~0.25 s; a million-point scatter
   rasterizes to PNG in ~0.15 s. The single-pass layout engine means the lead
-  over matplotlib grows with panel count, and the GIL is released while
-  rendering, so a thread pool over figures actually parallelizes. See
+  over matplotlib grows with panel count, and the GIL is released for both
+  rendering and the compute kernels, so a thread pool over figures actually
+  parallelizes. See
   [benchmarks](https://tkclam.github.io/pyplotrs/guide/performance/) for the
   measured table, the machine it came from, and the one case that is *slower*
   than matplotlib.

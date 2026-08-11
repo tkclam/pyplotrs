@@ -447,6 +447,18 @@ fn offset_range(values: F64Data, offsets: F64Data, two_sided: bool) -> Option<(f
     }
 }
 
+#[pyfunction]
+#[pyo3(signature = (values, bins, range=None, density=false))]
+fn histogram(
+    py: Python<'_>,
+    values: F64Data,
+    bins: usize,
+    range: Option<(f64, f64)>,
+    density: bool,
+) -> (Vec<f64>, Vec<f64>) {
+    py.detach(move || histogram_inner(values, bins, range, density))
+}
+
 /// Bin `values` into `bins` equal-width bins, returning `(edges, counts)`.
 ///
 /// The 1-D counterpart of [`hist2d`], which was already in Rust while this ran
@@ -457,9 +469,7 @@ fn offset_range(values: F64Data, offsets: F64Data, two_sided: bool) -> Option<(f
 /// `range` is the explicit `(lo, hi)`; when `None` the finite data range is used.
 /// A degenerate range is widened by 1.0, as an all-equal sample otherwise has
 /// nowhere to go.
-#[pyfunction]
-#[pyo3(signature = (values, bins, range=None, density=false))]
-fn histogram(
+fn histogram_inner(
     values: F64Data,
     bins: usize,
     range: Option<(f64, f64)>,
@@ -541,6 +551,22 @@ impl<'a> ColorMapper<'a> {
     }
 }
 
+#[pyfunction]
+fn map_colors(
+    py: Python<'_>,
+    values: F64Data,
+    lut: Vec<u8>,
+    vmin: f64,
+    vmax: f64,
+    norm: String,
+) -> Vec<(u8, u8, u8, u8)> {
+    // `String`, not `&str`: everything crossing `detach` must own its data. A
+    // `&str` extracted from a Python object points into memory the interpreter
+    // owns, and the GIL is what makes reading it safe. One small allocation per
+    // call, against a loop over every point.
+    py.detach(move || map_colors_inner(values, lut, vmin, vmax, &norm))
+}
+
 /// Map `values` to per-point RGBA through `lut`, normalized between `vmin` and
 /// `vmax` under `norm`.
 ///
@@ -548,8 +574,7 @@ impl<'a> ColorMapper<'a> {
 /// point - so a colormapped scatter of 100k points made 200k interpreter
 /// round-trips before any drawing began. Values outside the norm's domain come
 /// back fully transparent, matching the image path.
-#[pyfunction]
-fn map_colors(
+fn map_colors_inner(
     values: F64Data,
     lut: Vec<u8>,
     vmin: f64,
@@ -2068,6 +2093,17 @@ fn check_grid(len: usize, w: usize, h: usize, who: &str) -> PyResult<()> {
     Ok(())
 }
 
+#[pyfunction]
+fn contour_lines(
+    py: Python<'_>,
+    values: F64Data,
+    w: usize,
+    h: usize,
+    levels: F64Data,
+) -> PyResult<Vec<ContourLine>> {
+    py.detach(move || contour_lines_inner(values, w, h, levels))
+}
+
 /// Marching-squares contour lines. `values` is a row-major `w*h` grid (index =
 /// `row*w + col`). Returns one entry per continuous contour line as
 /// `(level_idx, closed, points)`, where `points` are in fractional grid
@@ -2078,8 +2114,7 @@ fn check_grid(len: usize, w: usize, h: usize, who: &str) -> PyResult<()> {
 /// Stitching happens here rather than in the caller because drawing each cell's
 /// segment as its own stroked path leaves a wedge of background showing at every
 /// joint (butt caps meeting at an angle); one path per line joins them properly.
-#[pyfunction]
-fn contour_lines(
+fn contour_lines_inner(
     values: F64Data,
     w: usize,
     h: usize,
@@ -2158,6 +2193,19 @@ fn contour_lines(
     Ok(out)
 }
 
+#[pyfunction]
+fn contourf_image(
+    py: Python<'_>,
+    values: F64Data,
+    w: usize,
+    h: usize,
+    edges: F64Data,
+    band_lut: Vec<u8>,
+    upsample: usize,
+) -> PyResult<(Vec<u8>, usize, usize)> {
+    py.detach(move || contourf_image_inner(values, w, h, edges, band_lut, upsample))
+}
+
 /// Filled contour bands as an RGBA image. The field is bilinearly upsampled by
 /// `upsample` and each pixel colored by the band its value falls in (`edges` has
 /// `nbands+1` monotone entries; `band_lut` is `nbands*4` RGBA bytes). Values
@@ -2165,8 +2213,7 @@ fn contour_lines(
 /// are transparent. Returns
 /// `(rgba, out_w, out_h)` with buffer row 0 = grid row `h-1` (largest data y at
 /// the top), matching `add_image`'s top-down placement.
-#[pyfunction]
-fn contourf_image(
+fn contourf_image_inner(
     values: F64Data,
     w: usize,
     h: usize,
@@ -2235,12 +2282,27 @@ fn contourf_image(
     Ok((buf, ow, oh))
 }
 
-/// 2D histogram: count `(xs, ys)` into `ny * nx` equal bins over
-/// `[xlo,xhi] x [ylo,yhi]`. Returns row-major counts (`iy*nx + ix`), `iy=0` the
-/// lowest-y row. Points outside the range are dropped.
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
 fn hist2d(
+    py: Python<'_>,
+    xs: F64Data,
+    ys: F64Data,
+    nx: usize,
+    ny: usize,
+    xlo: f64,
+    xhi: f64,
+    ylo: f64,
+    yhi: f64,
+) -> PyResult<Vec<f64>> {
+    py.detach(move || hist2d_inner(xs, ys, nx, ny, xlo, xhi, ylo, yhi))
+}
+
+/// 2D histogram: count `(xs, ys)` into `ny * nx` equal bins over
+/// `[xlo,xhi] x [ylo,yhi]`. Returns row-major counts (`iy*nx + ix`), `iy=0` the
+/// lowest-y row. Points outside the range are dropped.
+#[allow(clippy::too_many_arguments)]
+fn hist2d_inner(
     xs: F64Data,
     ys: F64Data,
     nx: usize,
@@ -2282,11 +2344,15 @@ fn hist2d(
     Ok(counts)
 }
 
+#[pyfunction]
+fn gaussian_kde(py: Python<'_>, samples: Vec<f64>, grid: Vec<f64>, bandwidth: f64) -> Vec<f64> {
+    py.detach(move || gaussian_kde_inner(samples, grid, bandwidth))
+}
+
 /// Evaluate a 1D Gaussian kernel density estimate of `samples` at each point of
 /// `grid`. `bandwidth <= 0` selects Scott's rule (`n^(-1/5) * std`). Used by
 /// `violinplot`.
-#[pyfunction]
-fn gaussian_kde(samples: Vec<f64>, grid: Vec<f64>, bandwidth: f64) -> Vec<f64> {
+fn gaussian_kde_inner(samples: Vec<f64>, grid: Vec<f64>, bandwidth: f64) -> Vec<f64> {
     let n = samples.len();
     if n == 0 {
         return vec![0.0; grid.len()];
@@ -2319,6 +2385,21 @@ fn gaussian_kde(samples: Vec<f64>, grid: Vec<f64>, bandwidth: f64) -> Vec<f64> {
         .collect()
 }
 
+#[pyfunction]
+#[allow(clippy::too_many_arguments)]
+fn hexbin(
+    py: Python<'_>,
+    xs: F64Data,
+    ys: F64Data,
+    gridsize: usize,
+    xlo: f64,
+    xhi: f64,
+    ylo: f64,
+    yhi: f64,
+) -> (Vec<(f64, f64, f64)>, f64, f64) {
+    py.detach(move || hexbin_inner(xs, ys, gridsize, xlo, xhi, ylo, yhi))
+}
+
 /// Hexagonal binning (matplotlib's two-offset-grid algorithm). Returns *every*
 /// hexagon of the lattice as `(center_x, center_y, count)` in data coordinates,
 /// plus the cell size `(sx, sy)` those centers are spaced on. `gridsize` is the
@@ -2337,9 +2418,8 @@ fn gaussian_kde(samples: Vec<f64>, grid: Vec<f64>, bandwidth: f64) -> Vec<f64> {
 /// metric used below, which only closes up when the polygon is built from the
 /// same `sy` the binning used. Deriving it a second time on the Python side is
 /// what let the two drift apart.
-#[pyfunction]
 #[allow(clippy::too_many_arguments)]
-fn hexbin(
+fn hexbin_inner(
     xs: F64Data,
     ys: F64Data,
     gridsize: usize,

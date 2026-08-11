@@ -41,11 +41,19 @@ costs far less than nine times a 1-panel one.
 
 ## Threads
 
-Rendering touches no Python objects, so **the GIL is released for the whole of a
-render** — `to_pdf`, `to_svg` and `to_png` all detach. Two consequences:
+Nothing below the Python layer touches a Python object, so **the GIL is
+released for the whole of a render and for every compute kernel**. Both halves
+matter, and only the first used to be true: the renderers (`to_pdf`, `to_svg`,
+`to_png`, and the GIF/APNG encoders) detached, while marching squares, the
+filled-contour rasterizer, `hist2d`, `hexbin`, the violin KDE, the histogram
+and the colormap mapping all held it. A figure whose cost was mostly *contour*
+rather than *raster* therefore did not parallelize at all — four of them on
+four threads took as long as four in a row. Three consequences:
 
 - Exporting a batch of figures from a `ThreadPoolExecutor` actually runs them
   concurrently, rather than serializing on the interpreter lock.
+- A long call stays interruptible. A 2000x2000 contour used to block every
+  other thread — and `Ctrl-C` — for its whole twelve seconds.
 - Raster export is itself multi-threaded: an expensive canvas is split into
   horizontal bands rasterized in parallel, and PNG scanline filtering and
   DEFLATE run in parallel too.
