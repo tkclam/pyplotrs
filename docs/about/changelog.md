@@ -165,3 +165,10 @@ All notable changes to pyplotrs are documented here. The format is based on
   off-center by the width of labels nobody saw. Those two bands are now
   dropped when the frame is off, which both centers the mark and gives it the
   space back.
+- `subplot_mosaic` grew a phantom panel from an indented layout string. A mosaic
+  is written inside a function, so its triple-quoted string carries that
+  indentation - the form the docstring itself shows - and each leading space was
+  read as a cell. Every row shared them, so they formed one solid rectangle: a
+  blank axes spanning every row, as wide as the code was indented, with the real
+  panels squeezed into what was left. The string is dedented before it is read
+  now, and a space marks an empty cell like `.` does.

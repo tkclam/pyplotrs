@@ -1032,3 +1032,36 @@ def test_frame_off_reserves_no_tick_band(tmp_path):
     assert (x0 + x1) / 2.0 == pytest.approx(w / 2.0, abs=1.0), (
         f"the pie spans x={x0}..{x1} on a {w}pt canvas - it is off-center, so "
         "an empty tick band is still being reserved beside it")
+
+
+def test_indented_mosaic_string_has_no_phantom_panel():
+    """An indented `subplot_mosaic` string grew a blank panel from its margin.
+
+    A mosaic is written inside a function, so its triple-quoted string carries
+    the function's indentation - which is exactly the form the docstring shows.
+    Each of those leading spaces was read as a cell, and every row shared them,
+    so the spaces formed one solid rectangle: a label of their own, spanning
+    every row and as many columns as the code was indented. The figure came out
+    with a wide empty axes on the left and the real panels squeezed into what
+    was left.
+    """
+    fig, axd = plt.subplot_mosaic(
+        """
+        AB
+        AC
+        """
+    )
+
+    assert set(axd) == {"A", "B", "C"}, f"phantom labels: {sorted(axd)}"
+    assert len(fig.axes) == 3
+    # A spans both rows of column 0; B and C are single cells in column 1.
+    assert fig._spans == [(0, 0, 2, 1), (0, 1, 1, 1), (1, 1, 1, 1)]
+
+
+def test_mosaic_space_marks_an_empty_cell():
+    """A space reads as an empty cell, like `"."`. Both spellings appear in the
+    wild, and the alternative is a panel whose label is a space."""
+    fig, axd = plt.subplot_mosaic(["AB", "A "])
+
+    assert set(axd) == {"A", "B"}
+    assert fig._spans == [(0, 0, 2, 1), (0, 1, 1, 1)]

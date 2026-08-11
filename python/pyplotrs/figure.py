@@ -19,6 +19,7 @@ design.
 from __future__ import annotations
 
 import html
+import textwrap
 
 from . import _pyplotrs_core as _core
 from . import theme as _theme
@@ -465,11 +466,17 @@ def subplot_mosaic(mosaic, *, figsize: tuple[float, float] = DEFAULT_FIGSIZE,
         \"\"\"
 
     gives ``A`` spanning both rows of column 0, with ``B``/``C`` stacked at the
-    right. ``"."`` marks an empty cell. Returns ``(fig, {label: axes})``. Each
-    label's cells must form a solid rectangle.
+    right. ``"."`` (or a space) marks an empty cell. Returns
+    ``(fig, {label: axes})``. Each label's cells must form a solid rectangle.
+
+    The string is dedented before it is read, so the indented triple-quoted
+    form above - the way a mosaic is actually written inside a function - means
+    what it looks like. Without that, the shared leading spaces are cells of
+    their own and the layout gains a phantom panel wider than the real ones.
     """
     if isinstance(mosaic, str):
-        rows = [list(line) for line in mosaic.splitlines() if line.strip()]
+        rows = [list(line) for line in textwrap.dedent(mosaic).splitlines()
+                if line.strip()]
     else:
         rows = [list(r) for r in mosaic]
     nrows = len(rows)
@@ -479,7 +486,7 @@ def subplot_mosaic(mosaic, *, figsize: tuple[float, float] = DEFAULT_FIGSIZE,
     order: list[str] = []
     for r, row in enumerate(rows):
         for c, label in enumerate(row):
-            if label == ".":
+            if label in (".", " "):
                 continue
             if label not in boxes:
                 boxes[label] = [r, c, r, c]
