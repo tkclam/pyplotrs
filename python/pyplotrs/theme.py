@@ -199,7 +199,7 @@ class Theme:
 
     palette: tuple[RGBA, ...] = _OKABE_ITO
     text_color: RGBA = (0, 0, 0, 255)
-    spine_color: RGBA = (89, 89, 89, 255)
+    spine_color: RGBA = (0, 0, 0, 255)
     # Which of "left"/"right"/"top"/"bottom" spines (and their ticks) to draw.
     spines: tuple[str, ...] = ("left", "bottom")
     spine_width: float = 1.0

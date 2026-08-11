@@ -25,7 +25,7 @@ _LEGEND_PROBE_POINTS = 60
 DEFAULT_FIGSIZE = (250.0, 200.0)
 
 # Spacing (points).
-_TICK_LENGTH = 3.5
+_TICK_LENGTH = 2.5
 _TICK_LABEL_GAP = 2.5
 
 _AXIS_LABEL_GAP = 3.0
@@ -41,7 +41,7 @@ _HSPACE = 24.0
 _CBAR_GAP = 8.0  # between the plot's right edge and the color strip
 _CBAR_WIDTH = 11.0  # width of the color strip
 
-_CBAR_TICK_LEN = 3.0
+_CBAR_TICK_LEN = 2.5
 _CBAR_TICK_GAP = 2.5
 
 # 3D chrome.
