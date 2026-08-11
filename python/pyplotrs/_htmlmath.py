@@ -90,14 +90,35 @@ class _MathCapture:
         self._real.add_math(x, y, text, size, color, font)
 
 
+#: Attribution carried into every generated page.
+#:
+#: Inlining the bundle makes each ``.html`` figure its own redistribution of
+#: MathJax, and Apache-2.0 s4(d) wants the attribution notice to travel with
+#: it. The minified bundle has no banner of its own, so this supplies one. It
+#: is a JS comment, so it survives into the file and costs 4 lines against 2.2
+#: MB. See ``python/pyplotrs/_vendor/MATHJAX-NOTICE.md``.
+_MATHJAX_BANNER = (
+    "/*! MathJax v3.2.2 | (c) 2009-2022 The MathJax Consortium"
+    " | Apache-2.0 | https://github.com/mathjax/MathJax */\n"
+)
+
+#: The MathJax release vendored under ``_vendor/``. Pinned here so
+#: ``tests/test_packaging.py`` can assert the banner, the notice file and the
+#: bundle itself have not drifted apart across an upgrade.
+MATHJAX_VERSION = "3.2.2"
+
+
 def _mathjax_bundle() -> str:
-    """The inlined MathJax library, cached. Any literal ``</script`` inside JS
-    string/regex literals is neutralized (``<\\/script`` is identical in JS) so
-    the inline ``<script>`` cannot be closed early."""
+    """The inlined MathJax library, cached, behind its attribution banner.
+
+    Any literal ``</script`` inside JS string/regex literals is neutralized
+    (``<\\/script`` is identical in JS) so the inline ``<script>`` cannot be
+    closed early.
+    """
     global _bundle_cache
     if _bundle_cache is None:
-        _bundle_cache = _BUNDLE_PATH.read_text(encoding="utf-8").replace(
-            "</script", "<\\/script")
+        _bundle_cache = _MATHJAX_BANNER + _BUNDLE_PATH.read_text(
+            encoding="utf-8").replace("</script", "<\\/script")
     return _bundle_cache
 
 

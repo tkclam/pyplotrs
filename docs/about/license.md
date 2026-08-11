@@ -10,7 +10,13 @@ additional terms or conditions.
 ## Bundled third-party assets
 
 pyplotrs embeds a small number of third-party assets, each under a permissive
-license.
+license. Every license and notice below is installed into
+`pyplotrs-<version>.dist-info/licenses/` with the wheel, so a redistributor
+does not have to fetch this page.
+
+[`THIRD-PARTY-NOTICES.md`](https://github.com/tkclam/pyplotrs/blob/main/THIRD-PARTY-NOTICES.md)
+is the single generated file listing all of it, including the ~110 Rust crates
+compiled into the extension module.
 
 ### Fonts (embedded in the compiled extension)
 
@@ -44,6 +50,23 @@ and [seaborn](https://seaborn.pydata.org/) (BSD-3-Clause, `sns_*`).
 Among them, the `viridis`, `plasma`, `inferno`, `magma` and `cividis` tables are
 the canonical perceptually-uniform colormaps created for matplotlib by Stefan van
 der Walt and Nathaniel Smith, dedicated to the **public domain (CC0)**.
+
+### MathJax (inlined into HTML math output)
+
+- **MathJax 3.2.2** — © 2009–2022 The MathJax Consortium. **Apache License
+  2.0**. `Figure.save("*.html")` re-typesets `$...$` math with MathJax so it
+  stays selectable and copyable in a browser, and inlines the whole library so
+  the page needs no network access. This is separate from pyplotrs' own math
+  engine (`crates/pyplotrs-math`), which typesets math for PDF, SVG and PNG
+  from the math font's OpenType MATH table and uses none of this code.
+  Source: <https://github.com/mathjax/MathJax>.
+  License text:
+  [`python/pyplotrs/_vendor/MATHJAX-LICENSE.txt`](https://github.com/tkclam/pyplotrs/blob/main/python/pyplotrs/_vendor/MATHJAX-LICENSE.txt);
+  what the bundle contains, including the Speech Rule Engine and the TeX
+  extension set, is in
+  [`MATHJAX-NOTICE.md`](https://github.com/tkclam/pyplotrs/blob/main/python/pyplotrs/_vendor/MATHJAX-NOTICE.md).
+  Because each generated `.html` file carries its own copy, an attribution
+  banner is prepended at inline time so the notice travels with it.
 
 ### PDF writer (compiled into the extension)
 

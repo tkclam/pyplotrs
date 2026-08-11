@@ -9,16 +9,24 @@ description = "A blazingly fast, publication-quality plotting library for Python
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
-# Bundled fonts (Liberation Sans, STIX Two Math) ship under the SIL OFL; the
-# curated colormap/palette tables are matplotlib/colorcet/cmocean/seaborn-derived
-# (see THIRD_PARTY_COLORMAPS.md - colorcet's CC-BY 4.0 requires attribution).
-# These travel with every wheel as required by the OFL/CC-BY.
+# Everything pyplotrs redistributes, with the notice each license requires:
+# the bundled fonts (Liberation Sans, STIX Two Math) under the SIL OFL; the
+# curated colormap/palette tables, matplotlib/colorcet/cmocean/seaborn-derived
+# (colorcet is CC-BY 4.0 and requires attribution); the MathJax bundle inlined
+# into `.html` output, Apache-2.0, which requires the license text and the
+# notice; and THIRD-PARTY-NOTICES.md for the Rust crates compiled into the
+# extension. Listing them here is what puts them in `dist-info/licenses/` in
+# every wheel, which is where a redistributor looks. `tests/test_packaging.py`
+# asserts they arrive.
 license-files = [
     "LICENSE",
+    "THIRD-PARTY-NOTICES.md",
     "assets/fonts/LiberationSans-OFL.txt",
     "assets/fonts/STIXTwoMath-OFL.txt",
     "assets/fonts/NOTICE.md",
     "THIRD_PARTY_COLORMAPS.md",
+    "python/pyplotrs/_vendor/MATHJAX-LICENSE.txt",
+    "python/pyplotrs/_vendor/MATHJAX-NOTICE.md",
 ]
 authors = [{ name = "The pyplotrs authors" }]
 keywords = [
@@ -94,6 +102,11 @@ python-source = "python"
 # keep that from recurring.
 include = [
     { path = "assets/fonts/*.ttf", format = "sdist" },
-    { path = "python/pyplotrs/_vendor/*.js", format = "sdist" },
+    { path = "python/pyplotrs/_vendor/*", format = "sdist" },
     { path = "vendor/krilla-0.8.2/**/*", format = "sdist" },
+    # The test suite, so a downstream packager can validate the artifact they
+    # build rather than taking it on trust. Conda-forge and the distros all
+    # run the suite during their build; without this they have nothing to run.
+    { path = "tests/**/*", format = "sdist" },
+    { path = "tools/gen_third_party_notices.py", format = "sdist" },
 ]

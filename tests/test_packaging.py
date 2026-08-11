@@ -1,4 +1,10 @@
-"""The source distribution has to be buildable.
+"""What the built artifacts have to contain.
+
+Two things nothing else in the suite can see, because both are properties of
+the *distribution* rather than of the library: the source distribution has to
+be buildable, and every redistributed asset has to carry its license.
+
+## The sdist
 
 `139179d` vendored a patched krilla and wired it in with
 ``[patch.crates-io] krilla = { path = "vendor/krilla-0.8.2" }``, but did not add
@@ -18,6 +24,16 @@ Two tests, deliberately at different costs:
 * :func:`test_sdist_resolves` actually builds the tarball and resolves it with
   cargo. It needs maturin and a network-warm cargo registry, so it is marked
   ``packaging`` and deselected by default; CI runs it explicitly.
+
+## The licenses
+
+The wheels redistribute two font families, ~150 colormap tables, a 2.2 MB
+MathJax bundle and ~110 statically linked Rust crates. Several of those
+licenses require the notice to travel with the binary. Listing a file in
+``[project] license-files`` is what puts it in ``dist-info/licenses/``, and
+nothing tied that list to the files actually present - which is how the
+MathJax bundle came to ship with no license text anywhere in the wheel, the
+sdist, or the generated ``.html`` pages that inline it.
 """
 
 from __future__ import annotations
@@ -26,35 +42,58 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import tomllib
 from pathlib import Path
 
 import pytest
+
+# `tomllib` is 3.11+, and this package supports 3.9. A bare `import tomllib`
+# here is a *collection* error on 3.9/3.10, which fails the whole run rather
+# than skipping a file - and 3.9 is exactly the interpreter the linux and macOS
+# wheel jobs use, so the entire suite aborted there.
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - 3.9/3.10 only
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        tomllib = None  # type: ignore[assignment]
+
+requires_toml = pytest.mark.skipif(
+    tomllib is None,
+    reason="needs tomllib (3.11+) or tomli; `pip install pyplotrs[test]` provides one",
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def _patch_paths() -> list[str]:
     """Local paths the root workspace patches crates.io with."""
+    if tomllib is None:  # pragma: no cover - collection-time on 3.9/3.10
+        return []
     cargo = tomllib.loads((ROOT / "Cargo.toml").read_text())
     patched = cargo.get("patch", {}).get("crates-io", {})
     return [spec["path"] for spec in patched.values() if "path" in spec]
 
 
+def _pyproject() -> dict:
+    return tomllib.loads((ROOT / "pyproject.toml").read_text())
+
+
 def _sdist_include_globs() -> list[str]:
-    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
-    include = pyproject.get("tool", {}).get("maturin", {}).get("include", [])
+    include = _pyproject().get("tool", {}).get("maturin", {}).get("include", [])
     return [e["path"] for e in include
             if isinstance(e, dict) and e.get("format") in (None, "sdist")]
 
 
+@requires_toml
 def test_there_is_something_to_check():
     """Guard the guard: if the krilla patch is ever dropped, these tests would
     silently pass while asserting nothing."""
     assert _patch_paths(), "expected at least one [patch.crates-io] path entry"
 
 
-@pytest.mark.parametrize("patch_path", _patch_paths())
+@requires_toml
+@pytest.mark.parametrize("patch_path", _patch_paths() or ["vendor/krilla-0.8.2"])
 def test_patch_paths_are_included_in_sdist(patch_path):
     """Every patched path must have its sources swept into the sdist.
 
@@ -111,4 +150,98 @@ def test_sdist_resolves(tmp_path):
     assert resolved.returncode == 0, (
         "the sdist does not resolve - a from-source `pip install` would fail "
         f"here:\n{resolved.stderr}"
+    )
+
+
+# -- what actually reaches the user ------------------------------------------
+#
+# The distribution redistributes fonts, colormap tables, a MathJax bundle and
+# ~110 Rust crates. Several of those licenses require the notice to travel with
+# the artifact. Listing a file in `[project] license-files` is what puts it in
+# `dist-info/licenses/`; these tests check the list has not drifted from the
+# files on disk, which is how the MathJax bundle came to ship for months with
+# no license text anywhere.
+
+@requires_toml
+def test_every_declared_license_file_exists():
+    missing = [rel for rel in _pyproject()["project"]["license-files"]
+               if not (ROOT / rel).is_file()]
+    assert not missing, (
+        f"declared in license-files but not on disk: {missing}. The build "
+        f"fails on this, so it would not reach a wheel."
+    )
+
+
+@requires_toml
+@pytest.mark.parametrize("asset,notice", [
+    ("python/pyplotrs/_vendor/mathjax-tex-svg-full.min.js",
+     "python/pyplotrs/_vendor/MATHJAX-LICENSE.txt"),
+    ("assets/fonts/LiberationSans-Regular.ttf",
+     "assets/fonts/LiberationSans-OFL.txt"),
+    ("assets/fonts/STIXTwoMath-Regular.ttf",
+     "assets/fonts/STIXTwoMath-OFL.txt"),
+])
+def test_every_redistributed_asset_ships_its_license(asset, notice):
+    """If the asset is here, so is its license, and the license is declared."""
+    if not (ROOT / asset).is_file():
+        pytest.skip(f"{asset} is not present in this checkout")
+    assert (ROOT / notice).is_file(), f"{asset} ships without {notice}"
+    assert notice in _pyproject()["project"]["license-files"], (
+        f"{notice} exists but is not in license-files, so it never reaches "
+        f"dist-info/licenses/ and a wheel user cannot see it"
+    )
+
+
+def test_the_mathjax_version_is_recorded_where_it_is_claimed():
+    """The banner, the notice file and the bundle must agree, so an upgrade
+    cannot leave the attribution describing the previous release."""
+    from pyplotrs import _htmlmath
+
+    version = _htmlmath.MATHJAX_VERSION
+    assert f'VERSION="{version}"' in _htmlmath._BUNDLE_PATH.read_text(encoding="utf-8"), (
+        f"MATHJAX_VERSION is {version!r} but the bundle does not declare it"
+    )
+    assert version in _htmlmath._MATHJAX_BANNER
+    notice = (ROOT / "python/pyplotrs/_vendor/MATHJAX-NOTICE.md").read_text(encoding="utf-8")
+    assert version in notice
+
+
+def test_generated_html_carries_the_mathjax_attribution():
+    """Inlining the bundle makes each `.html` figure its own redistribution,
+    so the notice has to be in the file itself, not only in the wheel."""
+    import pyplotrs as plt
+
+    fig, ax = plt.subplots(figsize=(200, 150))
+    ax.set(title=r"$\alpha + \beta$")
+    page = fig.to_html() if hasattr(fig, "to_html") else None
+    if page is None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "f.html"
+            fig.save(str(out))
+            page = out.read_text(encoding="utf-8")
+    assert "MathJax" in page and "Apache-2.0" in page, (
+        "a generated math page must carry the MathJax attribution banner"
+    )
+
+
+@requires_toml
+def test_third_party_notices_are_up_to_date():
+    """`THIRD-PARTY-NOTICES.md` is generated from the resolved Cargo graph, so
+    adding or bumping a dependency must regenerate it."""
+    if shutil.which("cargo") is None:
+        pytest.skip("cargo not available")
+    committed = (ROOT / "THIRD-PARTY-NOTICES.md").read_text(encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "tools/gen_third_party_notices.py"],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, (
+        f"the notice generator failed - a dependency may carry a license "
+        f"outside the allowed set:\n{result.stdout}\n{result.stderr}"
+    )
+    assert (ROOT / "THIRD-PARTY-NOTICES.md").read_text(encoding="utf-8") == committed, (
+        "THIRD-PARTY-NOTICES.md is stale; run "
+        "`python tools/gen_third_party_notices.py` and commit the result"
     )
