@@ -459,6 +459,32 @@ def _subdivide(majors: list[float], n: int, lo: float, hi: float) -> list[float]
     return out
 
 
+def _spine_ends(join: str, width: float, lo_meets: bool, hi_meets: bool):
+    """How far a spine should run past each of its two ends, in points.
+
+    Two strokes that meet at a right angle are drawn as separate paths, so each
+    stops on the other's *centerline* and the outer quarter of the junction is
+    left uncovered: a spine ending at another spine notches its corner, and a
+    tick sitting on the axis limit juts half a stroke width past the flat end of
+    the spine it belongs to. Both read as "these two lines missed each other".
+    Extending the spine by half its width covers exactly what a miter join
+    between the two would have, without merging them into one path - they are
+    different lines with different meanings, and a tick has to stay free to
+    point inward or vanish with ``axis("off")``.
+
+    ``join`` selects when to do it: ``"miter"`` only at an end something abuts
+    (``lo_meets`` / ``hi_meets``, decided by the caller, which is the only one
+    that knows where the ticks landed), ``"square"`` unconditionally - a
+    projecting cap, so a free end overhangs - and ``"butt"`` never.
+    """
+    if join == "butt" or width <= 0.0:
+        return 0.0, 0.0
+    half = width / 2.0
+    if join == "square":
+        return half, half
+    return (half if lo_meets else 0.0), (half if hi_meets else 0.0)
+
+
 def _flatten2d(values):
     """Flatten a 2D grid row-major; pass a 1D sequence straight through.
 

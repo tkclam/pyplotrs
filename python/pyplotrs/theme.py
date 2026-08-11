@@ -203,6 +203,13 @@ class Theme:
     # Which of "left"/"right"/"top"/"bottom" spines (and their ticks) to draw.
     spines: tuple[str, ...] = ("left", "bottom")
     spine_width: float = 1.0
+    # How a spine finishes where another line abuts its end - the perpendicular
+    # spine at a corner, or a tick mark sitting on the axis limit. Stroked
+    # separately, the two stop on each other's centerline and leave the outer
+    # corner open (see `_spine_ends`). "miter" closes it by running the spine
+    # half a stroke width past such an end, "square" past every end, "butt"
+    # never - the geometry before this was noticed.
+    spine_join: str = "miter"
 
     tick_label_size: float = 9.0
     axis_label_size: float = 10.0
@@ -227,6 +234,16 @@ class Theme:
     axes_facecolor: RGBA | None = None  # plot-area background fill
     legend_facecolor: RGBA = (255, 255, 255, 255)
     legend_edgecolor: RGBA = (179, 179, 179, 255)
+
+    def __post_init__(self) -> None:
+        # The one theme field with a closed set of values. Checking it here
+        # names the typo at `Theme(...)` / `with_(...)`; the draw code would
+        # otherwise silently fall back to a join the caller did not ask for.
+        if self.spine_join not in ("miter", "square", "butt"):
+            raise ValueError(
+                f'spine_join must be "miter", "square" or "butt", '
+                f"got {self.spine_join!r}"
+            )
 
     @property
     def separator_color(self) -> RGBA:

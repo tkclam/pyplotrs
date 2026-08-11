@@ -1084,3 +1084,138 @@ def test_pinned_ticks_outside_the_view_are_dropped():
     assert lo > -0.05 and hi < 0.05, "the view no longer excludes the outer ticks"
     assert ax.get_yticks() == [0.0], f"ticks outside {lo}..{hi}: {ax.get_yticks()}"
     assert ax.get_yticklabels() == ["0"]
+
+
+# -- spine / tick junctions ----------------------------------------------------
+
+def _chrome_lines(fig, tmp_path, name, width):
+    """The straight two-point segments stroked at ``width``, as `(x0, y0, x1, y1)`.
+
+    That is the axes chrome - spines and tick marks - and nothing else: the data
+    here is drawn at the theme's line width, which differs from the spine width.
+    """
+    out = tmp_path / f"{name}.svg"
+    fig.save(str(out))
+    found = []
+    for d, w in re.findall(r'<path[^>]*d="([^"]*)"[^>]*stroke-width="([\d.]+)"',
+                           out.read_text()):
+        nums = [float(v) for v in re.findall(r"-?\d+(?:\.\d+)?", d)]
+        if len(nums) == 4 and float(w) == pytest.approx(width):
+            found.append(tuple(nums))
+    assert found, f"no chrome strokes at width {width} in {name}.svg"
+    return found
+
+
+def _spines(lines, vertical):
+    """The full-length chrome segments running one way, ordered across the page.
+
+    Those are the spines: a tick mark is a couple of points long and the axis it
+    sits on is the height of the panel, so "longer than half the longest" splits
+    them cleanly however the ends are finished.
+    """
+    def length(ln):
+        return abs(ln[3] - ln[1]) if vertical else abs(ln[2] - ln[0])
+
+    along = [ln for ln in lines if (ln[0] == ln[2] if vertical else ln[1] == ln[3])]
+    longest = max(length(ln) for ln in along)
+    return sorted((ln for ln in along if length(ln) > longest / 2.0),
+                  key=lambda ln: ln[0] if vertical else ln[1])
+
+
+def _junction_figure(theme, ylim=(0, 8)):
+    fig, ax = plt.subplots(figsize=(200, 150), theme=theme)
+    ax.line([0, 1, 2, 3], [0, 2, 5, 8])
+    ax.set(xlim=(0, 3), ylim=ylim)
+    return fig, ax
+
+
+def test_spine_end_reaches_the_outer_edge_of_the_tick_that_sits_on_it(tmp_path):
+    """A tick on the axis limit and the end of its spine did not join up.
+
+    Both are strokes with width, drawn as separate paths, so each stopped on the
+    other's centerline: the tick's own half-width jutted half a stroke past the
+    flat end of the spine, and the outer corner between them was left blank. At
+    a 1pt spine that is a 0.5pt step in the one place a reader's eye is drawn to
+    - the corner of the frame. Running the spine half a width past that end
+    covers exactly what a miter join between the two would have.
+    """
+    sw = plt.themes.default.spine_width
+    fig, _ax = _junction_figure(plt.themes.default)
+    lines = _chrome_lines(fig, tmp_path, "join_tick", sw)
+
+    spine = _spines(lines, vertical=True)[0]
+    spine_top = min(spine[1], spine[3])
+    # The y tick on ymax: the horizontal chrome stroke highest on the page.
+    tick = min((ln for ln in lines if ln[1] == ln[3]), key=lambda ln: ln[1])
+
+    assert spine_top == pytest.approx(tick[1] - sw / 2.0), (
+        f"the left spine ends at y={spine_top} but the limit tick spans "
+        f"y={tick[1] - sw / 2.0}..{tick[1] + sw / 2.0} - they do not close"
+    )
+
+
+def test_spine_corner_is_closed_with_no_tick_to_hide_it(tmp_path):
+    """The same notch between two spines, where no limit tick fills it in.
+
+    A framed axes with its ticks inside the view is the bare case: the vertical
+    spine stopped on the horizontal one's centerline and vice versa, leaving a
+    half-width square missing from the outer corner of the frame. It survived
+    this long because the default theme is despined and its one corner usually
+    *does* carry limit ticks, which cover the hole by accident.
+    """
+    framed = plt.themes.default.with_(spines=("left", "right", "top", "bottom"))
+    sw = framed.spine_width
+    fig, _ax = _junction_figure(framed, ylim=(-0.3, 8.3))
+    lines = _chrome_lines(fig, tmp_path, "join_corner", sw)
+
+    left = _spines(lines, vertical=True)[0]
+    top = _spines(lines, vertical=False)[0]
+    assert min(left[1], left[3]) == pytest.approx(top[1] - sw / 2.0), (
+        "the vertical spine stops short of the top spine's outer edge")
+    assert min(top[0], top[2]) == pytest.approx(left[0] - sw / 2.0), (
+        "the horizontal spine stops short of the left spine's outer edge")
+
+
+def test_spine_join_butt_keeps_the_spine_on_the_plot_rect(tmp_path):
+    """The escape hatch, for anyone who wants the ends bare: `spine_join="butt"`
+    puts every spine back on exactly the plot rect it bounds."""
+    framed = plt.themes.default.with_(spines=("left", "right", "top", "bottom"),
+                                      spine_join="butt")
+    fig, _ax = _junction_figure(framed, ylim=(-0.3, 8.3))
+    lines = _chrome_lines(fig, tmp_path, "join_butt", framed.spine_width)
+
+    left = _spines(lines, vertical=True)[0]
+    top = _spines(lines, vertical=False)[0]
+    assert min(left[1], left[3]) == pytest.approx(top[1]), (
+        "with butt ends the spines meet on each other's centerline")
+    assert min(top[0], top[2]) == pytest.approx(left[0]), (
+        "with butt ends the spines meet on each other's centerline")
+
+
+def test_spine_join_square_extends_an_end_nothing_meets(tmp_path):
+    """`"miter"` closes a junction; `"square"` is the blunter projecting cap that
+    overhangs every end, junction or not.
+
+    The two only differ on a *free* end - here the top of the left spine, with
+    the view running past the last tick - which is the whole reason both exist:
+    an unclosed spine end is a statement about where the axis stops, and half a
+    stroke of overhang is not always wanted there.
+    """
+    sw = plt.themes.default.spine_width
+    tops = {}
+    for join in ("miter", "square"):
+        theme = plt.themes.default.with_(spine_join=join)
+        fig, _ax = _junction_figure(theme, ylim=(0, 9))  # ticks 0..8, none at 9
+        lines = _chrome_lines(fig, tmp_path, f"join_{join}", sw)
+        spine = _spines(lines, vertical=True)[0]
+        tops[join] = min(spine[1], spine[3])
+
+    assert tops["square"] == pytest.approx(tops["miter"] - sw / 2.0), (
+        f"square should overhang the free end by {sw / 2.0}, got "
+        f"{tops['miter'] - tops['square']}")
+
+
+def test_spine_join_rejects_an_unknown_value():
+    """A typo has to fail at the theme, not silently draw a different join."""
+    with pytest.raises(ValueError, match="spine_join"):
+        plt.themes.default.with_(spine_join="mitre")

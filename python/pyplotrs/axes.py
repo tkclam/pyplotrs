@@ -51,6 +51,7 @@ from ._util import (
     _is_uniform,
     _level_edges,
     _patch_bbox,
+    _spine_ends,
     _step_points,
     _streamlines,
     _subdivide,
@@ -2055,18 +2056,39 @@ class Axes(_AxesBase):
         # Spines (despining is per-theme: only the listed edges are drawn;
         # ``axis("off")`` suppresses them all).
         if not self._frame_off:
+            # What abuts each end of a spine: the perpendicular edge at that
+            # corner, or a tick sitting close enough to the end that its own
+            # half-width overhangs it. `_spine_ends` turns that into how far to
+            # run the spine past its endpoint. Edges a twin or a flush
+            # secondary axis will draw count too - they are a corner from this
+            # spine's point of view even though this axes is not drawing them.
+            edges = set(t.spines)
+            if self._twinx is not None:
+                edges.add("right")
+            if self._twiny is not None:
+                edges.add("top")
+            for spec in self._secondary:
+                if not spec.get("_offset", 0.0):
+                    edges.add(spec["loc"])
+            x_at = [sx(v) for v, _ in xticks] + [sx(v) for v in x_minor]
+            y_at = [sy(v) for v, _ in yticks] + [sy(v) for v in y_minor]
+            # Vertical spines share their two ends' verdicts, horizontal ones
+            # theirs: what a corner looks like does not depend on which of the
+            # two spines meeting there is being drawn.
+            v_lo, v_hi = self._spine_ends_for(y_at, py, py + ph, "top", "bottom", edges)
+            h_lo, h_hi = self._spine_ends_for(x_at, px, px + pw, "left", "right", edges)
             if "left" in t.spines:
-                scene.add_path([(px, py), (px, py + ph)], stroke_color=_SPINE,
-                               stroke_width=sw, cap="butt")
+                scene.add_path([(px, py - v_lo), (px, py + ph + v_hi)],
+                               stroke_color=_SPINE, stroke_width=sw, cap="butt")
             if "bottom" in t.spines:
-                scene.add_path([(px, py + ph), (px + pw, py + ph)], stroke_color=_SPINE,
-                               stroke_width=sw, cap="butt")
+                scene.add_path([(px - h_lo, py + ph), (px + pw + h_hi, py + ph)],
+                               stroke_color=_SPINE, stroke_width=sw, cap="butt")
             if "right" in t.spines:
-                scene.add_path([(px + pw, py), (px + pw, py + ph)], stroke_color=_SPINE,
-                               stroke_width=sw, cap="butt")
+                scene.add_path([(px + pw, py - v_lo), (px + pw, py + ph + v_hi)],
+                               stroke_color=_SPINE, stroke_width=sw, cap="butt")
             if "top" in t.spines:
-                scene.add_path([(px, py), (px + pw, py)], stroke_color=_SPINE,
-                               stroke_width=sw, cap="butt")
+                scene.add_path([(px - h_lo, py), (px + pw + h_hi, py)],
+                               stroke_color=_SPINE, stroke_width=sw, cap="butt")
 
         # All data marks, clipped to the plot rect.
         marks = self._ordered_marks()
@@ -2205,6 +2227,26 @@ class Axes(_AxesBase):
 
     # -- twin / secondary / inset drawing -----------------------------------
 
+    def _spine_ends_for(self, tick_at, lo, hi, lo_side, hi_side, edges=None):
+        """How far a spine runs past its ``lo``/``hi`` ends (see `_spine_ends`).
+
+        ``tick_at`` is where this spine's ticks landed in device space; a tick
+        within half a stroke width of an end is one that would otherwise jut
+        past it. ``lo_side``/``hi_side`` name the perpendicular edges meeting
+        those ends, looked up in ``edges`` (the theme's spines unless the caller
+        knows of more - a twin draws edges the theme does not list).
+        """
+        t = self._theme
+        sw = t.spine_width
+        half = sw / 2.0
+        if edges is None:
+            edges = t.spines
+
+        def meets(edge, side):
+            return side in edges or any(abs(c - edge) < half for c in tick_at)
+
+        return _spine_ends(t.spine_join, sw, meets(lo, lo_side), meets(hi, hi_side))
+
     def _proj_for(self, plot, xr, yr, xscale, yscale) -> "_Proj":
         """Build a projection (device map + affine coeffs) for a given plot rect,
         data ranges, and axis scales - the reusable core of ``_draw``."""
@@ -2243,9 +2285,12 @@ class Axes(_AxesBase):
             for m in tw._marks:
                 tw._draw_mark(scene, m, proj)
             scene.end_group()
-            scene.add_path([(plot.x1, plot.y), (plot.x1, plot.y1)],
+            twticks = list(tw._yscale.ticks(tyr[0], tyr[1], 6))
+            lo, hi = self._spine_ends_for(
+                [proj.sy(v) for v, _ in twticks], plot.y, plot.y1, "top", "bottom")
+            scene.add_path([(plot.x1, plot.y - lo), (plot.x1, plot.y1 + hi)],
                            stroke_color=_SPINE, stroke_width=sw, cap="butt")
-            for val, label in tw._yscale.ticks(tyr[0], tyr[1], 6):
+            for val, label in twticks:
                 y = proj.sy(val)
                 scene.add_path([(plot.x1, y), (plot.x1 + _TICK_LENGTH, y)],
                                stroke_color=_SPINE, stroke_width=sw)
@@ -2264,9 +2309,12 @@ class Axes(_AxesBase):
             for m in tw._marks:
                 tw._draw_mark(scene, m, proj)
             scene.end_group()
-            scene.add_path([(plot.x, plot.y), (plot.x1, plot.y)],
+            twticks = list(tw._xscale.ticks(txr[0], txr[1], 7))
+            lo, hi = self._spine_ends_for(
+                [proj.sx(v) for v, _ in twticks], plot.x, plot.x1, "left", "right")
+            scene.add_path([(plot.x - lo, plot.y), (plot.x1 + hi, plot.y)],
                            stroke_color=_SPINE, stroke_width=sw, cap="butt")
-            for val, label in tw._xscale.ticks(txr[0], txr[1], 7):
+            for val, label in twticks:
                 x = proj.sx(val)
                 scene.add_path([(x, plot.y), (x, plot.y - _TICK_LENGTH)],
                                stroke_color=_SPINE, stroke_width=sw)
@@ -2337,11 +2385,18 @@ class Axes(_AxesBase):
         off = spec.get("_offset", 0.0)
         axis_label = spec["label"]
         hproj = self._proj_for(plot, xr, yr, self._xscale, self._yscale)
+        # An offset axis floats clear of the plot rect, so no spine of this
+        # axes reaches its ends - only its own limit ticks can overhang them.
+        corners = self._theme.spines if not off else ()
         if spec["axis"] == "x":
             top = spec["loc"] == "top"
             edge_y = plot.y - off if top else plot.y1 + off
             direction = -1.0 if top else 1.0
-            scene.add_path([(plot.x, edge_y), (plot.x1, edge_y)],
+            xs_at = [x for x in (hproj.sx(inv(v)) for v, _ in ticks)
+                     if plot.x - 0.5 <= x <= plot.x1 + 0.5]
+            lo, hi = self._spine_ends_for(xs_at, plot.x, plot.x1, "left", "right",
+                                          corners)
+            scene.add_path([(plot.x - lo, edge_y), (plot.x1 + hi, edge_y)],
                            stroke_color=_SPINE, stroke_width=sw, cap="butt")
             for sval, label in ticks:
                 x = hproj.sx(inv(sval))
@@ -2366,7 +2421,11 @@ class Axes(_AxesBase):
             right = spec["loc"] == "right"
             edge_x = plot.x1 + off if right else plot.x - off
             direction = 1.0 if right else -1.0
-            scene.add_path([(edge_x, plot.y), (edge_x, plot.y1)],
+            ys_at = [y for y in (hproj.sy(inv(v)) for v, _ in ticks)
+                     if plot.y - 0.5 <= y <= plot.y1 + 0.5]
+            lo, hi = self._spine_ends_for(ys_at, plot.y, plot.y1, "top", "bottom",
+                                          corners)
+            scene.add_path([(edge_x, plot.y - lo), (edge_x, plot.y1 + hi)],
                            stroke_color=_SPINE, stroke_width=sw, cap="butt")
             widest = 0.0
             for sval, label in ticks:

@@ -176,3 +176,13 @@ All notable changes to pyplotrs are documented here. The format is based on
   placed by the same map as the rest, they landed outside the plot rect as a
   stray label floating above or below the panel. Positions outside the limits
   are dropped now, and `get_xticks()`/`get_yticklabels()` report what is left.
+- A tick sitting on an axis limit did not join the end of its spine, and neither
+  did two spines meeting at a corner. Both are strokes with width, drawn as
+  separate paths, so each stopped on the other's centerline: the tick's own
+  half-width jutted past the flat end of the spine, and the outer quarter of the
+  corner was left blank - a half-point step at the corner of the frame, at the
+  default spine width. Spines now run half a stroke width past any end something
+  abuts, covering what a miter join between the two would have. The new theme
+  knob `spine_join` picks the rule: `"miter"` (default) closes only the ends
+  that need it, `"square"` overhangs every end like a projecting cap, and
+  `"butt"` restores the bare endpoints exactly.
