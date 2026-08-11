@@ -172,3 +172,7 @@ All notable changes to pyplotrs are documented here. The format is based on
   blank axes spanning every row, as wide as the code was indented, with the real
   panels squeezed into what was left. The string is dedented before it is read
   now, and a space marks an empty cell like `.` does.
+- Ticks pinned with `set(xticks=/yticks=)` outside the view were still drawn -
+  placed by the same map as the rest, they landed outside the plot rect as a
+  stray label floating above or below the panel. Positions outside the limits
+  are dropped now, and `get_xticks()`/`get_yticklabels()` report what is left.

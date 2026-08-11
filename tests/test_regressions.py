@@ -1065,3 +1065,22 @@ def test_mosaic_space_marks_an_empty_cell():
 
     assert set(axd) == {"A", "B"}
     assert fig._spans == [(0, 0, 2, 1), (0, 1, 1, 1)]
+
+
+def test_pinned_ticks_outside_the_view_are_dropped():
+    """`set(yticks=[...])` drew ticks that fall outside the limits anyway.
+
+    A pinned tick has no place on the axis to sit, so it was placed by the same
+    linear map as the rest and landed outside the plot rect: a stray label
+    floating above the panel, on top of whatever was there. It shows up as soon
+    as ticks are pinned to round numbers on data that turns out to be smaller
+    than expected - a residual panel, say.
+    """
+    fig, ax = plt.subplots()
+    ax.scatter([0, 1, 2], [0.01, -0.02, 0.015])
+    ax.set(yticks=[-0.05, 0.0, 0.05])
+
+    lo, hi = ax.get_ylim()
+    assert lo > -0.05 and hi < 0.05, "the view no longer excludes the outer ticks"
+    assert ax.get_yticks() == [0.0], f"ticks outside {lo}..{hi}: {ax.get_yticks()}"
+    assert ax.get_yticklabels() == ["0"]

@@ -1600,7 +1600,12 @@ class Axes(_AxesBase):
                        manual, manual_labels, formatter) -> list[tuple[float, str]]:
         """Locate ``(value, label)`` tick pairs honoring manual positions,
         manual labels, and a formatter override. Falls back to the scale's own
-        locator+labels when nothing is overridden (byte-identical to before)."""
+        locator+labels when nothing is overridden (byte-identical to before).
+
+        Manual positions outside ``lo..hi`` are dropped. A pinned tick has no
+        place on the axis to be drawn at, so it used to be placed by the same
+        arithmetic anyway and land *outside* the plot rect - a stray label
+        floating above or below the panel, over whatever was there."""
         if manual is not None:
             values = manual
         elif manual_labels is not None or formatter is not None:
@@ -1615,7 +1620,11 @@ class Axes(_AxesBase):
         else:
             labels = [_scales._fmt_plain(v) if v == int(v) else _ticker.fix_minus(f"{v:g}")
                       for v in values]
-        return list(zip(values, labels))
+        pairs = list(zip(values, labels))
+        if manual is not None:
+            eps = abs(hi - lo) * 1e-9
+            pairs = [p for p in pairs if lo - eps <= p[0] <= hi + eps]
+        return pairs
 
     # -- layout helpers -----------------------------------------------------
 
