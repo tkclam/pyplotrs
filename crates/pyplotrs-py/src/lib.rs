@@ -2023,6 +2023,51 @@ fn _stitch_polylines(segs: &[IsoSeg]) -> Vec<(bool, Vec<(f64, f64)>)> {
 /// One contour line as handed back to Python: `(level index, closed, points)`.
 type ContourLine = (u32, bool, Vec<(f64, f64)>);
 
+/// Reject a `(len, w, h)` triple the grid kernels cannot index safely.
+///
+/// These kernels take the flattened values and the shape as separate
+/// arguments, so nothing in the type system ties them together. A ragged
+/// nested list flattens to fewer than `w*h` elements while still reporting
+/// `w` from its first row, and the kernel then indexes past the end - which
+/// crosses the FFI boundary as a `PanicException`, a `BaseException` subclass
+/// that `except Exception` does not catch and whose message names a line in
+/// this file. The Python layer validates the caller's grid before it gets
+/// here; this is the backstop for the direct `_pyplotrs_core` caller and for
+/// the next kernel someone adds.
+/// The ceiling on a single buffer a data kernel may allocate, in bytes.
+///
+/// Matches the raster backend's own limit so that `contourf(upsample=...)` and
+/// `hist2d(bins=...)` fail the same way an oversized figure already does -
+/// with a `MemoryError` naming the size asked for. Without it a large enough
+/// argument reaches `vec![0u8; n]` and aborts the whole interpreter with
+/// SIGABRT, which no Python handler can see and which produces no traceback.
+const MAX_KERNEL_BYTES: f64 = 4.0e9;
+
+fn check_alloc(bytes: f64, who: &str, shape: &str) -> PyResult<()> {
+    if bytes > MAX_KERNEL_BYTES {
+        return Err(pyo3::exceptions::PyMemoryError::new_err(format!(
+            "{who} would allocate {shape} ({:.1} GB, limit {:.0} GB); \
+             reduce the resolution or the bin count",
+            bytes / 1e9,
+            MAX_KERNEL_BYTES / 1e9
+        )));
+    }
+    Ok(())
+}
+
+fn check_grid(len: usize, w: usize, h: usize, who: &str) -> PyResult<()> {
+    let want = w
+        .checked_mul(h)
+        .ok_or_else(|| PyValueError::new_err(format!("{who}: grid shape {w}x{h} overflows")))?;
+    if len < want {
+        return Err(PyValueError::new_err(format!(
+            "{who}: grid is {w}x{h} = {want} values but only {len} were given; \
+             rows must all be the same length"
+        )));
+    }
+    Ok(())
+}
+
 /// Marching-squares contour lines. `values` is a row-major `w*h` grid (index =
 /// `row*w + col`). Returns one entry per continuous contour line as
 /// `(level_idx, closed, points)`, where `points` are in fractional grid
@@ -2034,10 +2079,16 @@ type ContourLine = (u32, bool, Vec<(f64, f64)>);
 /// segment as its own stroked path leaves a wedge of background showing at every
 /// joint (butt caps meeting at an angle); one path per line joins them properly.
 #[pyfunction]
-fn contour_lines(values: F64Data, w: usize, h: usize, levels: F64Data) -> Vec<ContourLine> {
+fn contour_lines(
+    values: F64Data,
+    w: usize,
+    h: usize,
+    levels: F64Data,
+) -> PyResult<Vec<ContourLine>> {
+    check_grid(values.len(), w, h, "contour_lines")?;
     let mut out = Vec::new();
     if w < 2 || h < 2 {
-        return out;
+        return Ok(out);
     }
     let mut segs: Vec<IsoSeg> = Vec::new();
     for (li, &level) in levels.iter().enumerate() {
@@ -2104,7 +2155,7 @@ fn contour_lines(values: F64Data, w: usize, h: usize, levels: F64Data) -> Vec<Co
                 .map(|(closed, points)| (li, closed, points)),
         );
     }
-    out
+    Ok(out)
 }
 
 /// Filled contour bands as an RGBA image. The field is bilinearly upsampled by
@@ -2122,13 +2173,19 @@ fn contourf_image(
     edges: F64Data,
     band_lut: Vec<u8>,
     upsample: usize,
-) -> (Vec<u8>, usize, usize) {
+) -> PyResult<(Vec<u8>, usize, usize)> {
+    check_grid(values.len(), w, h, "contourf_image")?;
     let up = upsample.max(1);
     if w < 2 || h < 2 || edges.len() < 2 {
-        return (Vec::new(), 0, 0);
+        return Ok((Vec::new(), 0, 0));
     }
     let ow = (w - 1) * up + 1;
     let oh = (h - 1) * up + 1;
+    check_alloc(
+        ow as f64 * oh as f64 * 4.0,
+        "contourf_image",
+        &format!("{ow} x {oh} px"),
+    )?;
     let nbands = edges.len() - 1;
     // Edges written the obvious way - `lo + (hi - lo) * i / n` over the data's
     // own extrema - do not land on `hi`: the last one falls an ulp short, and
@@ -2175,7 +2232,7 @@ fn contourf_image(
             buf[o + 3] = band_lut[li + 3];
         }
     }
-    (buf, ow, oh)
+    Ok((buf, ow, oh))
 }
 
 /// 2D histogram: count `(xs, ys)` into `ny * nx` equal bins over
@@ -2192,7 +2249,19 @@ fn hist2d(
     xhi: f64,
     ylo: f64,
     yhi: f64,
-) -> Vec<f64> {
+) -> PyResult<Vec<f64>> {
+    // `nx == 0` used to reach `ix = nx - 1` below, which wraps in `usize` to
+    // 18446744073709551615 and indexes an empty buffer.
+    if nx == 0 || ny == 0 {
+        return Err(PyValueError::new_err(
+            "hist2d needs at least one bin on each axis; got nx=0 or ny=0",
+        ));
+    }
+    check_alloc(
+        nx as f64 * ny as f64 * 8.0,
+        "hist2d",
+        &format!("{nx} x {ny} bins"),
+    )?;
     let mut counts = vec![0.0f64; nx * ny];
     let xspan = if xhi > xlo { xhi - xlo } else { 1.0 };
     let yspan = if yhi > ylo { yhi - ylo } else { 1.0 };
@@ -2210,7 +2279,7 @@ fn hist2d(
         }
         counts[iy * nx + ix] += 1.0;
     }
-    counts
+    Ok(counts)
 }
 
 /// Evaluate a 1D Gaussian kernel density estimate of `samples` at each point of

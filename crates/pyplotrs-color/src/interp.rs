@@ -98,7 +98,13 @@ pub fn table_from_stops(stops: &[(f64, [u8; 3])], space: InterpSpace) -> [[u8; 3
         "table_from_stops needs at least one stop"
     );
     let mut sorted: Vec<(f64, [u8; 3])> = stops.to_vec();
-    sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    // `total_cmp`, not `partial_cmp().unwrap()`: a NaN position compares to
+    // nothing, so `partial_cmp` returns `None` and the unwrap panicked - which
+    // reached a caller of the public `Colormap(stops=...)` constructor as a
+    // `PanicException`. The Python layer rejects non-finite positions before
+    // this point; ordering NaN consistently here keeps the sort itself total
+    // for any other caller.
+    sorted.sort_by(|a, b| a.0.total_cmp(&b.0));
     let converted: Vec<(f64, [f64; 3])> = sorted
         .into_iter()
         .map(|(p, c)| (p, to_space(c, space)))

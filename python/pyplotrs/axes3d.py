@@ -29,6 +29,7 @@ from ._util import (
     _darker,
     _data_range,
     _delaunay,
+    _rectangular,
     _to_f64,
     _with_alpha,
 )
@@ -52,7 +53,7 @@ def _grid_xyz(X, Y, Z):
     the same shape, or 1D (``X`` length ncols, ``Y`` length nrows), in which
     case they are broadcast.
     """
-    gz = [[float(v) for v in row] for row in Z]
+    gz = _rectangular([[float(v) for v in row] for row in Z])
     nr = len(gz)
     nc = len(gz[0]) if gz else 0
 

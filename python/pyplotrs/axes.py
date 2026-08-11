@@ -52,6 +52,7 @@ from ._util import (
     _is_uniform,
     _level_edges,
     _patch_bbox,
+    _require_same_length,
     _spine_ends,
     _step_points,
     _streamlines,
@@ -380,11 +381,13 @@ class Axes(_AxesBase):
         faster vector export on dense data. Set ``False`` to keep every vertex
         exactly (e.g. when the polyline *is* the data being exported).
         """
+        xs, ys = self._coords(xs, "x"), self._coords(ys, "y")
+        _require_same_length("line", x=xs, y=ys)
         self._marks.append({
             "zorder": float(zorder),
             "kind": "line",
-            "xs": self._coords(xs, "x"),
-            "ys": self._coords(ys, "y"),
+            "xs": xs,
+            "ys": ys,
             "label": label,
             "color": self._mark_color(color, alpha),
             "linewidth": self._theme.line_width if linewidth is None else float(linewidth),
@@ -431,6 +434,7 @@ class Axes(_AxesBase):
         in that case, else ``self``."""
         xs = self._coords(xs, "x")
         ys = self._coords(ys, "y")
+        _require_same_length("scatter", x=xs, y=ys)
         mark = {
             "zorder": float(zorder),
             "kind": "scatter",
@@ -469,6 +473,7 @@ class Axes(_AxesBase):
         discrete categories at the default single-column figure size."""
         xs = self._coords(x, "x")
         heights = [float(v) for v in height]
+        _require_same_length("bar", x=xs, height=heights)
         self._marks.append({
             "zorder": float(zorder),
             "kind": "bar",
@@ -507,12 +512,14 @@ class Axes(_AxesBase):
                      label: str | None = None, zorder: float = 0.0) -> "Axes":
         """Fill the band between ``y1`` and ``y2`` across ``xs``."""
         xs = self._coords(xs, "x")
+        y1 = _to_f64(y1)
+        _require_same_length("fill_between", x=xs, y1=y1)
         self._marks.append({
             "zorder": float(zorder),
             "kind": "fill",
             "orient": "y",
             "xs": xs,
-            "y1": _to_f64(y1),
+            "y1": y1,
             "y2": _to_f64(_as_seq(y2, len(xs))),
             "color": self._next_color(color),
             "alpha": float(alpha),
@@ -525,12 +532,14 @@ class Axes(_AxesBase):
         """Fill the band between ``x1`` and ``x2`` across ``ys`` - the transpose
         of :meth:`fill_between`, for bands around a horizontal profile."""
         ys = self._coords(ys, "y")
+        x1 = _to_f64(x1)
+        _require_same_length("fill_betweenx", y=ys, x1=x1)
         self._marks.append({
             "zorder": float(zorder),
             "kind": "fill",
             "orient": "x",
             "ys": ys,
-            "y1": _to_f64(x1),
+            "y1": x1,
             "y2": _to_f64(_as_seq(x2, len(ys))),
             "color": self._next_color(color),
             "alpha": float(alpha),
@@ -581,6 +590,7 @@ class Axes(_AxesBase):
         """Plot ``(xs, ys)`` with symmetric ``yerr``/``xerr`` error bars."""
         xs = [float(x) for x in xs]
         ys = [float(y) for y in ys]
+        _require_same_length("errorbar", x=xs, y=ys)
         n = len(xs)
         self._marks.append({
             "zorder": float(zorder),
@@ -615,9 +625,11 @@ class Axes(_AxesBase):
         """Horizontal bars of the given ``width`` at vertical positions ``y``.
         ``y`` may be strings (categories), which set a categorical y-axis."""
         ys = self._coords(y, "y")
+        widths = [float(v) for v in width]
+        _require_same_length("barh", y=ys, width=widths)
         self._marks.append({
             "zorder": float(zorder),
-            "kind": "barh", "ys": ys, "widths": [float(v) for v in width],
+            "kind": "barh", "ys": ys, "widths": widths,
             "lefts": _as_seq(left, len(ys)), "height": float(height),
             "color": self._mark_color(color, alpha), "label": label,
             "edgecolor": None if edgecolor is None else self._theme.resolve(edgecolor),
@@ -773,7 +785,9 @@ class Axes(_AxesBase):
              linewidth: float | None = None, alpha: float = 1.0,
              linestyle: str = "solid", label: str | None = None, zorder: float = 0.0) -> "Axes":
         """Step plot through ``(xs, ys)``; ``where`` is ``pre``/``post``/``mid``."""
-        px, py = _step_points(list(_to_f64(xs)), list(_to_f64(ys)), where)
+        xs, ys = _to_f64(xs), _to_f64(ys)
+        _require_same_length("step", x=xs, y=ys)
+        px, py = _step_points(list(xs), list(ys), where)
         self._marks.append({
             "zorder": float(zorder),
             "kind": "line", "xs": _to_f64(px), "ys": _to_f64(py), "label": label,
@@ -820,9 +834,11 @@ class Axes(_AxesBase):
              label: str | None = None, zorder: float = 0.0) -> "Axes":
         """Stem plot: a vertical line from ``bottom`` to each ``(x, y)`` topped by
         a marker, with a baseline."""
+        xs, ys = self._coords(xs, "x"), self._coords(ys, "y")
+        _require_same_length("stem", x=xs, y=ys)
         self._marks.append({
             "zorder": float(zorder),
-            "kind": "stem", "xs": self._coords(xs, "x"), "ys": self._coords(ys, "y"),
+            "kind": "stem", "xs": xs, "ys": ys,
             "bottom": float(bottom), "color": self._mark_color(color, alpha),
             "marker": marker, "markersize": float(markersize), "label": label,
         })
@@ -873,6 +889,13 @@ class Axes(_AxesBase):
         xs = _to_f64(xs)
         ys = _to_f64(ys)
         nx, ny = (bins, bins) if isinstance(bins, int) else (int(bins[0]), int(bins[1]))
+        # A non-positive count reached the kernel, which computes `nx - 1` in
+        # `usize` - so 0 wrapped to 18446744073709551615 and indexed an empty
+        # buffer, and a negative failed as a PyO3 conversion OverflowError.
+        if nx < 1 or ny < 1:
+            raise ValueError(
+                f"hist2d needs at least one bin on each axis; got bins=({nx}, {ny})"
+            )
         if range is not None:
             (xlo, xhi), (ylo, yhi) = range
         else:
@@ -1075,6 +1098,12 @@ class Axes(_AxesBase):
             ys = tuple(ys[0])
         xs = _to_f64(x)
         n = len(xs)
+        for i, series in enumerate(ys):
+            if hasattr(series, "__len__") and len(series) != n:
+                raise ValueError(
+                    f"stackplot needs x and every series of equal length; "
+                    f"got x={n}, series {i}={len(series)}"
+                )
         lower = [float(baseline)] * n
         for i, series in enumerate(ys):
             vals = _as_seq(series, n)
@@ -1289,8 +1318,7 @@ class Axes(_AxesBase):
         """
         xs = _to_f64(x)
         ys = _to_f64(y)
-        if len(xs) != len(ys):
-            raise ValueError(f"fill needs x and y of equal length; got {len(xs)}, {len(ys)}")
+        _require_same_length("fill", x=xs, y=ys)
         return self.polygon(list(zip(xs, ys)), facecolor=facecolor, edgecolor=edgecolor,
                             linewidth=linewidth, linestyle=linestyle, alpha=alpha, hatch=hatch)
 

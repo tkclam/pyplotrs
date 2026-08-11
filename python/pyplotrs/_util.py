@@ -43,6 +43,25 @@ def _as_seq(value, n: int) -> list[float]:
     return [float(v) for v in items]
 
 
+def _require_same_length(mark: str, **arrays) -> None:
+    """Raise unless every named array is the same length.
+
+    Parallel-array marks used to truncate to the shortest input and carry on,
+    which is worse than it sounds: the *axis limits* are still folded from the
+    full arrays, so ``line([1,2,3,4,5], [10,20])`` drew a two-point line on an
+    x axis running to 5 and reported ``get_xlim() == (0.8, 5.2)``. That is a
+    figure which looks deliberate and is wrong, which is the one failure mode a
+    publication-quality library must not have. matplotlib raises here too.
+    """
+    lengths = {name: len(values) for name, values in arrays.items()}
+    if len(set(lengths.values())) <= 1:
+        return
+    detail = ", ".join(f"{name}={n}" for name, n in lengths.items())
+    raise ValueError(
+        f"{mark} needs {' and '.join(lengths)} of equal length; got {detail}"
+    )
+
+
 #: ``struct`` format codes for buffers that hold numbers, and so can go down
 #: the ``array("d", view)`` fast path. A buffer whose format is anything else -
 #: NumPy's ``1w`` for a ``<U*`` string array, ``O`` for an object array - is
@@ -682,15 +701,37 @@ def _interp_coord(coords: list[float], t: float) -> float:
     return coords[i] * (1.0 - frac) + coords[i + 1] * frac
 
 
+def _rectangular(Z: list[list[float]], what: str = "Z") -> list[list[float]]:
+    """Return ``Z`` unchanged, or raise if its rows are not all the same length.
+
+    The callers take ``w`` from ``Z[0]`` and ``h`` from ``len(Z)`` and hand the
+    pair to a Rust kernel alongside the flattened values. On a ragged grid that
+    pair describes more elements than were actually flattened, and the kernel
+    indexes off the end of the buffer - which surfaces as a ``PanicException``
+    naming a line inside the extension. Checking here means the message names
+    the argument instead.
+    """
+    if not Z:
+        return Z
+    w = len(Z[0])
+    for i, row in enumerate(Z):
+        if len(row) != w:
+            raise ValueError(
+                f"{what} rows must all be the same length; row 0 has {w}, "
+                f"row {i} has {len(row)}"
+            )
+    return Z
+
+
 def _field_args(args) -> tuple[list[float], list[float], list[list[float]]]:
     """Parse ``(Z)`` or ``(X, Y, Z)`` field-plot positional args into 1D x/y
     coordinate vectors and the 2D ``Z`` grid."""
     if len(args) == 1:
-        Z = [[float(v) for v in row] for row in args[0]]
+        Z = _rectangular([[float(v) for v in row] for row in args[0]])
         h = len(Z); w = len(Z[0]) if Z else 0
         return [float(i) for i in range(w)], [float(i) for i in range(h)], Z
     X, Y, Z = args[0], args[1], args[2]
-    Z = [[float(v) for v in row] for row in Z]
+    Z = _rectangular([[float(v) for v in row] for row in Z])
     # Accept 1D vectors or 2D meshgrids for X/Y (take the first row / column).
     xc = [float(v) for v in (X[0] if _is_2d(X) else X)]
     yc = [float(v) for v in ([r[0] for r in Y] if _is_2d(Y) else Y)]

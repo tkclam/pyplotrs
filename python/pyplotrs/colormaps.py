@@ -80,6 +80,15 @@ class Colormap:
             s = [(float(p), (int(r), int(g), int(b))) for p, (r, g, b) in stops]
             if len(s) < 2:
                 raise ValueError("a colormap needs at least two stops")
+            # The table build sorts by position, and NaN does not compare, so a
+            # non-finite position used to surface as a PanicException out of the
+            # sort rather than as a complaint about the argument.
+            bad = [i for i, (p, _c) in enumerate(s) if not -1e308 < p < 1e308]
+            if bad:
+                raise ValueError(
+                    f"colormap stop positions must be finite; stop "
+                    f"{bad[0]} has position {s[bad[0]][0]!r}"
+                )
             self._table = tuple(_core.colormap_table_from_stops(s, space))
 
     def __call__(self, t: float) -> _RGBA:
