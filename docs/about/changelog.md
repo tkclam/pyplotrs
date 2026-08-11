@@ -137,6 +137,12 @@ All notable changes to pyplotrs are documented here. The format is based on
   to butt cap and left a wedge of background at each joint. The kernel now
   stitches the pieces into whole lines (matched on grid-edge identity, so the
   join is exact), and each line is one path with round joins.
+- `pie` slice labels lost their last glyph (`gamma` drawn as `gamm`) and left a
+  third of the cell empty. The labels sat at a rim offset in data units while
+  their width is a device length, so `pie` padded its limits by a fixed factor
+  and hoped: too little for a long label, too much for a short one. The pie now
+  keeps its limits at its own bounding box and is fitted in device space
+  against measured labels, which are drawn outside the plot clip.
 - `contour(levels=N)` sliced the data range into `N + 1` equal parts, putting
   the lines on values like 0.1426 and 0.2853. `N` is now a *hint*, as it is in
   matplotlib: the levels land on multiples of a nice step, and only levels

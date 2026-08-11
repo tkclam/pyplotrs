@@ -887,3 +887,124 @@ def test_contourf_and_contour_default_to_the_same_levels():
     assert mappable.vmax == pytest.approx(1.0)
     assert ax._marks[1]["levels"] == pytest.approx(
         [-0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75])
+
+
+# -- pie -----------------------------------------------------------------------
+
+def _clipped_group(svg):
+    """The body of the axes' clipped data group, and the clip rect's bbox."""
+    grp = re.search(r'<g clip-path="url\(#(clip\d+)\)">(.*?)</g>', svg, flags=re.S)
+    assert grp, "no clipped data group in the SVG"
+    clip = re.search(rf'<clipPath id="{grp.group(1)}"[^>]*>(.*?)</clipPath>',
+                     svg, flags=re.S)
+    return grp.group(2), _path_bbox(clip.group(1))
+
+
+def _path_bbox(chunk):
+    """``(x0, y0, x1, y1)`` over every point of every path in ``chunk``. Paths
+    are emitted as ``M``/``L``/``Z`` only, so the numbers pair up as x, y."""
+    xs, ys = [], []
+    for d in re.findall(r'<path[^>]*d="([^"]*)"', chunk):
+        nums = [float(v) for v in re.findall(r"-?\d+(?:\.\d+)?", d)]
+        xs.extend(nums[0::2])
+        ys.extend(nums[1::2])
+    assert xs, "no path geometry found"
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def test_pie_slice_labels_are_not_clipped(tmp_path):
+    """`gamma` rendered as `gamm`.
+
+    Slice labels were drawn inside the axes' clip group, at a rim offset in
+    *data* units, while their width is a device length the view limits know
+    nothing about. `pie` padded the limits by a fixed 1.55x to cover for that -
+    a guess that clipped anything wider than it allowed for, and wasted a third
+    of the cell on everything narrower. The labels are now measured and drawn
+    outside the clip, and the pie takes the shrink instead.
+    """
+    w, h = 250.0, 200.0
+    fig, ax = plt.subplots(figsize=(w, h))
+    ax.pie([35, 25, 22, 18], labels=["alpha", "beta", "gamma", "delta"])
+
+    out = tmp_path / "pie_labels.svg"
+    fig.save(str(out))
+    svg = out.read_text()
+    clipped, _ = _clipped_group(svg)
+    assert "<text" not in clipped, (
+        "a slice label is inside the plot clip - the clip is what ate the last "
+        "glyph of the widest label"
+    )
+
+    from pyplotrs import _pyplotrs_core as _core
+    from pyplotrs._draw import _tw
+
+    size = ax._theme.tick_label_size
+    scene = _core.Scene(w, h)
+    texts, _ = _page_texts(fig, tmp_path, "pie_labels")
+    labels = [t for t in texts if t[2] in ("alpha", "beta", "gamma", "delta")]
+    assert len(labels) == 4, f"expected 4 slice labels, drew {len(labels)}"
+    for x, y, s in labels:
+        assert x >= 0.0 and x + _tw(scene, s, size) <= w, (
+            f"label {s!r} spans x={x}..{x + _tw(scene, s, size)} on a {w}pt canvas")
+        assert 0.0 <= y <= h, f"label {s!r} at y={y} is off a {h}pt-tall canvas"
+
+
+def test_pie_grows_until_a_label_reaches_the_cell_edge(tmp_path):
+    """Labeling a pie used to shrink it by a fixed 1.15/1.55 whatever the cell
+    and the labels looked like, because the room came out of the view limits -
+    which the equal aspect then squares off, spending it on all four sides at
+    once. Room now comes out of the *device* radius, only as much as the
+    measured labels need, so the fit is tight: something has to be touching an
+    edge, or the pie was drawn smaller than it had to be.
+
+    The labels are also held to the axes' whole cell rather than to that
+    square, so a wide cell spends its horizontal slack on the labels instead of
+    on the pie - which is why one of them reaches past the square here.
+    """
+    from pyplotrs import _pyplotrs_core as _core
+    from pyplotrs._draw import _th, _tw
+
+    w, h = 400.0, 200.0
+    names = ["alpha", "beta", "gamma", "delta"]
+
+    def draw(labels, name):
+        fig, ax = plt.subplots(figsize=(w, h))
+        ax.pie([35, 25, 22, 18], labels=labels)
+        out = tmp_path / f"{name}.svg"
+        fig.save(str(out))
+        svg = out.read_text()
+        clipped, square = _clipped_group(svg)
+        return ax, svg, _path_bbox(clipped), square
+
+    # With no labels the pie fills the equal-aspect square outright.
+    _ax, _svg, bare, square = draw(None, "pie_bare")
+    assert (bare[3] - bare[1]) == pytest.approx(square[3] - square[1], abs=2.0), (
+        f"an unlabeled pie should fill its square: {bare} in {square}")
+
+    ax, svg, pie, square = draw(names, "pie_labelled")
+    size = ax._theme.tick_label_size
+    scene = _core.Scene(w, h)
+    texts = re.findall(
+        r'<text[^>]*x="([-\d.]+)"[^>]*y="([-\d.]+)"[^>]*>([^<]*)</text>', svg)
+    boxes = []
+    for x, y, s in ((float(x), float(y), s) for x, y, s in texts):
+        if s not in names:
+            continue
+        asc, desc = _th(scene, s, size)
+        # `y` is the baseline, and the label is centered about the rim point.
+        boxes.append((x, y - (asc + desc) / 2.0, x + _tw(scene, s, size),
+                      y + (asc + desc) / 2.0))
+    assert len(boxes) == 4, f"expected 4 slice labels, drew {len(boxes)}"
+
+    # Tight vertically: the cell is height-bound, so its top and bottom are the
+    # square's, and the label that binds has to be sitting on one of them.
+    top = min(b[1] for b in boxes)
+    bottom = max(b[3] for b in boxes)
+    assert min(top - square[1], square[3] - bottom) <= 2.0, (
+        f"labels span y={top}..{bottom} inside a cell of y={square[1]}.."
+        f"{square[3]} - the pie could have been drawn larger")
+
+    # And using the slack the square does not have: a label reaches past it.
+    assert min(b[0] for b in boxes) < square[0], (
+        "no label used the cell's horizontal slack, so the pie was fitted to "
+        "the equal-aspect square instead of to the cell")

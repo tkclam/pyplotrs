@@ -53,6 +53,18 @@ _CUBE_FILL = 0.86  # fraction of the plot rect the projected cube fills
 
 _DATA_PAD = 0.05  # fraction of range added as margin around data
 
+#: Pie slice labels. `_PIE_LABEL_R` is where a label's anchor sits, in wedge
+#: radii, so the text clears the rim. A label's *width* is a device length the
+#: data limits know nothing about, so the pie is sized in device space instead
+#: (see `Axes._pie_geometry`): it shrinks until every label fits the plot rect.
+#: `_PIE_MIN_RADIUS` floors that shrink - a label wider than the rect would
+#: otherwise drive the radius to nothing, and a legible pie with one overhanging
+#: label beats a dot with a tidy one. It is a fraction of the radius the pie
+#: would have with no labels at all.
+_PIE_LABEL_R = 1.12
+_PIE_MIN_RADIUS = 0.5
+_PIE_WEDGE_STROKE = 1.0  # separator stroke straddling each wedge edge
+
 #: Width (points) of the face-colored outline drawn on tiled cells - hexbin's
 #: hexagons - so their shared edges don't show a seam. Two cells that abut
 #: exactly still split the pixels along that edge, and compositing them in turn

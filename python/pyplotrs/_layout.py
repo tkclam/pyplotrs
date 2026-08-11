@@ -28,16 +28,26 @@ class _Proj:
     ``add_markers_xform``) take raw data plus ``coeffs`` and the codes, and apply
     the (possibly nonlinear) transform per point **in Rust** before the affine,
     so no per-point Python runs on the hot path under any scale.
+
+    ``rect`` is the ``(x, y, w, h)`` these map into - the plot rect *after* any
+    equal-aspect shrink, which is also what the data is clipped to. ``cell`` is
+    the axes' plot rect *before* that shrink, so the two differ only under an
+    equal aspect. A mark sized in device points rather than data units (the pie
+    and its slice labels) needs the box it has to fit, not just the map into it:
+    the pie body fits ``rect``, its labels the wider ``cell``.
     """
 
-    __slots__ = ("sx", "sy", "coeffs", "xcode", "ycode")
+    __slots__ = ("sx", "sy", "coeffs", "xcode", "ycode", "rect", "cell")
 
-    def __init__(self, sx, sy, coeffs, xcode: str, ycode: str) -> None:
+    def __init__(self, sx, sy, coeffs, xcode: str, ycode: str, rect,
+                 cell=None) -> None:
         self.sx = sx
         self.sy = sy
         self.coeffs = coeffs  # (ax, bx, ay, by) over TRANSFORMED space
         self.xcode = xcode
         self.ycode = ycode
+        self.rect = rect  # (x, y, w, h) device points
+        self.cell = rect if cell is None else cell
 
 
 class _Rect:
