@@ -1008,3 +1008,27 @@ def test_pie_grows_until_a_label_reaches_the_cell_edge(tmp_path):
     assert min(b[0] for b in boxes) < square[0], (
         "no label used the cell's horizontal slack, so the pie was fitted to "
         "the equal-aspect square instead of to the cell")
+
+
+def test_frame_off_reserves_no_tick_band(tmp_path):
+    """A pie sat in a cell with a wide blank strip down its left.
+
+    `axis("off")` - which `pie` implies - suppresses every tick and tick label,
+    but the layout still reserved the band they would have occupied: a y band
+    as wide as the undrawn "-1.00" labels on the left, an x band on the bottom.
+    Nothing was drawn there, so the whole plot rect just sat off-center in its
+    cell. With no ticks to reserve for, the cell's only chrome is the title, so
+    the pie must come out centered on the canvas.
+    """
+    w, h = 400.0, 300.0
+    fig, ax = plt.subplots(figsize=(w, h))
+    ax.pie([35, 25, 22, 18])
+    ax.set(title="Pie")
+    out = tmp_path / "pie_off.svg"
+    fig.save(str(out))
+    clipped, _square = _clipped_group(out.read_text())
+    x0, _y0, x1, _y1 = _path_bbox(clipped)
+
+    assert (x0 + x1) / 2.0 == pytest.approx(w / 2.0, abs=1.0), (
+        f"the pie spans x={x0}..{x1} on a {w}pt canvas - it is off-center, so "
+        "an empty tick band is still being reserved beside it")

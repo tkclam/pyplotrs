@@ -1831,6 +1831,15 @@ class Axes(_AxesBase):
         y_label_w = max((_tw(scene, lbl, _TICK_LABEL_SIZE) for _, lbl in yticks), default=0.0)
         y_tick_w = _TICK_LENGTH + _TICK_LABEL_GAP + y_label_w
 
+        # `axis("off")` - which `pie` implies - draws no tick and no tick label,
+        # so a reserved tick band is empty by construction: it only pushes the
+        # plot rect off-center inside the cell. On a pie that showed as a wide
+        # blank strip down the left, the width of y labels that were never
+        # drawn. The bands below (title, axis labels, colorbar, twins) still
+        # draw with the frame off, so only these two are dropped.
+        if self._frame_off:
+            x_tick_h = y_tick_w = 0.0
+
         title_h = 0.0
         title_font = _font(t.title_weight)
         label_font = _font(t.axis_label_weight)

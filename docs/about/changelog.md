@@ -159,3 +159,9 @@ All notable changes to pyplotrs are documented here. The format is based on
   exactly, and the count of those decimals gave up at zero for any step under
   1e-6 - so every level rounded to 0.0, fell outside the data range, and was
   dropped.
+- `axis("off")` - and so every `pie` - left a blank strip down the left of the
+  cell and along its bottom. The layout still reserved the bands for the tick
+  marks and tick labels the frame-off axes never draws, so the plot rect sat
+  off-center by the width of labels nobody saw. Those two bands are now
+  dropped when the frame is off, which both centers the mark and gives it the
+  space back.
