@@ -2110,7 +2110,8 @@ fn contour_lines(values: F64Data, w: usize, h: usize, levels: F64Data) -> Vec<Co
 /// Filled contour bands as an RGBA image. The field is bilinearly upsampled by
 /// `upsample` and each pixel colored by the band its value falls in (`edges` has
 /// `nbands+1` monotone entries; `band_lut` is `nbands*4` RGBA bytes). Values
-/// outside `edges[0]..edges[last]` (and non-finite) are transparent. Returns
+/// outside `edges[0]..edges[last]` by more than a rounding (and non-finite ones)
+/// are transparent. Returns
 /// `(rgba, out_w, out_h)` with buffer row 0 = grid row `h-1` (largest data y at
 /// the top), matching `add_image`'s top-down placement.
 #[pyfunction]
@@ -2129,6 +2130,13 @@ fn contourf_image(
     let ow = (w - 1) * up + 1;
     let oh = (h - 1) * up + 1;
     let nbands = edges.len() - 1;
+    // Edges written the obvious way - `lo + (hi - lo) * i / n` over the data's
+    // own extrema - do not land on `hi`: the last one falls an ulp short, and
+    // then the pixels carrying the field's maximum test as *outside* the bands
+    // and come out transparent, a hairline of background straight through the
+    // peak. Admit a hair past each end. It is far below one band, so a caller
+    // who means to clip a range still gets it clipped.
+    let pad = 1e-9 * (edges[nbands] - edges[0]).abs();
     let mut buf = vec![0u8; ow * oh * 4];
     for oy in 0..oh {
         // Flip so buffer row 0 corresponds to the largest-y grid row (h-1).
@@ -2151,7 +2159,7 @@ fn contourf_image(
             let top = v00 + (v10 - v00) * fx;
             let bot = v01 + (v11 - v01) * fx;
             let val = top + (bot - top) * fy;
-            if val < edges[0] || val > edges[nbands] {
+            if val < edges[0] - pad || val > edges[nbands] + pad {
                 continue;
             }
             // Band index: largest b with edges[b] <= val.

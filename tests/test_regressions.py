@@ -595,3 +595,134 @@ def test_stitched_contour_never_joins_points_from_different_cells():
                 f"level {li} jumps from ({x0}, {y0}) to ({x1}, {y1}) - further "
                 f"than one grid cell, so these two points are not one segment"
             )
+
+
+def test_contour_levels_land_on_round_numbers():
+    """``levels=N`` used to slice the data range into N+1 equal parts, which put
+    the lines on values like 0.1426 and 0.2853 - and gave a different set (and
+    count) of lines than matplotlib for the same call. A contour level is read
+    as a *value*, so it belongs on a round number, chosen the way the axis
+    locator chooses ticks.
+    """
+    import math
+
+    gx = [-3.0 + 6.0 * i / 29 for i in range(30)]
+    gy = [-2.0 + 4.0 * j / 19 for j in range(20)]
+    Z = [[math.exp(-(x * x + y * y) / 4) * math.sin(1.5 * x) * math.cos(1.2 * y)
+          for x in gx] for y in gy]
+
+    fig, ax = plt.subplots()
+    ax.contour(gx, gy, Z, levels=10)
+    # matplotlib draws exactly these for this field and this `levels` hint.
+    assert ax._marks[0]["levels"] == pytest.approx(
+        [-0.75, -0.6, -0.45, -0.3, -0.15, 0.0, 0.15, 0.3, 0.45, 0.6, 0.75])
+
+
+def test_contour_levels_stay_inside_the_data_range():
+    """A level at (or past) an extreme draws nothing, or a single degenerate
+    point, but still consumed a color and a legend slot."""
+    fig, ax = plt.subplots()
+    ax.contour([[0.0, 1.0], [1.0, 2.0]], levels=5)
+    assert all(0.0 < lv < 2.0 for lv in ax._marks[0]["levels"])
+
+
+def test_contour_levels_survive_a_field_of_tiny_magnitude():
+    """The step is rounded to the decimals it needs to be written exactly, and
+    the count of those decimals gave up at zero for any step under 1e-6: every
+    level of a field spanning a micro-unit rounded to 0.0, fell outside the data
+    range, and was dropped. A whole class of fields drew no contour at all.
+    """
+    Z = [[1e-6 * (c + r) / 20.0 for c in range(11)] for r in range(11)]
+    fig, ax = plt.subplots()
+    ax.contour(Z, levels=7)
+    lvls = ax._marks[0]["levels"]
+    assert len(lvls) > 3, f"a 1e-6-wide field drew {len(lvls)} contour lines"
+    assert all(0.0 < lv < 1e-6 for lv in lvls)
+
+
+# -- filled contours ---------------------------------------------------------
+
+def _contourf_pixels(mark):
+    """``(width, height, rgba rows)`` of a ``contourf`` mark's raster."""
+    img, w, h = mark["img"], mark["uw"], mark["uh"]
+    return w, h, [[tuple(img[(y * w + x) * 4:(y * w + x) * 4 + 4]) for x in range(w)]
+                  for y in range(h)]
+
+
+def test_contourf_fills_the_column_through_the_extreme():
+    """Band edges built as ``lo + (hi - lo) * i / n`` land a whole ulp under
+    ``hi``, so the pixels interpolating the field's own maximum tested as *above*
+    the last edge and were left transparent - a white line straight down the
+    middle of the peak.
+
+    Auto levels no longer divide the range that way, but a caller's own can (it
+    is the obvious way to write them), so the band kernel admits a hair past
+    each end too. Both routes have to fill the peak.
+    """
+    import math
+
+    gx = [-3.0 + 6.0 * i / 29 for i in range(30)]
+    gy = [-2.0 + 4.0 * j / 19 for j in range(20)]
+    Z = [[math.exp(-(x * x + y * y) / 4) * math.sin(1.5 * x) * math.cos(1.2 * y)
+          for x in gx] for y in gy]
+    lo, hi = min(min(r) for r in Z), max(max(r) for r in Z)
+    # `lo + (hi - lo)` is not `hi`: the last edge falls an ulp short of the peak.
+    by_hand = [lo + (hi - lo) * i / 12 for i in range(13)]
+    assert by_hand[-1] < hi, "float arithmetic changed; pick another field"
+
+    for levels in (12, by_hand, [lo, 0.0, hi]):
+        fig, ax = plt.subplots()
+        ax.contourf(gx, gy, Z, levels=levels)
+        w, h, rows = _contourf_pixels(ax._marks[0])
+        clear = [(x, y) for y in range(h) for x in range(w) if rows[y][x][3] == 0]
+        assert not clear, (
+            f"levels={levels}: {len(clear)} transparent pixels inside the data "
+            f"range, at columns {sorted({x for x, _ in clear})}"
+        )
+
+
+def test_contourf_bands_end_where_contour_lines_run():
+    """Filled bands sliced the data range into equal fractions while the lines
+    were placed on round numbers, so a ``contour`` drawn over a ``contourf`` of
+    the same field ran through the middle of the bands instead of along their
+    boundaries. Both now read off one lattice - matplotlib's, so the numbers on
+    the colorbar match a matplotlib figure too.
+    """
+    import math
+
+    gx = [-3.0 + 6.0 * i / 29 for i in range(30)]
+    gy = [-2.0 + 4.0 * j / 19 for j in range(20)]
+    Z = [[math.exp(-(x * x + y * y) / 4) * math.sin(1.5 * x) * math.cos(1.2 * y)
+          for x in gx] for y in gy]
+
+    fig, ax = plt.subplots()
+    mappable = ax.contourf(gx, gy, Z, levels=12)
+    ax.contour(gx, gy, Z, levels=12)
+    edges = [-0.9, -0.75, -0.6, -0.45, -0.3, -0.15, 0.0,
+             0.15, 0.3, 0.45, 0.6, 0.75, 0.9]  # matplotlib's, for this field
+
+    assert mappable.vmin == pytest.approx(edges[0])
+    assert mappable.vmax == pytest.approx(edges[-1])
+    for lv in ax._marks[1]["levels"]:
+        assert any(lv == pytest.approx(e) for e in edges), (
+            f"line at {lv} sits inside a band, not on a boundary: {edges}"
+        )
+
+
+def test_contourf_and_contour_default_to_the_same_levels():
+    """Two hard-wired defaults (9 bands, 8 lines) meant the plainest overlay of
+    all - ``contourf`` then ``contour``, neither given ``levels`` - picked two
+    different steps and disagreed everywhere."""
+    import math
+
+    Z = [[math.sin(c / 4.0) * math.cos(r / 4.0) for c in range(25)] for r in range(25)]
+    fig, ax = plt.subplots()
+    mappable = ax.contourf(Z)
+    ax.contour(Z)
+
+    # matplotlib fills -1.0 to 1.0 in steps of 0.25 here; the two levels its
+    # lattice puts outside this field draw nothing, leaving the seven lines.
+    assert mappable.vmin == pytest.approx(-1.0)
+    assert mappable.vmax == pytest.approx(1.0)
+    assert ax._marks[1]["levels"] == pytest.approx(
+        [-0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75])

@@ -45,6 +45,7 @@ from ._util import (
     _interp_coord,
     _is_2d,
     _is_uniform,
+    _level_edges,
     _patch_bbox,
     _step_points,
     _streamlines,
@@ -934,7 +935,13 @@ class Axes(_AxesBase):
                 label: str | None = None, zorder: float = 0.0) -> "Axes":
         """Contour *lines* of a 2D field: ``contour(Z)`` or ``contour(X, Y, Z)``.
         Marching squares runs in Rust; lines are colored per level from
-        ``colors`` (a single color / list) or ``cmap`` (default palette C0)."""
+        ``colors`` (a single color / list) or ``cmap`` (default palette C0).
+
+        ``levels`` is either the thresholds themselves, or an int asking for
+        *about* that many: the levels then land on round numbers inside the data
+        range, the way the axis locator picks ticks, so the count comes out near
+        the hint rather than exactly on it.
+        """
         xc, yc, Z = _field_args(args)
         h = len(Z)
         w = len(Z[0]) if Z else 0
@@ -960,21 +967,19 @@ class Axes(_AxesBase):
                  upsample: int = 6, alpha: float = 1.0,
                  label: str | None = None, zorder: float = 0.0) -> "_Mappable":
         """Filled contour bands of a 2D field. The field is bilinearly upsampled
-        and band-colored in Rust (a raster fill, like ``imshow``)."""
+        and band-colored in Rust (a raster fill, like ``imshow``).
+
+        ``levels`` is either the band edges themselves, or an int asking for
+        *about* that many bands. Auto edges are the round numbers
+        :meth:`contour` draws its lines on, extended out to bracket the data, so
+        a contour overlay lands exactly on the band boundaries - and the
+        colorbar spans those round numbers rather than the raw extrema.
+        """
         xc, yc, Z = _field_args(args)
         h = len(Z)
         w = len(Z[0]) if Z else 0
         flat = _to_f64([v for row in Z for v in row])
-        # Filled bands must span the full data range (unlike contour *lines*,
-        # whose levels are interior), so the extrema aren't left transparent.
-        if levels is not None and not isinstance(levels, int):
-            edges = sorted(set(float(v) for v in levels))
-        else:
-            lo, hi = _core.data_range(flat) or (0.0, 1.0)
-            if hi <= lo:
-                hi = lo + 1.0
-            n = levels if isinstance(levels, int) else 9
-            edges = [lo + (hi - lo) * i / n for i in _irange(n + 1)]
+        edges = _level_edges(flat, levels)
         nbands = len(edges) - 1
         cm = _colormaps.get_cmap(cmap)
         nrm = _norms.get(norm, edges[0], edges[-1])

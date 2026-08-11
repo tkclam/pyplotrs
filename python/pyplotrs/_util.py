@@ -316,21 +316,122 @@ def _boxstats(values: list[float], whis: float = 1.5) -> dict:
     return {"q1": q1, "med": med, "q3": q3, "lo": lo, "hi": hi, "fliers": fliers}
 
 
-def _auto_levels(flat: list[float], levels, default_n: int = 8) -> list[float]:
-    """Resolve a ``levels`` argument into a sorted list of contour thresholds.
-    An int (or ``None``) picks that many evenly-spaced levels spanning the data."""
+# Nice-number step multipliers for contour levels, the set matplotlib's
+# ``MaxNLocator`` uses by default. Wider than the tick locator's {1, 2, 2.5, 5}
+# because a contour asks for roughly ten bands where an axis asks for five or so
+# labels, and at that density the coarse set overshoots badly - a 1.57-wide
+# field wants a step of 0.15, and rounding that up to 0.2 costs four lines.
+_LEVEL_STEPS = (1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0)
+
+# Levels a bare ``contour`` / ``contourf`` asks for, matplotlib's hard-wired
+# default. One constant for both: a `contour` overlaid on a `contourf` is only
+# readable if the lines land on the band boundaries beneath them, and they only
+# do that if both sides asked the locator the same question.
+_DEFAULT_LEVELS = 7
+
+
+def _level_step(lo: float, hi: float, n: int) -> tuple[float, float]:
+    """``(step, origin)``: the round step spanning ``lo..hi`` in about ``n + 1``
+    bands, and the value its multiples are counted from.
+
+    The hint counts *lines*; a step spanning the range in ``n + 1`` bands puts
+    ``n`` lines inside it, so that is the budget the step has to meet. Same rule
+    matplotlib's ``MaxNLocator(n + 1)`` applies to the same numbers.
+
+    ``origin`` is zero unless the field sits far from it compared to how wide it
+    is - 15.0895 to 15.0970, say - where counting from zero would spend every
+    round-looking digit on the part the levels have in common. matplotlib shifts
+    the count to the nearest power of ten below the midpoint there, and the
+    levels come out round in the digits that actually vary.
+    """
+    raw = (hi - lo) / (n + 1)
+    mag = 10.0 ** math.floor(math.log10(raw))
+    step = next((m * mag for m in _LEVEL_STEPS if m * mag >= raw * (1 - 1e-12)),
+                10.0 * mag)
+    mid = 0.5 * (lo + hi)
+    if abs(mid) / (hi - lo) < 100.0:
+        return step, 0.0
+    return step, math.copysign(10.0 ** math.floor(math.log10(abs(mid))), mid)
+
+
+def _level_lattice(flat: list[float], levels, default_n: int) -> tuple[list[float], float, float]:
+    """``(lattice, lo, hi)``: the round-numbered levels bracketing the data.
+
+    The lattice runs from the last step at or below the data minimum to the first
+    at or above the maximum, so it covers the range whole. Both contour flavors
+    read their levels off it - lines from the inside of it, filled bands from all
+    of it - which is what makes them coincide.
+    """
     finite = [v for v in flat if math.isfinite(v)]
     lo, hi = (min(finite), max(finite)) if finite else (0.0, 1.0)
-    if levels is None:
-        n = default_n
-    elif isinstance(levels, int):
-        n = levels
-    else:
-        return sorted(float(v) for v in levels)
     if hi <= lo:
-        hi = lo + 1.0
-    step = (hi - lo) / (n + 1)
-    return [lo + step * (i + 1) for i in range(n)]
+        return [], lo, hi
+    step, origin = _level_step(lo, hi, max(default_n if levels is None else levels, 1))
+    decimals = _decimals_for_step(step)
+    # Lattice indices bracketing the range, with a hair of slack so a range that
+    # ends *on* a lattice point keeps that point rather than gaining an empty
+    # band beyond it from a floor/ceil that missed by an ulp.
+    k0 = math.floor((lo - origin) / step + 1e-9)
+    k1 = math.ceil((hi - origin) / step - 1e-9)
+    # `k * step` accumulates float noise around values that are meant to be
+    # round; the step's own precision is the most a level can need.
+    return [round(origin + k * step, decimals) for k in range(k0, k1 + 1)], lo, hi
+
+
+def _auto_levels(flat: list[float], levels,
+                 default_n: int = _DEFAULT_LEVELS) -> list[float]:
+    """Resolve a ``levels`` argument into a sorted list of contour thresholds.
+
+    An int (or ``None``) is a *hint*: it asks for about that many levels, and the
+    thresholds land on round numbers - multiples of a nice step - rather than on
+    even fractions of the data range. Contour levels are read as values (a reader
+    asks "which line is z = 0.3?"), so 0.15, 0.30, 0.45 beats 0.1426, 0.2853,
+    0.4279, and the count comes out near the hint rather than exactly on it.
+    Only levels strictly inside the data range are kept; one on the extremes
+    would draw nothing, or a single degenerate point.
+    """
+    if levels is not None and not isinstance(levels, int):
+        return sorted(float(v) for v in levels)
+    if isinstance(levels, int) and levels < 1:
+        return []
+    lattice, lo, hi = _level_lattice(flat, levels, default_n)
+    return [v for v in lattice if lo < v < hi]
+
+
+def _level_edges(flat: list[float], levels,
+                 default_n: int = _DEFAULT_LEVELS) -> list[float]:
+    """Band *edges* for a filled contour: the whole lattice ``_auto_levels``
+    draws its lines on, out to the round numbers that bracket the data.
+
+    So the outermost bands reach past the data - a field over -0.78..0.78 in
+    steps of 0.15 fills -0.9..0.9, and the colorbar says so - which is what
+    matplotlib's ``contourf`` does, and what leaves every band boundary on a
+    round number a contour line can also sit on.
+    """
+    if levels is not None and not isinstance(levels, int):
+        return sorted(set(float(v) for v in levels))
+    lattice, lo, hi = _level_lattice(flat, levels, default_n)
+    # A flat field has no lattice to speak of; give it one band around its value
+    # so the fill is drawn at all.
+    return lattice if len(lattice) > 1 else [lo, lo + 1.0]
+
+
+def _decimals_for_step(step: float) -> int:
+    """Decimal places needed to write ``step`` (and its multiples) exactly."""
+    s = abs(step)
+    if s == 0.0 or not math.isfinite(s):
+        return 0
+    # Start where the leading digit reaches the ones place: a step of 4e-7 needs
+    # seven decimals before there is anything to test for integrality, and asking
+    # earlier only finds that 4e-7 rounds to 0 within any absolute tolerance.
+    first = max(0, -math.floor(math.log10(s)))
+    for d in range(first, first + 11):
+        scaled = s * 10.0 ** d
+        # `scaled >= 1` from here, so the tolerance is relative to the step, not
+        # to the absolute size of the number being written.
+        if abs(scaled - round(scaled)) < 1e-6 * scaled:
+            return d
+    return first + 10
 
 
 def _subdivide(majors: list[float], n: int, lo: float, hi: float) -> list[float]:

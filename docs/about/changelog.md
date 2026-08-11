@@ -91,6 +91,15 @@ All notable changes to pyplotrs are documented here. The format is based on
   (`_const`/`_util`/`_draw`/`_layout`/`axes`/`axes3d`/`polar`/`figure`),
   byte-identical output. The 3D projection layer moved into a dedicated
   `pyplotrs-3d` crate with batch (whole-mark, not per-vertex) projection.
+- `contourf` band edges now come off the same round-number lattice `contour`
+  draws its lines on, extended outward to bracket the data, the way matplotlib
+  picks filled levels. Bands were equal fractions of the data range while lines
+  were round numbers, so a `contour` drawn over a `contourf` of the same field
+  ran through the middle of the bands instead of along their boundaries. Both
+  also default to the same number of levels now (7, matplotlib's) rather than 9
+  bands against 8 lines. The outermost bands reach past the data as a result -
+  a field over -0.78..0.78 in steps of 0.15 fills -0.9..0.9 - so colorbar ranges
+  on existing figures shift out to those round numbers.
 
 ### Fixed
 
@@ -128,3 +137,19 @@ All notable changes to pyplotrs are documented here. The format is based on
   to butt cap and left a wedge of background at each joint. The kernel now
   stitches the pieces into whole lines (matched on grid-edge identity, so the
   join is exact), and each line is one path with round joins.
+- `contour(levels=N)` sliced the data range into `N + 1` equal parts, putting
+  the lines on values like 0.1426 and 0.2853. `N` is now a *hint*, as it is in
+  matplotlib: the levels land on multiples of a nice step, and only levels
+  strictly inside the data range are drawn (one on an extreme drew nothing but
+  still consumed a color).
+- `contourf` left a white line down the middle of its extreme band. The band
+  edges were built as `lo + (hi - lo) * i / n`, which lands the last one an ulp
+  below `hi`, so every pixel interpolating the field's own maximum tested as
+  *above* the top edge and was left transparent. The edges now come off the
+  level lattice, and the band kernel admits a hair past each end for the case
+  where a caller's own `levels` sit exactly on the extrema.
+- `contour` drew nothing at all on a field of small magnitude (spanning ~1e-6
+  or less). Levels are rounded to the decimals their step needs to be written
+  exactly, and the count of those decimals gave up at zero for any step under
+  1e-6 - so every level rounded to 0.0, fell outside the data range, and was
+  dropped.
