@@ -28,6 +28,7 @@ from ._const import (
     _DATA_PAD,
     _ELLIPSE_N,
     _LEGEND_PROBE_POINTS,
+    _SEAM_STROKE,
     _TICK_LABEL_GAP,
     _TICK_LENGTH,
     _TITLE_GAP,
@@ -869,19 +870,26 @@ class Axes(_AxesBase):
                vmin: float | None = None, vmax: float | None = None,
                alpha: float = 1.0, label: str | None = None,
                zorder: float = 0.0) -> "_Mappable":
-        """Hexagonal binning of ``(xs, ys)`` colored by count (binning in Rust)."""
+        """Hexagonal binning of ``(xs, ys)`` colored by count (binning in Rust).
+
+        The whole lattice is drawn, as in matplotlib: a cell no point landed in
+        is a count of zero, so it takes the bottom of the colormap rather than
+        leaving the background showing through.
+        """
         xs = _to_f64(xs)
         ys = _to_f64(ys)
         xlo, xhi = _core.data_range(xs) or (0.0, 1.0)
         ylo, yhi = _core.data_range(ys) or (0.0, 1.0)
-        hexes = _core.hexbin(xs, ys, gridsize, xlo, xhi, ylo, yhi)
+        hexes, sx, sy = _core.hexbin(xs, ys, gridsize, xlo, xhi, ylo, yhi)
         counts = _to_f64([c for _, _, c in hexes])
         cm, nrm, colors = self._map_colors(counts, cmap, norm, vmin, vmax)
-        sx = (xhi - xlo) / max(gridsize, 1)
-        sy = sx  # data-space cell; hexagon offsets below tile the two grids
-        # Pointy-top hexagon offsets (width ~ sx, height ~ 1.33 sy).
-        offs = [(0.0, sy * 0.66), (sx / 2.0, sy * 0.33), (sx / 2.0, -sy * 0.33),
-                (0.0, -sy * 0.66), (-sx / 2.0, -sy * 0.33), (-sx / 2.0, sy * 0.33)]
+        # Pointy-top hexagon: the Voronoi cell of the binner's two interleaved
+        # lattices, sx wide and 2/3 sy tall. Both scales come from the binner -
+        # sy is set by the *y* range and the derived row count, so guessing it
+        # from sx (as this once did) only tiles when the two happen to agree,
+        # and shears into slivers or overlapping spikes when they don't.
+        offs = [(0.0, sy / 3.0), (sx / 2.0, sy / 6.0), (sx / 2.0, -sy / 6.0),
+                (0.0, -sy / 3.0), (-sx / 2.0, -sy / 6.0), (-sx / 2.0, sy / 6.0)]
         if alpha < 1.0:
             colors = [_with_alpha(c, alpha) for c in colors]
         self._marks.append({
@@ -1705,9 +1713,14 @@ class Axes(_AxesBase):
                     xs.add(pos - hw, pos + hw)
                     ys.add_array(_to_f64(grid))
             elif k == "hexbin":
+                # The hexagons, not just their centers: the outer ring reaches
+                # half a cell past the outermost center, so bounding the centers
+                # alone slices those hexagons flat against the frame.
+                hx = max(ox for ox, _ in m["offsets"])
+                hy = max(oy for _, oy in m["offsets"])
                 for cx, cy in m["centers"]:
-                    xs.add(cx)
-                    ys.add(cy)
+                    xs.add(cx - hx, cx + hx)
+                    ys.add(cy - hy, cy + hy)
             elif k in ("quadmesh", "contourf"):
                 has_image = True
                 x0, x1, y0, y1 = m["extent"]
@@ -2551,9 +2564,24 @@ class Axes(_AxesBase):
         elif kind == "violin":
             self._draw_violin(scene, m, sx, sy)
         elif kind == "hexbin":
+            # Stroked in its own face color (matplotlib's `edgecolors="face"`).
+            # Neighboring hexagons abut exactly, so an antialiased fill splits
+            # the pixels along a shared edge between them - each covers part of
+            # the pixel, but they are composited one after the other, so the
+            # background shows through in the gap and the lattice reads as a
+            # mesh of pale seams. The stroke straddles the edge and paints that
+            # sliver solid. See `_SEAM_STROKE`.
+            #
+            # Only for opaque fills: a translucent hexagon would composite its
+            # own outline a second time over its own edge, trading the pale
+            # seam for a darker one, which is the more visible artifact of the
+            # two. Sealing that case needs the whole mark composited as a layer.
+            opaque = all(c[3] >= 255 for c in m["colors"])
             for (cx, cy), col in zip(m["centers"], m["colors"]):
                 poly = [(sx(cx + ox), sy(cy + oy)) for ox, oy in m["offsets"]]
-                scene.add_path(poly, fill_color=col, close=True)
+                scene.add_path(poly, fill_color=col, close=True,
+                               stroke_color=col if opaque else None,
+                               stroke_width=_SEAM_STROKE, join="round")
         elif kind == "quadmesh":
             for x0, x1, y0, y1, col in m["quads"]:
                 scene.add_path([(sx(x0), sy(y0)), (sx(x1), sy(y0)),

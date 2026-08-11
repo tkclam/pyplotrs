@@ -541,6 +541,167 @@ def test_secondary_y_does_not_displace_a_colorbar_label(tmp_path):
     )
 
 
+def test_hexbin_hexagons_tile_without_seams(tmp_path):
+    """Hexagons that tile the plane were still drawn with white between them.
+
+    Every fill is composited on its own, so along an edge two neighbors share,
+    each covers only part of the boundary pixels and the background bleeds
+    through the difference. It read worst on the vertical edges: those are
+    exactly axis-aligned, so every pixel down the seam splits the same way and
+    the leak lines up into a crisp white streak rather than dithering away.
+
+    The stretched case also covers the lattice geometry - hexagons sized off
+    the wrong cell leave real gaps, not just seams (see
+    :func:`test_hexbin_cell_matches_the_binning_lattice`).
+
+    Rendered at 100 dpi because a seam is a *pixel*-scale artifact: it thins as
+    resolution rises, so a high-dpi check would pass either way.
+    """
+    import random
+
+    from conftest import read_png
+
+    for name, yscale in (("square", 1.0), ("stretched", 6.0)):
+        rng = random.Random(3)
+        n = 20000  # dense enough that the middle of the patch has no empty cells
+        xs = [rng.uniform(0.0, 1.0) for _ in range(n)]
+        ys = [yscale * rng.uniform(0.0, 1.0) for _ in range(n)]
+
+        # One flat color for every hexagon: with the count range swamped, any
+        # pixel inside the patch that is *not* that color is a gap or a seam.
+        fig, ax = plt.subplots(figsize=(240, 180))
+        ax.hexbin(xs, ys, gridsize=18, vmin=-1e6, vmax=1e6)
+        out = tmp_path / f"hex_{name}.png"
+        fig.save(str(out), dpi=100)
+
+        w, h, buf = read_png(out)
+        # A window at the canvas center, small enough to stay inside the patch.
+        x0, x1 = int(w * 0.45), int(w * 0.55)
+        y0, y1 = int(h * 0.45), int(h * 0.55)
+        px = [tuple(buf[(y * w + x) * 4:(y * w + x) * 4 + 3])
+              for y in range(y0, y1) for x in range(x0, x1)]
+        face = max(set(px), key=px.count)
+        assert face != (255, 255, 255), f"{name}: sampled the background, not the patch"
+
+        worst = max(max(abs(c - f) for c, f in zip(p, face)) for p in px)
+        assert worst <= 8, (
+            f"{name}: hexbin interior is not solid - a pixel differs from the "
+            f"face color {face} by {worst} levels, i.e. background showing "
+            f"through a gap or a shared edge"
+        )
+
+
+def test_hexbin_draws_the_cells_nothing_landed_in(tmp_path):
+    """An empty cell is a count of zero, not a hole in the patch.
+
+    Only the occupied hexagons were emitted, so wherever the cloud thinned out
+    the figure background showed through the lattice and the patch frayed into
+    speckle. matplotlib bins into the whole grid and draws all of it: a cell
+    nothing landed in is a zero, and takes the bottom of the colormap - viridis'
+    deepest shade - so the patch reads as one continuous field.
+
+    Dropping them also moved the color scale, which then started at the
+    smallest *occupied* count: a cell holding a single point got the very bottom
+    of the colormap, the color an empty cell has to have, and the scale said
+    nothing about how far the data was above nothing.
+
+    Checked through the rendered pixels rather than the mark, because the
+    symptom was the background showing through: the four clumps leave the middle
+    of the lattice empty, so the center of the canvas lands on cells with no
+    points in them at all.
+    """
+    import random
+
+    from conftest import read_png
+    from pyplotrs import colormaps
+
+    rng = random.Random(11)
+    xs, ys = [], []
+    # Tight clumps, with hard edges: a gaussian tail would drop the odd point in
+    # the middle, and a count of one is not the color under test.
+    for cx, cy in ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)):
+        for _ in range(500):
+            xs.append(cx + rng.uniform(-0.05, 0.05))
+            ys.append(cy + rng.uniform(-0.05, 0.05))
+
+    gridsize = 12
+    fig, ax = plt.subplots(figsize=(240, 180))
+    ax.hexbin(xs, ys, gridsize=gridsize)
+
+    # Both interleaved lattices in full: (nx+1)x(ny+1) grid points, plus the
+    # nx x ny half-offset centers between them.
+    ny = int(gridsize / 3 ** 0.5)
+    assert len(ax._marks[-1]["centers"]) == (gridsize + 1) * (ny + 1) + gridsize * ny
+
+    out = tmp_path / "hexbin_empty.png"
+    fig.save(str(out), dpi=100)
+    w, h, buf = read_png(out)
+
+    empty = colormaps.get_cmap("viridis")(0.0)[:3]
+    px = [tuple(buf[(y * w + x) * 4:(y * w + x) * 4 + 3])
+          for y in range(int(h * 0.45), int(h * 0.55))
+          for x in range(int(w * 0.45), int(w * 0.55))]
+    assert max(px, key=px.count) == empty, (
+        "the middle of the hexbin patch, where no point fell, should be the "
+        f"colormap's zero {empty}; it is mostly {max(px, key=px.count)}"
+    )
+    # Nothing anywhere near the background: a few levels of drift along a shared
+    # edge is the seam this lattice already tolerates (see
+    # :func:`test_hexbin_hexagons_tile_without_seams`), 187 levels is white.
+    worst = max(max(abs(c - e) for c, e in zip(p, empty)) for p in px)
+    assert worst <= 8, (
+        f"a pixel in the empty middle of the patch is {worst} levels off the "
+        f"colormap's zero - the background showing through an undrawn cell"
+    )
+
+
+def test_hexbin_cell_matches_the_binning_lattice():
+    """The drawn hexagon has to be the cell the binner actually binned into.
+
+    The binner spaces its rows on a y cell derived from the *y* range and its
+    own row count, but the polygon was built from the x cell alone with a fudged
+    aspect factor. The two agreed only when the data range was roughly square -
+    which every example happened to be. Stretch y and the hexagons shrank to
+    slivers with background between them; squash it and they grew into
+    overlapping spikes.
+
+    Checked against the emitted centers rather than a recomputed cell size, so
+    the polygon is pinned to the lattice itself: the two interleaved grids put
+    their centers half a cell apart, and the cell is their Voronoi region - half
+    the cell wide, and a third of it from center to point.
+    """
+    import random
+
+    def half_cell(values):
+        """Smallest real spacing between the distinct coordinates of a lattice."""
+        vals = sorted(set(values))
+        span = vals[-1] - vals[0]
+        return min(b - a for a, b in zip(vals, vals[1:]) if b - a > span * 1e-6)
+
+    for yscale in (1.0, 6.0, 0.15):
+        rng = random.Random(5)
+        xs = [rng.uniform(0.0, 1.0) for _ in range(4000)]
+        ys = [yscale * rng.uniform(0.0, 1.0) for _ in range(4000)]
+
+        fig, ax = plt.subplots(figsize=(240, 180))
+        ax.hexbin(xs, ys, gridsize=16)
+        mark = ax._marks[-1]
+
+        half_x = half_cell(cx for cx, _ in mark["centers"])
+        half_y = half_cell(cy for _, cy in mark["centers"])
+        wide = max(ox for ox, _ in mark["offsets"])
+        tall = max(oy for _, oy in mark["offsets"])
+
+        assert wide == pytest.approx(half_x, rel=1e-9), (
+            f"yscale={yscale}: hexagon is {wide} wide from center to side, "
+            f"but neighboring columns sit {half_x} apart"
+        )
+        assert tall == pytest.approx(2 * half_y / 3, rel=1e-9), (
+            f"yscale={yscale}: hexagon reaches {tall} from center to point, "
+            f"but the row cell it was binned on is {2 * half_y}"
+        )
+
+
 # -- contour lines -----------------------------------------------------------
 
 def test_contour_emits_one_path_per_line_not_one_per_cell():

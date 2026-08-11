@@ -188,7 +188,7 @@ def gaussian_kde(
 def hexbin(
     xs: list[float], ys: list[float], gridsize: int,
     xlo: float, xhi: float, ylo: float, yhi: float,
-) -> list[tuple[float, float, float]]: ...
+) -> tuple[list[tuple[float, float, float]], float, float]: ...
 def solve_layout(
     width: float,
     height: float,

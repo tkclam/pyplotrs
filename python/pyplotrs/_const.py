@@ -53,6 +53,17 @@ _CUBE_FILL = 0.86  # fraction of the plot rect the projected cube fills
 
 _DATA_PAD = 0.05  # fraction of range added as margin around data
 
+#: Width (points) of the face-colored outline drawn on tiled cells - hexbin's
+#: hexagons - so their shared edges don't show a seam. Two cells that abut
+#: exactly still split the pixels along that edge, and compositing them in turn
+#: leaves the background partly uncovered; the outline straddles the edge and
+#: covers the sliver. It has to be at least one device pixel wide to do that, so
+#: this is sized for the coarsest resolution we render at: 1 pt spans a pixel
+#: down to 72 dpi, and inline notebook figures (`_INLINE_DPI`) get two. The cost
+#: is that a cell grows by half this, which is invisible next to a cell but is
+#: why the outline is not made wider "to be safe".
+_SEAM_STROKE = 1.0
+
 # Figure size units. pyplotrs sizes figures in *points* by default, so a plot can
 # be reasoned about directly against its font scale (e.g. a 480x360 pt figure
 # with a 10 pt font). These factors convert a length in the named unit to points

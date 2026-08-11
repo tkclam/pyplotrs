@@ -2250,9 +2250,24 @@ fn gaussian_kde(samples: Vec<f64>, grid: Vec<f64>, bandwidth: f64) -> Vec<f64> {
         .collect()
 }
 
-/// Hexagonal binning (matplotlib's two-offset-grid algorithm). Returns occupied
-/// hexagons as `(center_x, center_y, count)` in data coordinates. `gridsize` is
-/// the number of hexagons across x; the y count is derived for regular hexagons.
+/// Hexagonal binning (matplotlib's two-offset-grid algorithm). Returns *every*
+/// hexagon of the lattice as `(center_x, center_y, count)` in data coordinates,
+/// plus the cell size `(sx, sy)` those centers are spaced on. `gridsize` is the
+/// number of hexagons across x; the y count is derived for regular hexagons.
+///
+/// Empty cells are emitted with a count of `0` rather than dropped, which is
+/// what matplotlib does: the patch is a solid field the colormap covers end to
+/// end, and a cell nothing landed in reads as the bottom of the scale (the
+/// deepest shade of viridis) instead of a hole punched through to the
+/// background. Dropping them also made the color scale start at the smallest
+/// *occupied* count, so an isolated single-point cell came out at the very
+/// bottom of the colormap - the same color an empty one has to have.
+///
+/// The caller needs `(sx, sy)` to draw a hexagon that actually tiles: the cell
+/// is the Voronoi region of the two interleaved lattices under the `dx^2 + 3dy^2`
+/// metric used below, which only closes up when the polygon is built from the
+/// same `sy` the binning used. Deriving it a second time on the Python side is
+/// what let the two drift apart.
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
 fn hexbin(
@@ -2263,22 +2278,28 @@ fn hexbin(
     xhi: f64,
     ylo: f64,
     yhi: f64,
-) -> Vec<(f64, f64, f64)> {
+) -> (Vec<(f64, f64, f64)>, f64, f64) {
     let nx = gridsize.max(1);
-    let ny = ((nx as f64 / 3.0_f64.sqrt()).round() as usize).max(1);
-    let sx = if xhi > xlo {
-        (xhi - xlo) / nx as f64
-    } else {
-        1.0
-    };
-    let sy = if yhi > ylo {
-        (yhi - ylo) / ny as f64
-    } else {
-        1.0
-    };
-    // Two interleaved grids: full (n1) and half-offset (n2).
-    let mut n1 = std::collections::HashMap::<(i64, i64), f64>::new();
-    let mut n2 = std::collections::HashMap::<(i64, i64), f64>::new();
+    let ny = ((nx as f64 / 3.0_f64.sqrt()) as usize).max(1);
+    // A degenerate range has no cell size to speak of, and now that the whole
+    // lattice is drawn a placeholder cell of 1.0 would stretch a `gridsize`-wide
+    // field of hexagons around a single point. Widen the range around the data
+    // instead, as matplotlib's `nonsingular` does before it bins.
+    let (xlo, xhi) = expand_if_singular(xlo, xhi);
+    let (ylo, yhi) = expand_if_singular(ylo, yhi);
+    // The hexagons cover x exactly from `xlo` to `xhi`, so a point sitting on
+    // `xhi` lands one column past the last one on nothing but rounding. Pad the
+    // way matplotlib pads, so it bins into the edge column instead of dropping.
+    let pad = 1e-9 * (xhi - xlo);
+    let (xlo, xhi) = (xlo - pad, xhi + pad);
+    let sx = (xhi - xlo) / nx as f64;
+    let sy = (yhi - ylo) / ny as f64;
+    // Two interleaved grids: the lattice points (n1, one row and column longer,
+    // since it has a cell centered on each edge) and the half-offset cell
+    // centers (n2). Both are counted in full, zeros included.
+    let (nx1, ny1, nx2, ny2) = (nx + 1, ny + 1, nx, ny);
+    let mut n1 = vec![0.0_f64; nx1 * ny1];
+    let mut n2 = vec![0.0_f64; nx2 * ny2];
     for (&px, &py) in xs.iter().zip(ys.iter()) {
         if !(px.is_finite() && py.is_finite()) {
             continue;
@@ -2291,34 +2312,64 @@ fn hexbin(
         let iy2 = y.floor();
         let d1 = (x - ix1).powi(2) + 3.0 * (y - iy1).powi(2);
         let d2 = (x - ix2 - 0.5).powi(2) + 3.0 * (y - iy2 - 0.5).powi(2);
+        // Off-lattice points are dropped rather than given a cell of their own:
+        // with the field emitted whole, a stray cell hanging off the edge is a
+        // lone hexagon floating outside the patch. `xlo..xhi` is the data range
+        // in the usual case, so this only bites on an explicit range.
         if d1 <= d2 {
-            *n1.entry((ix1 as i64, iy1 as i64)).or_insert(0.0) += 1.0;
-        } else {
-            *n2.entry((ix2 as i64, iy2 as i64)).or_insert(0.0) += 1.0;
+            if let (Some(ix), Some(iy)) = (in_grid(ix1, nx1), in_grid(iy1, ny1)) {
+                n1[ix * ny1 + iy] += 1.0;
+            }
+        } else if let (Some(ix), Some(iy)) = (in_grid(ix2, nx2), in_grid(iy2, ny2)) {
+            n2[ix * ny2 + iy] += 1.0;
         }
     }
-    // Sort by cell index before emitting. `HashMap` iteration order is
-    // randomized per process, so without this the *same* data produced a
-    // different hexagon draw order on every run - and since neighbouring
-    // hexagons share an edge, that changed which one won the shared pixels.
-    // A figure has to be reproducible: byte-identical output is what golden
-    // tests and `git diff` on a committed figure both depend on.
-    let mut cells1: Vec<((i64, i64), f64)> = n1.into_iter().collect();
-    let mut cells2: Vec<((i64, i64), f64)> = n2.into_iter().collect();
-    cells1.sort_unstable_by_key(|&((ix, iy), _)| (iy, ix));
-    cells2.sort_unstable_by_key(|&((ix, iy), _)| (iy, ix));
-    let mut out = Vec::with_capacity(cells1.len() + cells2.len());
-    for ((ix, iy), c) in cells1 {
-        out.push((xlo + ix as f64 * sx, ylo + iy as f64 * sy, c));
+    // Emitted in lattice order, row by row. The order is what one hexagon
+    // covers of the edge it shares with the next, so it has to be fixed: this
+    // once iterated two `HashMap`s, whose order Rust randomizes per process,
+    // and the same data drew different pixels along every shared edge on every
+    // run. A figure has to be reproducible - byte-identical output is what
+    // golden tests and `git diff` on a committed figure both depend on.
+    let mut out = Vec::with_capacity(nx1 * ny1 + nx2 * ny2);
+    for iy in 0..ny1 {
+        for ix in 0..nx1 {
+            out.push((
+                xlo + ix as f64 * sx,
+                ylo + iy as f64 * sy,
+                n1[ix * ny1 + iy],
+            ));
+        }
     }
-    for ((ix, iy), c) in cells2 {
-        out.push((
-            xlo + (ix as f64 + 0.5) * sx,
-            ylo + (iy as f64 + 0.5) * sy,
-            c,
-        ));
+    for iy in 0..ny2 {
+        for ix in 0..nx2 {
+            out.push((
+                xlo + (ix as f64 + 0.5) * sx,
+                ylo + (iy as f64 + 0.5) * sy,
+                n2[ix * ny2 + iy],
+            ));
+        }
     }
-    out
+    (out, sx, sy)
+}
+
+/// The lattice index `v` falls on, or `None` if it is off the grid of `n` cells.
+fn in_grid(v: f64, n: usize) -> Option<usize> {
+    (v >= 0.0 && v < n as f64).then_some(v as usize)
+}
+
+/// A range wide enough to divide into cells: matplotlib's `nonsingular` with
+/// its hexbin expander, which opens a collapsed range out by 10% of the value
+/// it collapsed onto - or to `[-0.1, 0.1]` when that value is zero and there is
+/// no scale to take a percentage of.
+fn expand_if_singular(lo: f64, hi: f64) -> (f64, f64) {
+    let (lo, hi) = if hi < lo { (hi, lo) } else { (lo, hi) };
+    if hi > lo {
+        return (lo, hi);
+    }
+    if lo == 0.0 && hi == 0.0 {
+        return (-0.1, 0.1);
+    }
+    (lo - 0.1 * lo.abs(), hi + 0.1 * hi.abs())
 }
 
 #[pymodule]
