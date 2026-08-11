@@ -26,8 +26,11 @@ The return shape mirrors the grid:
 | `subplots(1, n)` or `subplots(n, 1)` | a flat list `[ax, ...]` |
 | `subplots(r, c)` | a nested list `[[ax, ...], ...]` (row-major) |
 
-You can also construct a [`Figure`][pyplotrs.figure.Figure] directly and reach
-its axes through `fig.axes` (a flat, row-major list).
+`projection="polar"` or `projection="3d"` makes every panel a
+[`PolarAxes`](polar.md) or an [`Axes3D`](3d.md) instead.
+[`plt.figure()`][pyplotrs.figure] creates a figure with **no** axes, for when
+every panel is placed by hand — see [layout](layout.md). Either way, `fig.axes`
+is the flat, row-major list of what a figure holds.
 
 ## Sizing
 
@@ -47,7 +50,7 @@ plt.subplots(figsize=(12, 8), units="cm")
 ## Drawing & the `set` method
 
 Each `Axes` exposes the mark vocabulary (`line`, `scatter`, `bar`, …) plus a
-[`set`][pyplotrs.axes.Axes.set] method for chrome:
+[`set`][pyplotrs.axes.Axes.set] method for everything else:
 
 ```python
 ax.line(xs, ys, label="series")
@@ -61,6 +64,32 @@ Mark methods return the axes, so calls chain:
 ax.line(xs, a).line(xs, b, linestyle="dashed").scatter(xs, c)
 ```
 
+`set` also carries the scales, ticks, formatters, margins, aspect and grid —
+see [scales & ticks](scales-and-ticks.md) for that half of it.
+
+## Reading an axes back
+
+Writing is `set(**kwargs)`; reading is the `get_*` accessors. The split is
+deliberate: one way to change an axes, one way to interrogate it, rather than
+parallel `get_x`/`set_x` pairs *plus* a bulk `set`.
+
+```python
+ax.get_xlim(), ax.get_ylim()
+ax.get_xlabel(), ax.get_ylabel(), ax.get_title()
+ax.get_xscale(), ax.get_yscale(), ax.get_aspect()
+ax.get_xticks(), ax.get_xticklabels()
+ax.get_legend_handles_labels()
+```
+
+Every getter reports the **effective** value — what will actually be drawn.
+`get_xlim()` on an axes with no explicit limit returns the autoscaled range;
+`get_xticks()` returns the located ticks; on a `sharex` figure they report the
+range the whole row settled on. "What did I set" is already visible in the
+calling code; "what will I get" is not.
+
+`Axes3D` and `PolarAxes` carry the same idea with their own vocabulary
+(`get_zlim`, `get_view`, `get_rlim`, `get_rticks`, …).
+
 ## Shared axes
 
 `sharex` / `sharey` unify the data range across all panels so they line up and
@@ -71,6 +100,8 @@ fig, axs = plt.subplots(1, 3, sharey=True)
 for k, ax in enumerate(axs):
     ax.line(xs, [f(x, k) for x in xs])
 ```
+
+More on grids, spanning panels, insets and twin axes in [layout](layout.md).
 
 ## Figure-level chrome
 
@@ -83,29 +114,25 @@ fig.set(suptitle="An overview")
 fig.legend(loc="right")
 ```
 
+## Displaying and saving
+
+```python
+fig.save("out.pdf")     # format from the extension
+fig                     # in a notebook: renders inline
+```
+
+A `Figure` renders itself in Jupyter, so a bare `fig` at the end of a cell
+displays it — there is no `show()`. See [saving figures](saving.md).
+
 ## A note on data inputs
 
 Marks accept any iterable of numbers — Python lists, tuples, generators, NumPy
-arrays, pandas/polars columns. There is no hard dependency on NumPy. Non-finite
-values (`NaN`/`inf`) are ignored when autoscaling and **break a line into a gap**
-(rather than distorting the plot), matching matplotlib's behaviour.
+arrays, pandas/polars columns. There is no hard dependency on NumPy; anything
+exposing an `f64` buffer is read directly, without an intermediate Python list.
 
-## Unequal panel sizes
+Two input types also pick the axis scale for you: **strings** give a categorical
+axis and **datetimes** give a date axis (see
+[scales & ticks](scales-and-ticks.md#scales-the-data-chooses)).
 
-`width_ratios` and `height_ratios` weight the columns and rows:
-
-```python
-fig, axs = plt.subplots(1, 2, width_ratios=[3, 1])   # wide panel, narrow panel
-fig, axs = plt.subplots(2, 2, height_ratios=[1, 2])  # short row over a tall one
-```
-
-Only the proportions matter — `[3, 1]` and `[0.75, 0.25]` are the same — and the
-gutters keep their size, so weighting changes the panels rather than the space
-between them. A malformed hint (wrong length, zero or negative) falls back to an
-even grid instead of raising.
-
-`Figure.add_gridspec` takes them too:
-
-```python
-gs = fig.add_gridspec(2, 2, width_ratios=[2, 1])
-```
+Non-finite values (`NaN`/`inf`) are ignored when autoscaling and **break a line
+into a gap** (rather than distorting the plot), matching matplotlib's behavior.

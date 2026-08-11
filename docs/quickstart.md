@@ -1,7 +1,8 @@
 # Quickstart
 
 This page gets you from zero to a saved, publication-ready figure in a few
-minutes. It assumes pyplotrs is [installed](installation.md).
+minutes. It assumes pyplotrs is [installed](installation.md). For a longer,
+build-it-up walkthrough, see the [tutorial](tutorial.md).
 
 ## Your first figure
 
@@ -17,7 +18,12 @@ fig.save("first.png")
 ```
 
 That's the whole loop: **make a figure, draw on the axes, save.** There is no
-hidden "current figure" — `fig` and `ax` are ordinary objects you hold onto.
+hidden "current figure" — `fig` and `ax` are ordinary objects you hold onto, so
+a function that builds a figure can just return it.
+
+!!! tip "In a notebook"
+    A `Figure` renders itself inline, so ending a cell with `fig` displays it.
+    You never need a `show()`.
 
 ## Adding marks
 
@@ -39,21 +45,34 @@ ax.set(title="Trigonometric functions", xlabel="t", ylabel="value")
 fig.save("trig.png")
 ```
 
-`set(...)` is a one-stop method for the title, axis labels and view limits.
-`legend()` builds a legend whose glyphs mirror the actual mark styles.
+`set(...)` is the one-stop method for titles, axis labels, limits, scales, ticks
+and margins — pyplotrs has no `set_xlabel`/`set_xlim` family. `legend()` builds a
+legend whose keys mirror the actual mark styles.
 
-See [plot types](guide/plot-types.md) for the full mark vocabulary
-(`bar`, `hist`, `fill_between`, `errorbar`, `imshow`, …).
+See [plot types](guide/plot-types.md) for the full mark vocabulary (`bar`,
+`hist`, `boxplot`, `fill_between`, `errorbar`, `contour`, `imshow`, …).
+
+## Reading an axes back
+
+Writing is `set(**kwargs)`; reading is the `get_*` accessors. Every getter
+reports the **effective** value — what will actually be drawn, autoscaling
+included — not just what you happened to set:
+
+```python
+ax.get_xlim()        # (0.0, 8.0) even though no xlim was set
+ax.get_xticks()      # the located tick positions
+ax.get_yticklabels() # the strings that will be drawn
+```
 
 ## Saving in any format
 
-The format is chosen from the file extension:
+The format comes from the file extension:
 
 ```python
-fig.save("figure.pdf")    # vector, with real editable/selectable text
-fig.save("figure.svg")    # vector, fonts embedded
+fig.save("figure.pdf")            # vector, with real editable/selectable text
+fig.save("figure.svg")            # vector, fonts embedded
 fig.save("figure.png", dpi=300)   # raster (200 dpi default)
-fig.save("figure.html")   # self-contained page, selectable text
+fig.save("figure.html")           # self-contained page, selectable text
 ```
 
 The **PDF** keeps text as genuine embedded fonts — open it in Illustrator and
@@ -62,16 +81,19 @@ every label is selectable and editable. More in [saving figures](guide/saving.md
 ## Multiple panels
 
 Pass a grid shape to `subplots`. With one row or column you get a flat list of
-axes; with a full grid you get rows of axes:
+axes; with a full grid you get a list of rows:
 
 ```python
-fig, axs = plt.subplots(1, 2, figsize=(640, 260), sharey=True)
+fig, axs = plt.subplots(1, 2, figsize=(500, 200), sharey=True)
 axs[0].line(xs, [math.sin(x) for x in xs])
 axs[1].line(xs, [math.cos(x) for x in xs])
 axs[0].set(ylabel="y")
 fig.set(suptitle="Two panels, shared y-axis")
 fig.save("panels.png")
 ```
+
+Uneven grids, spanning panels, twin axes and insets are all in the
+[layout guide](guide/layout.md).
 
 ## Sizing in points
 
@@ -84,6 +106,21 @@ of the box. Pass `units="in"`, `"cm"` or `"mm"` for another unit:
 plt.subplots(figsize=(89, 60), units="mm")   # a single Nature column
 plt.subplots(figsize=(4, 3), units="in")
 ```
+
+## Data pyplotrs accepts
+
+Marks take any iterable of numbers — lists, tuples, generators, NumPy arrays,
+pandas/polars columns. NumPy is not a dependency. Two input types also *choose
+the axis for you*:
+
+```python
+ax.bar(["ash", "birch", "cedar"], [12, 19, 7])          # categorical x-axis
+ax.line([date(2026, 1, 1), date(2026, 2, 1)], [3, 5])   # date x-axis
+```
+
+Non-finite values (`NaN`/`inf`) are ignored when autoscaling and break a line
+into a gap rather than distorting the plot. More in
+[scales & ticks](guide/scales-and-ticks.md).
 
 ## A taste of more
 
@@ -106,6 +143,24 @@ plt.subplots(figsize=(4, 3), units="in")
 
     [More on math & annotations →](guide/math-and-annotations.md)
 
+=== "Images"
+
+    ```python
+    m = ax.imshow(field, cmap="magma")
+    fig.colorbar(m, label="intensity")
+    ```
+
+    [More on colormaps & images →](guide/colormaps-and-images.md)
+
+=== "Polar"
+
+    ```python
+    fig, ax = plt.subplots(projection="polar")
+    ax.plot(theta, r, label="response")
+    ```
+
+    [More on polar plots →](guide/polar.md)
+
 === "3D"
 
     ```python
@@ -116,5 +171,7 @@ plt.subplots(figsize=(4, 3), units="in")
 
     [More on 3D plots →](guide/3d.md)
 
-Ready for the details? Continue to the [user guide](guide/figure-and-axes.md), or
-jump into the [gallery](gallery/index.md).
+Ready for the details? Work through the [tutorial](tutorial.md), continue to the
+[user guide](guide/figure-and-axes.md), or jump into the
+[gallery](gallery/index.md). Coming from matplotlib? Start with
+[the differences](migrating-from-matplotlib.md).

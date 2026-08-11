@@ -34,8 +34,9 @@ fig.save("hello.html")  # self-contained, selectable text
   scale, despined axes, and "nice-number" ticks out of the box. No styling
   required to get a figure that looks finished.
 - **Fast** — the hot per-point/per-pixel loops live in Rust. Million-point line
-  and scatter exports are sub-second, and the single-pass layout engine means
-  the lead grows with panel count.
+  and scatter exports are sub-second, the single-pass layout engine means the
+  lead grows with panel count, and the GIL is released while rendering, so a
+  thread pool over figures actually parallelizes.
 - **Portable output** — the chosen font is **embedded into every saved file**
   (PDF/SVG/PNG/HTML), so a figure looks identical on any machine, regardless of
   the fonts installed there.
@@ -49,9 +50,18 @@ fig.save("hello.html")  # self-contained, selectable text
 
 | Area | What you get |
 |---|---|
-| **2D marks** | `line`, `scatter`, `bar`, `hist`, `fill_between`, `errorbar`, `imshow` + `colorbar` |
-| **3D** | `scatter`, `plot`, `surface` — projected to editable 2D vectors, with an interactive HTML viewer |
+| **Lines & points** | `line`, `scatter`, `step`, `stairs`, `stem`, `loglog`/`semilogx`/`semilogy` |
+| **Bars & categories** | `bar`, `barh`, `broken_barh`, `eventplot`, plus automatic categorical axes from string data |
+| **Distributions** | `hist`, `boxplot`, `violinplot` (Rust KDE), `pie` |
+| **Uncertainty** | `errorbar`, `fill_between`, `fill_betweenx`, `stackplot` |
+| **Fields & images** | `imshow` + `colorbar`, `matshow`, `spy`, `pcolormesh`, `hist2d`, `hexbin`, `contour`, `contourf`, `quiver`, `streamplot` |
+| **Guides & shapes** | `axhline`/`axvline`, `axhspan`/`axvspan`, `axline`, `hlines`/`vlines`, `rectangle`, `circle`, `ellipse`, `polygon`, `arrow` |
+| **Polar** | `plot`, `scatter` on a configurable dial |
+| **3D** | `scatter`, `plot`, `surface`, `bar3d`, `plot_wireframe`, `contour3d`, `plot_trisurf`, `quiver3d`, `voxels` — projected to editable 2D vectors, with an interactive HTML viewer |
+| **Axes** | Linear, log, symlog, logit, date and categorical scales; 8 tick formatters; 4 color norms |
+| **Layout** | Grids with ratios, `subplot_mosaic`, `GridSpec`, twin axes, insets, secondary axes |
 | **Themes** | `default`, `nature`, `grayscale`, `presentation`, plus `Theme.with_(...)` to derive your own |
+| **Color** | 127 exact colormaps, 25 categorical palettes, Oklab/CAM16-UCS conversion and CVD checks |
 | **Annotations** | `text`, `annotate` with callout arrows; LaTeX math anywhere |
 | **Animation** | `animate(render, frames)` → GIF / APNG |
 | **Formats** | PDF, SVG, PNG (with DPI), and self-contained HTML |

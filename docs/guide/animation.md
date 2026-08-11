@@ -36,13 +36,37 @@ anim.save("out.gif")     # 256-color, broadly viewable
 anim.save("out.apng")    # full 8-bit color, higher fidelity
 ```
 
-Every frame must share the same figure size (the animation canvas is fixed).
-`save` chooses the encoder from the extension (`.gif` vs `.apng`/`.png`); `dpi`
-sets the raster resolution and `fps` can be overridden at save time.
+Building a whole figure per frame sounds expensive and is not: a figure is a
+list of recorded marks until it is rendered, and the rendering is the same Rust
+path a single `save` takes.
+
+## Saving
+
+`save` chooses the encoder from the extension — `.gif`, or `.apng`/`.png` for
+APNG; anything else raises `ValueError`. Two options can be overridden at save
+time:
+
+```python
+anim.save("out.gif", dpi=150, fps=12)
+```
+
+`dpi` sets the raster resolution (default 100, lower than `Figure.save`'s 200
+because an animation is many frames), and `fps` overrides the rate given at
+construction.
+
+Every frame must share the same figure size — the animation canvas is fixed, and
+a mismatch raises `ValueError` naming the frame size that differed.
 
 !!! tip "Iterable frames"
-    `frames` can be any iterable, so you can drive the animation from data:
+    `frames` can be any iterable, so you can drive the animation from data
+    rather than from an index:
 
     ```python
     plt.animate(render, frames=timestamps).save("series.gif")
     ```
+
+!!! note "GIF vs APNG"
+    GIF quantizes each frame to at most 256 colors — near-lossless for typical
+    plots, which have few distinct colors — and plays anywhere. APNG keeps full
+    8-bit-per-channel color and is the better choice for colormapped fields or
+    anything with smooth gradients.

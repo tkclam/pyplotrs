@@ -50,30 +50,63 @@ mine = plt.themes.default.with_(
 fig, ax = plt.subplots(theme=mine)
 ```
 
-Useful knobs include `palette`, `text_color`, `spine_color`, `spines` (which of
-`"left"/"right"/"top"/"bottom"` to draw), `spine_width`, the type-scale sizes
-(`tick_label_size`, `axis_label_size`, `title_size`, `suptitle_size`,
-`legend_size`), the chrome weights (`title_weight`, `suptitle_weight`,
-`axis_label_weight`), `line_width`, `grid` / `grid_color` / `grid_width`,
-`axes_facecolor`, and the legend colours. See the
-[Theme API](../api/themes.md) for the full list.
+Because a theme is a value rather than global config, two figures in the same
+script — or the same thread pool — can use different ones without interfering.
 
-## Colours
+### Every field
+
+| Field | Default | Controls |
+|---|---|---|
+| `palette` | Okabe-Ito | The cycling color sequence `"C0".."Cn"` indexes |
+| `text_color` | black | Titles, labels, tick labels, annotations |
+| `spine_color` | black | Axis lines and tick marks |
+| `spines` | `("left", "bottom")` | Which spines (and their ticks) to draw |
+| `spine_width` | `1.0` | Spine stroke width |
+| `spine_join` | `"miter"` | How a spine finishes where another abuts it: `"miter"`, `"square"`, `"butt"` |
+| `tick_label_size` | `9.0` | Type scale, in points |
+| `axis_label_size` | `10.0` | " |
+| `title_size` | `11.0` | " |
+| `suptitle_size` | `13.0` | " |
+| `legend_size` | `9.0` | " |
+| `title_weight` | `"normal"` | `"normal"` or `"bold"` chrome weight |
+| `suptitle_weight` | `"normal"` | " |
+| `axis_label_weight` | `"normal"` | " |
+| `line_width` | `1.5` | Default stroke width of a `line` mark |
+| `grid` | `False` | Draw gridlines |
+| `grid_color` | light gray | " |
+| `grid_width` | `0.6` | " |
+| `axes_facecolor` | `None` | Plot-area background fill (`None` = transparent) |
+| `legend_facecolor` | white | Legend box fill |
+| `legend_edgecolor` | gray | Legend box border |
+
+A theme also derives `separator_color` — the hairline between adjacent filled
+shapes such as histogram bins and pie wedges — from `axes_facecolor`, so those
+seams read as "the background showing through" whatever the background is.
+
+## Colors
 
 Anywhere a `color=` is accepted you can give:
 
-- `None` — take the next colour from the theme palette (auto-cycling);
-- `"C0" … "C7"` — an index into *this theme's* palette (so `"C3"` follows the
-  active theme, not a fixed global colour);
-- `(r, g, b)` or `(r, g, b, a)` — literal bytes in `0–255`.
+- `None` — take the next color from the theme palette (auto-cycling);
+- `"C0" … "Cn"` — an index into *this theme's* palette (so `"C3"` follows the
+  active theme, not a fixed global color);
+- a CSS/matplotlib color name — `"steelblue"`, `"red"` (case-insensitive);
+- hex — `"#f80"`, `"#ff8800"`, `"#ff8800cc"`;
+- `(r, g, b)` or `(r, g, b, a)` — literal bytes in `0–255`;
+- an all-float tuple in `0–1` — matplotlib's convention, scaled for you.
 
 ```python
-ax.line(xs, ys, color="C2")               # third palette colour
-ax.line(xs, ys, color=(214, 39, 40))      # literal RGB
+ax.line(xs, ys, color="C2")                     # third palette color
+ax.line(xs, ys, color=(214, 39, 40))            # literal RGB bytes
 ax.scatter(xs, ys, color=(31, 119, 180, 128))   # semi-transparent
 ```
 
-The default palette is **Okabe-Ito**, a colorblind-safe categorical set.
+The default palette is **Okabe-Ito**, a colorblind-safe categorical set. Swap in
+any of the [built-in palettes](colormaps-and-images.md#categorical-palettes):
+
+```python
+mine = plt.themes.default.with_(palette=plt.palettes.get("tab10"))
+```
 
 ## Fonts
 
@@ -119,9 +152,16 @@ Each face is embedded as its own subset, so a figure using all four carries four
 subsetted fonts and every one stays selectable, editable text.
 
 Font matching is approximate: a family with no italic face resolves to its
-regular one, so text stays legible but is not slanted. `resolved_font_variants()`
-reports what each face landed on — two selectors reporting the same PostScript
-name means the host has no distinct face for one of them.
+regular one, so text stays legible but is not slanted.
+[`resolved_font_variants()`][pyplotrs.resolved_font_variants] reports what each
+face landed on — two selectors reporting the same name means the host has no
+distinct face for one of them:
+
+```python
+plt.resolved_font_variants()
+# [('body', 'ArialMT'), ('body-bold', 'Arial-BoldMT'),
+#  ('body-italic', 'Arial-ItalicMT'), ('body-bolditalic', 'Arial-BoldItalicMT')]
+```
 
 All four Liberation Sans faces are **bundled**, so emphasis works even on a
 machine with no fonts installed at all — a slim container, a wheel builder — and
@@ -134,7 +174,7 @@ hyphen-minus (`-2`). The two are different characters: the hyphen is a short, lo
 word-joiner, while the minus is drawn on the math axis at the width of a `+` and
 close to the width of a digit, so a column of tick labels stays aligned. It is
 also what `$...$` math has always used, so a linear axis and a log axis' `$10^{-3}$`
-now read the same.
+read the same.
 
 ```python
 plt.set_unicode_minus(False)   # back to ASCII "-"

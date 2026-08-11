@@ -17,6 +17,8 @@ fig.save("figure.html")
 | `.png` | Raster at `dpi` (default **200**), with physical-size metadata |
 | `.html` / `.htm` | A single self-contained page (see below) |
 
+Anything else raises `ValueError` rather than guessing.
+
 ## PDF: editable, selectable, accessible text
 
 This is pyplotrs' headline feature. Text in the PDF is genuine embedded,
@@ -27,6 +29,11 @@ subsetted font data — **not outlines** — so:
 - `pdftotext` / copy-paste extracts the text (math included, as Unicode);
 - `pdffonts` shows the embedded subsets.
 
+```bash
+pdftotext figure.pdf - | head
+pdffonts figure.pdf
+```
+
 Pass `tagged=True` to write a **tagged, accessible PDF**: the whole chart becomes
 one `Figure` structure element with alt text (auto-derived from the
 titles/labels, or set explicitly), plus a document title and language, so screen
@@ -35,6 +42,10 @@ readers can announce it.
 ```python
 fig.save("figure.pdf", tagged=True, title="Figure 1", alt="Response vs time")
 ```
+
+Every text face in use is embedded as its own subset, so a figure mixing
+regular, bold, italic and math carries four subsets and every one of them stays
+selectable.
 
 ## Resolution
 
@@ -45,6 +56,10 @@ publication-quality; bump it for print:
 ```python
 fig.save("figure.png", dpi=600)
 ```
+
+The value is also written into the PNG's `pHYs` chunk, so the file knows its own
+physical size and lands at the right size in a document rather than at whatever
+the importing application assumes.
 
 ## Transparent backgrounds
 
@@ -74,8 +89,35 @@ already "transparent" and ignore the flag.
 fig.save("figure.html")
 ```
 
+`title=` and `alt=` label the page and its inline SVG (`role="img"`) here too,
+auto-derived from the figure's own titles and labels when omitted.
+
 ## Cross-machine consistency
 
 Whichever body font is resolved, it is **embedded into every saved file**, so a
 figure looks identical wherever it's opened — independent of the fonts installed
 on the viewer's machine. See [styling & themes](styling-and-themes.md#fonts).
+
+## Saving many figures at once
+
+Rendering releases the GIL, so a thread pool over figures actually runs in
+parallel — and with no global state there is nothing for the threads to fight
+over:
+
+```python
+from concurrent.futures import ThreadPoolExecutor
+
+with ThreadPoolExecutor() as pool:
+    pool.map(lambda i: build(i).save(f"panel{i}.pdf"), range(64))
+```
+
+See [performance](performance.md).
+
+## Animated output
+
+An [animation](animation.md) is saved through its own object, not `Figure.save`,
+and writes `.gif` or `.apng`:
+
+```python
+plt.animate(render, frames=60).save("wave.gif")
+```

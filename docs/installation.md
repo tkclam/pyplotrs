@@ -66,13 +66,18 @@ changes are picked up immediately and only Rust changes need a rebuild. Drop
 
 | Extra | Installs | For |
 |---|---|---|
-| `pyplotrs[docs]` | mkdocs-material, mkdocstrings | Building this documentation site |
+| `pyplotrs[docs]` | mkdocs-material, mkdocstrings, black | Building this documentation site |
+| `pyplotrs[test]` | pytest | Running the test suite |
 | `pyplotrs[bench]` | matplotlib, numpy | Running the head-to-head benchmarks |
+| `pyplotrs[dev]` | ipykernel, matplotlib | The verify notebooks under `notebooks/` |
 
 ```bash
 pip install -e ".[docs]"
 mkdocs serve
 ```
+
+None of these are needed to *use* pyplotrs — the library itself has no runtime
+dependencies.
 
 ## What gets bundled
 

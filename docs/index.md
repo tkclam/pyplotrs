@@ -22,6 +22,7 @@ fig.save("hello.png")   # 200 dpi by default
 ```
 
 [Get started :material-arrow-right:](quickstart.md){ .md-button .md-button--primary }
+[Work through the tutorial :material-school:](tutorial.md){ .md-button }
 [Browse the gallery :material-image-multiple:](gallery/index.md){ .md-button }
 
 ## Why pyplotrs?
@@ -41,15 +42,16 @@ fig.save("hello.png")   # 200 dpi by default
     ---
 
     A colorblind-safe palette, a sensible type scale, despined axes, and
-    "nice-number" ticks out of the box. No styling needed to look finished.
+    "nice-number" ticks out of the box, at journal-column size. No styling
+    needed to look finished.
 
 -   :material-rocket-launch:{ .lg .middle } **Fast**
 
     ---
 
     The hot per-point and per-pixel loops live in Rust. Million-point line and
-    scatter exports are sub-second, and the single-pass layout means the lead
-    grows with panel count.
+    scatter exports are sub-second, the single-pass layout means the lead grows
+    with panel count, and the GIL is released while rendering.
 
 -   :material-earth:{ .lg .middle } **Portable output**
 
@@ -78,9 +80,18 @@ fig.save("hello.png")   # 200 dpi by default
 
 | Area | What you get |
 |---|---|
-| **2D marks** | `line`, `scatter`, `bar`, `hist`, `fill_between`, `errorbar`, `imshow` + `colorbar` |
-| **3D** | `scatter`, `plot`, `surface` — projected to editable 2D vectors, with an interactive HTML viewer |
+| **Lines & points** | `line`, `scatter`, `step`, `stairs`, `stem`, `loglog`/`semilogx`/`semilogy` |
+| **Bars & categories** | `bar`, `barh`, `broken_barh`, `eventplot`, plus automatic categorical axes from string data |
+| **Distributions** | `hist`, `boxplot`, `violinplot` (Rust KDE), `pie` |
+| **Uncertainty** | `errorbar`, `fill_between`, `fill_betweenx`, `stackplot` |
+| **Fields & images** | `imshow` + `colorbar`, `matshow`, `spy`, `pcolormesh`, `hist2d`, `hexbin`, `contour`, `contourf`, `quiver`, `streamplot` |
+| **Guides & shapes** | `axhline`/`axvline`, `axhspan`/`axvspan`, `axline`, `hlines`/`vlines`, `rectangle`, `circle`, `ellipse`, `polygon`, `arrow` |
+| **Polar** | `plot`, `scatter` on a configurable dial |
+| **3D** | `scatter`, `plot`, `surface`, `bar3d`, `plot_wireframe`, `contour3d`, `plot_trisurf`, `quiver3d`, `voxels` — projected to editable 2D vectors, with an interactive HTML viewer |
+| **Axes** | Linear, log, symlog, logit, date and categorical scales; 8 tick formatters; 4 color norms |
+| **Layout** | Grids with ratios, `subplot_mosaic`, `GridSpec`, twin axes, insets, secondary axes |
 | **Themes** | `default`, `nature`, `grayscale`, `presentation`, plus `Theme.with_(...)` |
+| **Color** | 127 exact colormaps, 25 categorical palettes, Oklab/CAM16-UCS conversion and CVD checks |
 | **Annotations** | `text`, `annotate` with callout arrows; LaTeX math anywhere |
 | **Animation** | `animate(render, frames)` → GIF / APNG |
 | **Formats** | PDF, SVG, PNG (with DPI), and self-contained HTML |
@@ -93,5 +104,15 @@ See the [gallery](gallery/index.md) for the full set, each with runnable source.
 pip install pyplotrs
 ```
 
-Pre-built wheels bundle the Rust core and fonts — no toolchain required. See
+Pre-built wheels bundle the Rust core and fonts — no toolchain required, and no
+required runtime dependencies (not even NumPy). See
 [installation](installation.md) for details and building from source.
+
+## Where to start
+
+- **New here?** [Quickstart](quickstart.md), then the
+  [tutorial](tutorial.md).
+- **Coming from matplotlib?** [The differences](migrating-from-matplotlib.md).
+- **Looking for a specific mark?** [Plot types](guide/plot-types.md) or the
+  [gallery](gallery/index.md).
+- **Looking for a signature?** [API reference](api/figure.md).
