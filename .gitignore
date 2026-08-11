@@ -18,6 +18,12 @@ python/pyplotrs/*.pyd
 /dist/
 /wheelhouse/
 
+# Coverage output
+.coverage
+.coverage.*
+/htmlcov/
+/coverage.xml
+
 # Built documentation site (mkdocs build)
 /site/
 
@@ -26,3 +32,8 @@ python/pyplotrs/*.pyd
 
 # Internal planning / design docs (kept locally, not part of the package).
 /design/
+
+# Editor / agent scratch state.
+/.claude/
+.idea/
+.vscode/

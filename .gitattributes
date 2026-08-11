@@ -1,0 +1,26 @@
+# Normalize line endings in the repository; check out native on each platform.
+* text=auto
+
+# Vendored third-party sources. `linguist-vendored` keeps them out of GitHub's
+# language statistics; `-diff` keeps a 2.2 MB minified bundle from being
+# expanded into a diff nobody can read.
+vendor/**                              linguist-vendored
+python/pyplotrs/_vendor/**             linguist-vendored -diff
+python/pyplotrs/_vendor/*.js           binary
+
+# Generated colormap/palette tables (written by tools/extract_colormaps.py).
+crates/pyplotrs-color/src/*_gen.rs     linguist-generated
+crates/pyplotrs-color/data/*.bin       binary
+
+# Fonts and reference images are binary; never try to merge or diff them.
+assets/fonts/*.ttf                     binary
+tests/golden/*.png                     binary
+docs/**/*.png                          binary
+docs/**/*.gif                          binary
+
+# Keep the shell scripts and CI files LF regardless of host.
+*.sh                                   text eol=lf
+*.yml                                  text eol=lf
+
+# Documentation is not code.
+docs/**                                linguist-documentation
