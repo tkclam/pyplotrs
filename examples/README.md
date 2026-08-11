@@ -24,14 +24,18 @@ for f in ../../../examples/*.py; do python "$f"; done
 | `histogram.py` | Histogram with density normalization |
 | `fill_between.py` | Filled confidence band around a line |
 | `errorbar.py` | Error bars with caps |
+| `statistical.py` | Box plot, violin plot and a labeled pie |
 | `polar.py` | Polar projection: line + scatter with a legend |
 | `heatmap.py` | `imshow` image with a colorbar |
+| `fields.py` | `quiver`, `streamplot`, `stackplot`, `spy` |
 | `colormaps.py` | Reference strip of the built-in colormaps |
+| `scales.py` | Log, symlog, automatic date and categorical axes |
 | `surface3d.py` | 3D colormapped surface |
 | `scatter3d.py` | 3D scatter cloud |
 | `line3d.py` | 3D parametric curve |
 | `themes.py` | The same plot in each built-in theme |
 | `subplots.py` | Shared-axis small multiples + figure legend |
+| `layout.py` | `subplot_mosaic`, a twin y-axis and an inset |
 | `math_labels.py` | LaTeX `$...$` math in titles/labels/legend |
 | `annotations.py` | Text and callout-arrow annotations |
 | `animation_wave.py` | Animated GIF (traveling wave) |
