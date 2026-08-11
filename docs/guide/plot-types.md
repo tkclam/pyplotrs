@@ -45,7 +45,7 @@ and means the **area** in pt², matching matplotlib's `s`, so `size=36` and
 ![scatter plot](../gallery/images/scatter.png){ width="340" }
 
 Pass `c=` (a per-point array) to color markers by value through `cmap`/`norm`;
-the call then returns a handle for [`Figure.colorbar`][pyplotrs.figure.Figure.colorbar].
+the call then returns a handle for [`Figure.colorbar`][pyplotrs.Figure.colorbar].
 
 ### Steps & stems
 
@@ -152,7 +152,7 @@ with caps, optionally connected by a line and decorated with markers. Pass
 
 [`imshow`][pyplotrs.axes.Axes.imshow] displays a 2D field as a colormapped image
 and returns a handle you can pass to
-[`Figure.colorbar`][pyplotrs.figure.Figure.colorbar]. See
+[`Figure.colorbar`][pyplotrs.Figure.colorbar]. See
 [colormaps & images](colormaps-and-images.md) for the full story.
 
 ```python

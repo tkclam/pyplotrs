@@ -1,10 +1,10 @@
 """Normalizations: map data values into ``[0, 1]`` for colormap lookup.
 
-A :class:`Normalize` (and its subclasses) is the colorbar/colormap analog of a
-:class:`~pyplotrs.scales.Scale`: ``norm(value)`` returns the position in ``[0, 1]``
+A ``Normalize`` (and its subclasses) is the colorbar/colormap analog of a
+[`Scale`][pyplotrs.scales.Scale]: ``norm(value)`` returns the position in ``[0, 1]``
 a value occupies on the color axis, and ``norm.colorbar_ticks()`` locates labeled
-ticks for a colorbar. Used by :meth:`pyplotrs.Axes.scatter` (``c=``) and
-:meth:`pyplotrs.Axes.imshow` (``norm=``).
+ticks for a colorbar. Used by [`Axes.scatter`][pyplotrs.axes.Axes.scatter] (``c=``) and
+[`Axes.imshow`][pyplotrs.axes.Axes.imshow] (``norm=``).
 """
 
 from __future__ import annotations
@@ -35,13 +35,13 @@ _Tick = tuple[float, str]
 
 class Normalize:
     """Linear normalization between ``vmin`` and ``vmax`` (clamped to ``[0, 1]``).
-    ``vmin``/``vmax`` left ``None`` are filled from the data by :meth:`autoscale`."""
+    ``vmin``/``vmax`` left ``None`` are filled from the data by ``autoscale``."""
 
     def __repr__(self) -> str:
         return _auto_repr(self)
 
 
-    #: Rust ``apply_scale`` selector, mirroring :attr:`pyplotrs.scales.Scale.code`.
+    #: Rust ``apply_scale`` selector, mirroring [`pyplotrs.scales.Scale.code`][pyplotrs.scales.Scale.code].
     #: When set, bulk color mapping runs in Rust via ``_core.map_colors``;
     #: ``None`` means this norm has no Rust equivalent and each value must go
     #: through ``__call__`` in Python. Must name a branch ``apply_scale`` handles.
@@ -153,8 +153,8 @@ class BoundaryNorm(Normalize):
 
 
 def get(norm, vmin: float | None, vmax: float | None) -> Normalize:
-    """Resolve a ``norm`` argument (a :class:`Normalize`, the string ``"log"``,
-    or ``None``) plus optional ``vmin``/``vmax`` into a :class:`Normalize`."""
+    """Resolve a ``norm`` argument (a ``Normalize``, the string ``"log"``,
+    or ``None``) plus optional ``vmin``/``vmax`` into a ``Normalize``."""
     if norm is None:
         return Normalize(vmin, vmax)
     if isinstance(norm, Normalize):

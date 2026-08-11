@@ -1,16 +1,16 @@
 """Tick-label formatters.
 
-A :class:`Formatter` turns a tick's numeric position into its label string. Pass
-an instance to :meth:`pyplotrs.Axes.set` via ``xformatter=``/``yformatter=`` (or
-to a colorbar); the active :class:`~pyplotrs.scales.Scale` locates the tick
+A ``Formatter`` turns a tick's numeric position into its label string. Pass
+an instance to [`Axes.set`][pyplotrs.axes.Axes.set] via ``xformatter=``/``yformatter=`` (or
+to a colorbar); the active [`Scale`][pyplotrs.scales.Scale] locates the tick
 *positions* and the formatter decides how each is written. Labels may contain
-``$...$`` math (e.g. :class:`LogFormatter` emits ``$10^{k}$``), which flows
+``$...$`` math (e.g. ``LogFormatter`` emits ``$10^{k}$``), which flows
 through the same editable-text pipeline as every other label.
 
-Formatters that render a *number* sign it with :data:`MINUS` (see
-:func:`fix_minus`). The ones that hand back a string you supplied -
-:class:`FixedFormatter`, :class:`FuncFormatter`, :class:`StrMethodFormatter`,
-:class:`DateFormatter` - pass it through untouched, so ``"%Y-%m-%d"`` keeps its
+Formatters that render a *number* sign it with ``MINUS`` (see
+``fix_minus``). The ones that hand back a string you supplied -
+``FixedFormatter``, ``FuncFormatter``, ``StrMethodFormatter``,
+``DateFormatter`` - pass it through untouched, so ``"%Y-%m-%d"`` keeps its
 hyphens.
 """
 
@@ -39,13 +39,13 @@ _UNICODE_MINUS = True
 
 
 def fix_minus(s: str) -> str:
-    """Replace the sign in a *numeric* label with a real :data:`MINUS`.
+    """Replace the sign in a *numeric* label with a real ``MINUS``.
 
     Only apply this to strings pyplotrs formatted from a number - never to user
     text, category names, or ``strftime`` output, where a hyphen is a hyphen.
     Math (``$...$``) is likewise left alone: the math engine maps ``-`` to
     U+2212 itself, and feeding it a pre-substituted glyph would lose the binary
-    operator's spacing. Disabled by :func:`pyplotrs.set_unicode_minus`.
+    operator's spacing. Disabled by [`pyplotrs.set_unicode_minus`][pyplotrs.set_unicode_minus].
     """
     return s.replace("-", MINUS) if _UNICODE_MINUS else s
 
@@ -54,7 +54,7 @@ def _fmt_g(value: float) -> str:
     """A compact number: integers without a trailing ``.0``, else ``%g``.
 
     ASCII-signed - callers that emit the result as plain text pass it through
-    :func:`fix_minus`; callers that embed it in math must not.
+    ``fix_minus``; callers that embed it in math must not.
     """
     if value == int(value) and abs(value) < 1e16:
         return str(int(value))
@@ -62,7 +62,7 @@ def _fmt_g(value: float) -> str:
 
 
 class Formatter:
-    """Base formatter: subclasses implement :meth:`__call__`. Calling a formatter
+    """Base formatter: subclasses implement ``__call__``. Calling a formatter
     with a tick value (and optional integer position) returns its label."""
 
     def __repr__(self) -> str:
@@ -207,8 +207,8 @@ class LogFormatter(Formatter):
 
 
 class DateFormatter(Formatter):
-    """Format a day-number tick (see :func:`pyplotrs.scales.date2num`) with a
-    :func:`~datetime.datetime.strftime` pattern, e.g. ``DateFormatter("%Y-%m")``."""
+    """Format a day-number tick (see [`pyplotrs.scales.date2num`][pyplotrs.scales.date2num]) with a
+    ``strftime`` pattern, e.g. ``DateFormatter("%Y-%m")``."""
 
     def __init__(self, fmt: str = "%Y-%m-%d") -> None:
         self.fmt = fmt
@@ -219,7 +219,7 @@ class DateFormatter(Formatter):
 
 
 def get(formatter):
-    """Resolve a formatter argument: a :class:`Formatter`, a ``str`` format
+    """Resolve a formatter argument: a ``Formatter``, a ``str`` format
     template (``"{x:.2f}"``), a callable, or ``None``."""
     if formatter is None or isinstance(formatter, Formatter):
         return formatter

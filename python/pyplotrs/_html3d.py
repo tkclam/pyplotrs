@@ -7,8 +7,8 @@ colors) as JSON plus a small self-contained Canvas2D renderer that re-projects
 on the client: drag to orbit, wheel to zoom, shift-drag to pan, double-click to
 reset. No dependencies, nothing fetched at view time — one portable file.
 
-The browser-side projection is a direct port of :class:`pyplotrs.threed.Camera3D`
-and :meth:`pyplotrs.figure.Axes3D._draw`, so the interactive view matches the
+The browser-side projection is a direct port of [`pyplotrs.threed.Camera3D`][pyplotrs.threed.Camera3D]
+and [`pyplotrs.axes3d.Axes3D._draw`][pyplotrs.axes3d.Axes3D._draw], so the interactive view matches the
 static PDF/SVG/PNG render at the same camera angle.
 
 Labels that use ``$...$`` are typeset by an inlined copy of MathJax (the same

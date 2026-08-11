@@ -4,13 +4,13 @@ State-of-the-art color science, exposed directly rather than buried in the
 colormap machinery: sRGB <-> linear-light RGB <-> CIE XYZ <-> CIELAB <->
 Oklab/Oklch <-> CAM16-UCS, plus color-vision-deficiency (CVD) simulation and
 two colormap-quality diagnostics. Everything runs in Rust
-(:mod:`pyplotrs._pyplotrs_core`, backed by the ``pyplotrs-color`` crate,
+(``pyplotrs._pyplotrs_core``, backed by the ``pyplotrs-color`` crate,
 itself built on the `palette <https://github.com/Ogeon/palette>`_ crate).
 
-Oklab (Ottosson, 2020) is what :class:`pyplotrs.colormaps.Colormap` uses to
+Oklab (Ottosson, 2020) is what [`pyplotrs.colormaps.Colormap`][pyplotrs.colormaps.Colormap] uses to
 interpolate custom ``stops=`` by default - it is the practical, contemporary
 choice for perceptually smooth gradients. CAM16-UCS is the more rigorous (and
-more expensive) full color-appearance model; it backs :func:`distance` and
+more expensive) full color-appearance model; it backs ``distance`` and
 the two diagnostics below rather than everyday interpolation::
 
     from pyplotrs import color, colormaps
@@ -116,8 +116,8 @@ def simulate_cvd(rgb: _RGB, kind: CvdKind) -> _RGB:
 def cvd_safe_report(cmap) -> dict[CvdKind, float]:
     """Worst-case distinguishability of a colormap under each CVD kind.
 
-    ``cmap`` is anything :func:`pyplotrs.colormaps.get_cmap` accepts (a name
-    or a :class:`~pyplotrs.colormaps.Colormap`). Each value is `1.0` (CVD
+    ``cmap`` is anything [`pyplotrs.colormaps.get_cmap`][pyplotrs.colormaps.get_cmap] accepts (a name
+    or a [`Colormap`][pyplotrs.colormaps.Colormap]). Each value is `1.0` (CVD
     doesn't shrink the map's worst-case contrast at all) down to `0.0` (some
     pair of colors that reads as distinct normally becomes visually identical
     under that CVD). Below ~0.5 is worth treating as a real accessibility
@@ -129,7 +129,7 @@ def cvd_safe_report(cmap) -> dict[CvdKind, float]:
 
 def perceptual_uniformity(cmap) -> float:
     """Perceptual-uniformity roughness of a colormap (`cmap`: a name or a
-    :class:`~pyplotrs.colormaps.Colormap`): the coefficient of variation of
+    [`Colormap`][pyplotrs.colormaps.Colormap]): the coefficient of variation of
     the CAM16-UCS step size between consecutive table entries. `0.0` means
     every step looks equally large (ideal for mapping continuous data, where
     visual step size should track data step size); larger values mean some

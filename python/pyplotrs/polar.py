@@ -1,4 +1,4 @@
-""":class:`PolarAxes`: theta/r marks on a circular frame."""
+"""``PolarAxes``: theta/r marks on a circular frame."""
 
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ class PolarAxes(_AxesBase):
         """Scatter polar points ``(theta, r)`` (``theta`` in radians).
 
         ``markersize`` is a diameter in points; ``size`` is the matplotlib-style
-        area in pt² (see :meth:`Axes.scatter`)."""
+        area in pt² (see ``Axes.scatter``)."""
         _check_marker(marker)
         self._marks.append({
             "zorder": float(zorder),

@@ -1,9 +1,9 @@
-"""The 2D :class:`Axes`: a coordinate system plus a stack of marks.
+"""The 2D ``Axes``: a coordinate system plus a stack of marks.
 
-Also holds :class:`_AxesBase` - the contract every axes kind shares (color
+Also holds ``_AxesBase`` - the contract every axes kind shares (color
 cycling, the mark ordering rule, legends, the ``get_*`` readers) - and
-:class:`Mappable`, the handle a colormapped mark returns for
-:meth:`Figure.colorbar`.
+``Mappable``, the handle a colormapped mark returns for
+``Figure.colorbar``.
 """
 
 from __future__ import annotations
@@ -85,12 +85,12 @@ _irange = range
 
 
 class Mappable:
-    """The colormapped-mark handle that :meth:`Figure.colorbar` takes.
+    """The colormapped-mark handle that ``Figure.colorbar`` takes.
 
     Returned by every mark that maps values through a colormap -
-    :meth:`Axes.imshow`, :meth:`Axes.scatter` with ``c=``,
-    :meth:`Axes.pcolormesh`, :meth:`Axes.hexbin`, :meth:`Axes.hist2d`,
-    :meth:`Axes.contourf` - and carrying the colormap and value range the
+    ``Axes.imshow``, ``Axes.scatter`` with ``c=``,
+    ``Axes.pcolormesh``, ``Axes.hexbin``, ``Axes.hist2d``,
+    ``Axes.contourf`` - and carrying the colormap and value range the
     colorbar needs to draw a matching scale::
 
         im = ax.imshow(field, cmap="magma")
@@ -256,7 +256,7 @@ class _AxesBase:
         understands. Colormapped kinds (surface, trisurf, contour3d) carry no
         single data color, so they store a representative swatch color (their
         colormap's midpoint, or the middle level) at mark-construction time for
-        exactly this purpose. :class:`Axes` overrides this to pass its marks
+        exactly this purpose. ``Axes`` overrides this to pass its marks
         through untouched, since its glyph drawer has real branches for
         bar/hist/fill swatches that this normalization would flatten into plain
         rules.
@@ -342,8 +342,8 @@ class Axes(_AxesBase):
         """Coerce plot coordinates to a contiguous ``array("d")``.
 
         Datetime-like values switch that axis to a
-        :class:`~pyplotrs.scales.DateScale` (mapped via ``date2num``); strings
-        switch it to a :class:`~pyplotrs.scales.CategoricalScale`, mapping each
+        [`DateScale`][pyplotrs.scales.DateScale] (mapped via ``date2num``); strings
+        switch it to a [`CategoricalScale`][pyplotrs.scales.CategoricalScale], mapping each
         distinct label to an integer position in first-seen order.
 
         The numeric case is the hot one and is handled first, without ever
@@ -438,7 +438,7 @@ class Axes(_AxesBase):
         return self
 
     def semilogx(self, xs, ys, **kwargs) -> "Axes":
-        """:meth:`line` with the x-axis log-scaled - matplotlib's ``ax.semilogx``.
+        """``line`` with the x-axis log-scaled - matplotlib's ``ax.semilogx``.
 
         A thin wrapper: ``ax.set(xscale="log")`` then ``ax.line(xs, ys, **kwargs)``.
         """
@@ -446,12 +446,12 @@ class Axes(_AxesBase):
         return self.line(xs, ys, **kwargs)
 
     def semilogy(self, xs, ys, **kwargs) -> "Axes":
-        """:meth:`line` with the y-axis log-scaled - matplotlib's ``ax.semilogy``."""
+        """``line`` with the y-axis log-scaled - matplotlib's ``ax.semilogy``."""
         self.set(yscale="log")
         return self.line(xs, ys, **kwargs)
 
     def loglog(self, xs, ys, **kwargs) -> "Axes":
-        """:meth:`line` with both axes log-scaled - matplotlib's ``ax.loglog``."""
+        """``line`` with both axes log-scaled - matplotlib's ``ax.loglog``."""
         self.set(xscale="log", yscale="log")
         return self.line(xs, ys, **kwargs)
 
@@ -469,7 +469,7 @@ class Axes(_AxesBase):
 
         Pass ``c`` (a per-point array) to color markers by value through ``cmap``
         and ``norm`` (``vmin``/``vmax`` set the range; ``norm="log"`` or a
-        :mod:`pyplotrs.norms` instance for non-linear). Returns a colorbar handle
+        [`pyplotrs.norms`][pyplotrs.norms] instance for non-linear). Returns a colorbar handle
         in that case, else ``self``."""
         _check_marker(marker)
         xs = self._coords(xs, "x")
@@ -575,7 +575,7 @@ class Axes(_AxesBase):
     def fill_betweenx(self, ys, x1, x2=0.0, *, color=None, alpha: float = 0.3,
                       label: str | None = None, zorder: float = 0.0) -> "Axes":
         """Fill the band between ``x1`` and ``x2`` across ``ys`` - the transpose
-        of :meth:`fill_between`, for bands around a horizontal profile."""
+        of ``fill_between``, for bands around a horizontal profile."""
         ys = self._coords(ys, "y")
         x1 = _to_f64(x1)
         _require_same_length("fill_betweenx", y=ys, x1=x1)
@@ -598,7 +598,7 @@ class Axes(_AxesBase):
         """Horizontal line segments at each ``y``, spanning ``xmin`` to ``xmax``
         in **data** coordinates.
 
-        Unlike :meth:`axhline`, which spans a fraction of the axes and is a
+        Unlike ``axhline``, which spans a fraction of the axes and is a
         guide, these are data and participate in autoscaling. Each argument may
         be a scalar or a sequence; scalars broadcast."""
         return self._add_lines("h", y, xmin, xmax, color, linewidth, linestyle, label,
@@ -608,13 +608,13 @@ class Axes(_AxesBase):
                alpha: float = 1.0, linestyle: str = "solid",
                label: str | None = None, zorder: float = 0.0) -> "Axes":
         """Vertical line segments at each ``x``, spanning ``ymin`` to ``ymax`` in
-        **data** coordinates (see :meth:`hlines`)."""
+        **data** coordinates (see ``hlines``)."""
         return self._add_lines("v", x, ymin, ymax, color, linewidth, linestyle, label,
                                alpha, zorder)
 
     def _add_lines(self, orient, pos, lo, hi, color, linewidth, linestyle, label,
                    alpha=1.0, zorder: float = 0.0) -> "Axes":
-        """Shared body of :meth:`hlines` / :meth:`vlines`."""
+        """Shared body of ``hlines`` / ``vlines``."""
         pos = _to_f64(pos if hasattr(pos, "__len__") else [pos])
         n = len(pos)
         lo = _to_f64(_as_seq(lo, n))
@@ -658,7 +658,7 @@ class Axes(_AxesBase):
     def _map_colors(self, values, cmap, norm, vmin, vmax):
         """``(colormap, norm, rgba_per_value)`` for the per-element colored
         types (hexbin, pcolormesh). The mapping itself runs in Rust - see
-        :func:`_rgba_values`."""
+        ``_rgba_values``."""
         vals = _to_f64(values)
         cm = _colormaps.get_cmap(cmap)
         nrm = _norms.get(norm, vmin, vmax).autoscale(vals)
@@ -734,7 +734,7 @@ class Axes(_AxesBase):
         an equal aspect so wedges stay circular.
 
         This is the one mark with no scalar ``label``: its labels are per-wedge,
-        so they come from ``labels`` - which is also what feeds :meth:`legend`.
+        so they come from ``labels`` - which is also what feeds ``legend``.
         """
         vals = [float(v) for v in sizes]
         total = sum(vals) or 1.0
@@ -781,13 +781,13 @@ class Axes(_AxesBase):
         """Display 2D ``data`` as a colormapped image.
 
         ``data`` is a sequence of equal-length rows. ``cmap`` is a colormap
-        name (see :mod:`pyplotrs.colormaps`) or a ``Colormap``. ``norm`` maps
+        name (see [`pyplotrs.colormaps`][pyplotrs.colormaps]) or a ``Colormap``. ``norm`` maps
         values onto the color axis (``None`` linear, ``"log"`` for a
-        :class:`~pyplotrs.norms.LogNorm`, or any :class:`~pyplotrs.norms.Normalize`);
+        [`LogNorm`][pyplotrs.norms.LogNorm], or any [`Normalize`][pyplotrs.norms.Normalize]);
         the per-pixel lookup runs in Rust. ``extent`` is ``(x0, x1, y0, y1)`` in
         data coordinates (default ``(0, ncols, 0, nrows)``); ``origin`` is
         ``"upper"`` (row 0 at top) or ``"lower"``. Returns a handle for
-        :meth:`Figure.colorbar`.
+        ``Figure.colorbar``.
         """
         # Flattened once here, row-major, and handed to Rust as a buffer; the
         # draw path used to re-flatten a nested list per pixel on every save.
@@ -1067,7 +1067,7 @@ class Axes(_AxesBase):
 
         ``levels`` is either the band edges themselves, or an int asking for
         *about* that many bands. Auto edges are the round numbers
-        :meth:`contour` draws its lines on, extended out to bracket the data, so
+        ``contour`` draws its lines on, extended out to bracket the data, so
         a contour overlay lands exactly on the band boundaries - and the
         colorbar spans those round numbers rather than the raw extrema.
         """
@@ -1092,7 +1092,7 @@ class Axes(_AxesBase):
         return Mappable(self, cm, edges[0], edges[-1], norm=nrm)
 
     def pcolor(self, *args, **kwargs) -> "Mappable":
-        """Alias of :meth:`pcolormesh`.
+        """Alias of ``pcolormesh``.
 
         matplotlib distinguishes the two (``pcolor`` returns a masked-aware
         ``PolyCollection``, ``pcolormesh`` a faster ``QuadMesh``); pyplotrs has
@@ -1104,7 +1104,7 @@ class Axes(_AxesBase):
     def matshow(self, data, **kwargs) -> "Mappable":
         """Display a matrix with row 0 at the top and one cell per entry.
 
-        :meth:`imshow` with the conventions a *matrix* wants rather than the
+        ``imshow`` with the conventions a *matrix* wants rather than the
         ones an *image* wants: origin at the top-left and an equal aspect, so
         cells stay square."""
         kwargs.setdefault("origin", "upper")
@@ -1260,7 +1260,7 @@ class Axes(_AxesBase):
                 color=None, linewidth: float | None = None,
                 linestyle: str = "solid") -> "Axes":
         """Draw a vertical reference line at data ``x`` spanning the axes
-        fraction ``ymin..ymax``. See :meth:`axhline`."""
+        fraction ``ymin..ymax``. See ``axhline``."""
         self._refs.append({
             "kind": "axvline", "x": float(x), "min": float(ymin), "max": float(ymax),
             "color": self._theme.resolve(color) if color is not None else self._theme.text_color,
@@ -1357,11 +1357,11 @@ class Axes(_AxesBase):
              hatch: str | None = None) -> "Axes":
         """Fill the closed polygon through ``(x, y)`` - matplotlib's ``ax.fill``.
 
-        A thin wrapper over :meth:`polygon` taking parallel ``x``/``y`` arrays
+        A thin wrapper over ``polygon`` taking parallel ``x``/``y`` arrays
         instead of a list of point pairs; ``facecolor`` cycles the palette like
-        a data mark when omitted. It is a patch like :meth:`polygon` (drawn
+        a data mark when omitted. It is a patch like ``polygon`` (drawn
         over the data, outside the zorder/legend contract the marks share) -
-        call :meth:`polygon` directly for its other knobs.
+        call ``polygon`` directly for its other knobs.
         """
         xs = _to_f64(x)
         ys = _to_f64(y)
@@ -1503,7 +1503,7 @@ class Axes(_AxesBase):
         """Annotate the data point ``xy`` with ``text`` placed at ``xytext``
         (defaults to ``xy``), optionally drawing a callout arrow from the text to
         the point. All coordinates are in data space. ``weight``/``style`` select
-        a bold and/or italic face (see :meth:`text`)."""
+        a bold and/or italic face (see ``text``)."""
         xy = (float(xy[0]), float(xy[1]))
         self._annotations.append({
             "kind": "annotate", "s": str(text), "xy": xy,
@@ -1526,10 +1526,10 @@ class Axes(_AxesBase):
         and tick/grid/aspect/margin controls.
 
         ``xscale``/``yscale`` accept ``"linear"`` (default), ``"log"``,
-        ``"symlog"``, ``"logit"`` or a :class:`pyplotrs.scales.Scale`.
+        ``"symlog"``, ``"logit"`` or a [`pyplotrs.scales.Scale`][pyplotrs.scales.Scale].
         ``xticks``/``yticks`` pin tick positions; ``xticklabels``/``yticklabels``
         give matching label strings. ``xformatter``/``yformatter`` accept a
-        :class:`pyplotrs.ticker.Formatter`, a ``"{x:.2f}"`` template, or a
+        [`pyplotrs.ticker.Formatter`][pyplotrs.ticker.Formatter], a ``"{x:.2f}"`` template, or a
         callable. ``grid`` overrides the theme grid; ``aspect="equal"`` equalizes
         the data-unit scale on both axes.
 
@@ -1621,7 +1621,7 @@ class Axes(_AxesBase):
         return self._effective_ranges()[0]
 
     def get_ylim(self) -> tuple[float, float]:
-        """Effective y limits (see :meth:`get_xlim`; ``sharey`` unifies these)."""
+        """Effective y limits (see ``get_xlim``; ``sharey`` unifies these)."""
         return self._effective_ranges()[1]
 
     def get_xlabel(self) -> str | None:
@@ -1720,7 +1720,7 @@ class Axes(_AxesBase):
         """Autoscaled ``(xrange, yrange)`` for this axes.
 
         Bulk coordinate arrays are reduced to their finite min/max **in Rust**
-        and folded into a running bound (see :class:`_RangeAcc`); only the
+        and folded into a running bound (see ``_RangeAcc``); only the
         handful of derived scalars each mark contributes - bar edges, image
         extents, whisker ends - are touched in Python. Previously this
         concatenated every point of every mark into one list and scanned that,
@@ -2934,7 +2934,7 @@ class Axes(_AxesBase):
     def _draw_errorbar(self, scene, m: dict, proj: "_Proj") -> None:
         """Draw one errorbar mark.
 
-        Takes the whole :class:`_Proj` rather than bare ``sx``/``sy`` closures:
+        Takes the whole ``_Proj`` rather than bare ``sx``/``sy`` closures:
         the connecting line and the markers go through the Rust fast paths,
         which need the affine coefficients *and* the scale codes. Deriving the
         coefficients here by sampling ``sx(0.0)``/``sx(1.0)`` (as this used to)
@@ -3154,7 +3154,7 @@ class Axes(_AxesBase):
         box and takes the lowest, preferring earlier candidates on a tie so the
         familiar upper-right stays the default on an empty or symmetric plot.
 
-        The sample is capped (:data:`_LEGEND_PROBE_POINTS` per mark), so the cost
+        The sample is capped (``_LEGEND_PROBE_POINTS`` per mark), so the cost
         is a few hundred operations per figure no matter how large the data -
         this runs at draw time, and a legend is not worth an O(n) pass.
         """
@@ -3179,7 +3179,7 @@ class Axes(_AxesBase):
         return best[1], best[2]
 
     def _sample_device_points(self, proj: "_Proj") -> list[tuple[float, float]]:
-        """Up to :data:`_LEGEND_PROBE_POINTS` device-space points per mark, as a
+        """Up to ``_LEGEND_PROBE_POINTS`` device-space points per mark, as a
         cheap stand-in for "where the ink is"."""
         sx, sy = proj.sx, proj.sy
         out: list[tuple[float, float]] = []

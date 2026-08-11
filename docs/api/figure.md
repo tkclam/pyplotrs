@@ -4,15 +4,15 @@ The core 2D/3D plotting API.
 
 ## Entry points
 
-::: pyplotrs.figure.subplots
+::: pyplotrs.subplots
 
-::: pyplotrs.figure.subplot_mosaic
+::: pyplotrs.subplot_mosaic
 
 ::: pyplotrs.figure
 
 ## Figure
 
-::: pyplotrs.figure.Figure
+::: pyplotrs.Figure
     options:
       members:
         - set
@@ -22,7 +22,7 @@ The core 2D/3D plotting API.
         - colorbar
         - save
 
-::: pyplotrs.figure.GridSpec
+::: pyplotrs.GridSpec
 
 ## Axes
 

@@ -1,7 +1,7 @@
 """pyplotrs.animation: multi-frame / animated export.
 
 pyplotrs has no global "current figure" state, so an animation is just a *render
-callback* that returns a fully-built :class:`pyplotrs.Figure` for each frame. The
+callback* that returns a fully-built [`pyplotrs.Figure`][pyplotrs.Figure] for each frame. The
 frames are rasterized and encoded to an animated **GIF** (broadly viewable,
 256-color per frame) or **APNG** (full 8-bit color, higher fidelity), chosen
 by the output file extension::
@@ -28,7 +28,7 @@ from __future__ import annotations
 from typing import Callable, Iterable, Optional, Union
 
 from . import _pyplotrs_core as _core
-from .figure import Figure
+from ._figure import Figure
 
 
 class Animation:
@@ -38,7 +38,7 @@ class Animation:
     ----------
     render:
         Called once per frame as ``render(value)``; must return a
-        :class:`pyplotrs.Figure`.
+        [`pyplotrs.Figure`][pyplotrs.Figure].
     frames:
         Either an ``int`` (the callback receives ``0 .. frames-1``) or an
         iterable of values passed to the callback in order.
@@ -118,7 +118,7 @@ class Animation:
 
 def animate(render: Callable[..., Figure], frames: Union[int, Iterable], *,
             fps: float = 20.0, repeat: bool = True) -> Animation:
-    """Convenience constructor for :class:`Animation` (see its docstring)."""
+    """Convenience constructor for ``Animation`` (see its docstring)."""
     return Animation(render, frames, fps=fps, repeat=repeat)
 
 

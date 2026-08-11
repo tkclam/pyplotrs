@@ -189,7 +189,7 @@ def _to_f64(values) -> "array":
 
 def _concat(arrays: list) -> "array":
     """Join coordinate arrays into one. Only the non-linear-scale autoscaling
-    path needs this; the linear path folds bounds instead (see :class:`_RangeAcc`)."""
+    path needs this; the linear path folds bounds instead (see ``_RangeAcc``)."""
     if not arrays:
         return array("d")
     if len(arrays) == 1:
@@ -234,7 +234,7 @@ class _RangeAcc:
     in Python instead of O(points) in Python plus a full copy.
 
     Bulk arrays are also retained by reference (never copied) for
-    :meth:`arrays`, because non-linear scales do their own domain-aware
+    ``arrays``, because non-linear scales do their own domain-aware
     autoscaling and need the values, not just the bounds.
     """
 
@@ -909,8 +909,8 @@ def _patch_bbox(p: dict) -> tuple[list[float], list[float]]:
 def _auto_repr(obj, *names: str, skip_none: bool = True) -> str:
     """``ClassName(a=1, b='x')`` from the named attributes.
 
-    Used by the base classes in :mod:`~pyplotrs.scales`,
-    :mod:`~pyplotrs.norms` and :mod:`~pyplotrs.ticker` so their nineteen
+    Used by the base classes in [`scales`][pyplotrs.scales],
+    [`norms`][pyplotrs.norms] and [`ticker`][pyplotrs.ticker] so their nineteen
     subclasses all get a useful repr from three implementations. If no names
     are given, every public attribute is shown in definition order.
 

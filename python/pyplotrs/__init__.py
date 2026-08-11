@@ -14,11 +14,11 @@ interfere::
 
 Saving picks the backend from the extension: ``.pdf`` (embedded, subset fonts -
 the text stays real), ``.svg``, ``.png`` (at ``dpi=``), ``.html``
-(self-contained). In a notebook a :class:`Figure` renders itself inline.
+(self-contained). In a notebook a ``Figure`` renders itself inline.
 
-Start at :func:`subplots`; :class:`Axes` carries the marks, :class:`Figure` the
-layout and output. :mod:`~pyplotrs.themes`, :mod:`~pyplotrs.colormaps`,
-:mod:`~pyplotrs.scales`, :mod:`~pyplotrs.ticker` and :mod:`~pyplotrs.norms`
+Start at ``subplots``; ``Axes`` carries the marks, ``Figure`` the
+layout and output. [`themes`][pyplotrs.themes], [`colormaps`][pyplotrs.colormaps],
+[`scales`][pyplotrs.scales], [`ticker`][pyplotrs.ticker] and [`norms`][pyplotrs.norms]
 hold the styling and axis vocabulary.
 
 Full documentation: https://tkclam.github.io/pyplotrs/
@@ -31,9 +31,7 @@ from . import _pyplotrs_core as _core
 from . import color, colormaps, norms, palettes, scales, ticker
 from . import theme as themes
 from ._const import DEFAULT_FIGSIZE
-from .animation import Animation, animate
-from .colormaps import Colormap, get_cmap
-from .figure import (
+from ._figure import (
     Axes,
     Axes3D,
     Figure,
@@ -43,6 +41,8 @@ from .figure import (
     subplot_mosaic,
     subplots,
 )
+from .animation import Animation, animate
+from .colormaps import Colormap, get_cmap
 from .theme import Theme
 
 try:
@@ -57,9 +57,9 @@ except PackageNotFoundError:  # pragma: no cover - running from a source tree
 
 def figure(figsize: tuple[float, float] = DEFAULT_FIGSIZE, *, theme=None,
            units: str = "pt") -> Figure:
-    """Create an empty :class:`Figure` (no axes). Use
-    :meth:`Figure.add_gridspec` + :meth:`Figure.add_subplot` to place spanning
-    axes, or :func:`subplots` / :func:`subplot_mosaic` for the common cases."""
+    """Create an empty ``Figure`` (no axes). Use
+    ``Figure.add_gridspec`` + ``Figure.add_subplot`` to place spanning
+    axes, or ``subplots`` / ``subplot_mosaic`` for the common cases."""
     fig = Figure(figsize=figsize, nrows=1, ncols=1, theme=theme, units=units)
     fig.axes = []
     fig._spans = []
@@ -111,7 +111,7 @@ def set_unicode_minus(on: bool = True) -> None:
         pyplotrs.set_unicode_minus(False)
 
     This governs labels pyplotrs formats from a number - axis and colorbar
-    ticks, and the numeric :mod:`~pyplotrs.ticker` formatters. Text you supply
+    ticks, and the numeric [`ticker`][pyplotrs.ticker] formatters. Text you supply
     yourself is never rewritten, and ``$...$`` math always uses a real minus.
     """
     ticker._UNICODE_MINUS = bool(on)
@@ -119,7 +119,7 @@ def set_unicode_minus(on: bool = True) -> None:
 
 def get_unicode_minus() -> bool:
     """Whether negative numeric labels use U+2212 (see
-    :func:`set_unicode_minus`). Defaults to ``True``."""
+    ``set_unicode_minus``). Defaults to ``True``."""
     return ticker._UNICODE_MINUS
 
 

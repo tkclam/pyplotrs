@@ -1,14 +1,14 @@
 """Axis scales: the data-space -> transformed-space mapping that sits between
 raw data and the device transform.
 
-A :class:`Scale` owns three things an axis needs: a monotonic ``transform`` (and
+A ``Scale`` owns three things an axis needs: a monotonic ``transform`` (and
 its ``inverse``) used to position data, a tick *locator+formatter* (``ticks``),
 and an optional set of ``minor_ticks``. The figure draws marks by composing the
 scale transform with an affine device map, so the Rust fast paths stay valid:
 they only ever see an affine map over *transformed* space (see
-``Axes._draw``/``_draw_mark`` in :mod:`pyplotrs.figure`).
+``Axes._draw``/``_draw_mark`` in ``pyplotrs._figure``).
 
-:class:`LinearScale` is the default and is bit-for-bit identical to the previous
+``LinearScale`` is the default and is bit-for-bit identical to the previous
 linear-only behavior (its ``transform`` is the identity and its ``ticks`` defer
 to the Rust ``nice_ticks`` locator). Nonlinear scales (log, symlog, ...) override
 ``transform``/``inverse``/``ticks`` and set ``is_identity = False`` so the figure
@@ -40,7 +40,7 @@ def nice_ticks(lo: float, hi: float, max_ticks: int) -> list[Tick]:
     Every caller of the locator goes through here rather than
     ``_core.nice_ticks``: the Rust side formats with an ASCII hyphen (it is a
     pure function with no view of the display setting) and this is where that
-    becomes a real :data:`~pyplotrs.ticker.MINUS`. Doing it before the labels
+    becomes a real [`MINUS`][pyplotrs.ticker.MINUS]. Doing it before the labels
     reach the layout engine keeps the pre-measured extents honest - a minus is
     nearly twice the width of a hyphen.
     """
@@ -327,7 +327,7 @@ _EPOCH = _dt.datetime(1970, 1, 1)
 
 
 def is_datetime_like(v) -> bool:
-    """Whether ``v`` is a datetime we can place on a :class:`DateScale`
+    """Whether ``v`` is a datetime we can place on a ``DateScale``
     (``datetime``/``date``, pandas ``Timestamp``, or NumPy ``datetime64``)."""
     if isinstance(v, (_dt.datetime, _dt.date)):
         return True
@@ -352,7 +352,7 @@ def date2num(v) -> float:
 
 
 def num2date(x: float) -> _dt.datetime:
-    """Inverse of :func:`date2num`: a float day-number back to a ``datetime``."""
+    """Inverse of ``date2num``: a float day-number back to a ``datetime``."""
     return _EPOCH + _dt.timedelta(days=float(x))
 
 
@@ -423,7 +423,7 @@ def _date_ticks(lo: float, hi: float, max_ticks: int) -> list[Tick]:
 
 
 class DateScale(Scale):
-    """A time axis over float **day numbers** (:func:`date2num`, days since
+    """A time axis over float **day numbers** (``date2num``, days since
     1970-01-01). Datetime inputs are converted on the way in; ticks fall on
     calendar boundaries (year/month/day/hour) chosen from the visible span."""
 
@@ -442,8 +442,8 @@ class DateScale(Scale):
 
 
 def get(scale) -> Scale:
-    """Resolve ``scale`` (a :class:`Scale`, a name string, or ``None``) to a
-    concrete :class:`Scale`. ``None``/``"linear"`` -> :class:`LinearScale`."""
+    """Resolve ``scale`` (a ``Scale``, a name string, or ``None``) to a
+    concrete ``Scale``. ``None``/``"linear"`` -> ``LinearScale``."""
     if scale is None:
         return LinearScale()
     if isinstance(scale, Scale):

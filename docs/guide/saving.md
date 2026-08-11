@@ -1,6 +1,6 @@
 # Saving figures
 
-[`Figure.save`][pyplotrs.figure.Figure.save] picks the format from the file
+[`Figure.save`][pyplotrs.Figure.save] picks the format from the file
 extension (case-insensitive):
 
 ```python

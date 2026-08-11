@@ -1,16 +1,16 @@
 """Themes: the single bundle of style choices a figure is drawn with.
 
-A :class:`Theme` is an immutable dataclass holding the genuinely *style*-varying
+A ``Theme`` is an immutable dataclass holding the genuinely *style*-varying
 knobs (palette, type scale, spine/grid/background, default line weights). There
-is **no global "current theme"** - a theme is passed to :func:`pyplotrs.subplots`
-(or :class:`pyplotrs.Figure`) and flows to its axes, matching the library's
+is **no global "current theme"** - a theme is passed to [`pyplotrs.subplots`][pyplotrs.subplots]
+(or [`pyplotrs.Figure`][pyplotrs.Figure]) and flows to its axes, matching the library's
 no-global-state philosophy.
 
 Built-in presets are module attributes, so ``pyplotrs.themes.nature`` etc. work::
 
     fig, ax = pyplotrs.subplots(theme=pyplotrs.themes.presentation)
 
-Derive your own with :meth:`Theme.with_`::
+Derive your own with ``Theme.with_``::
 
     mine = pyplotrs.themes.default.with_(grid=True, line_width=2.0)
 """
@@ -139,7 +139,7 @@ def _channel(v) -> int:
 
     Both conventions are accepted and told apart the way matplotlib's users
     expect: an *all-float* tuple in 0-1 is scaled, anything else is already in
-    bytes. See :func:`parse_color` for why the distinction has to be made on the
+    bytes. See ``parse_color`` for why the distinction has to be made on the
     whole tuple rather than per channel.
     """
     return max(0, min(255, int(round(v))))
@@ -195,7 +195,7 @@ def parse_color(color, palette: tuple[RGBA, ...]) -> RGBA:
 
 @dataclass(frozen=True)
 class Theme:
-    """An immutable set of style choices. Use :meth:`with_` to derive variants."""
+    """An immutable set of style choices. Use ``with_`` to derive variants."""
 
     def __repr__(self) -> str:
         """A one-line summary, not the whole field list.
@@ -266,7 +266,7 @@ class Theme:
         pie wedges.
 
         The intent is "the plot background showing through", so it follows
-        :attr:`axes_facecolor` and falls back to white when that is ``None``
+        ``axes_facecolor`` and falls back to white when that is ``None``
         (a transparent plot area over a white page). Hardcoding white here is
         what made histogram bins grow white outlines under a dark theme.
         """
@@ -274,7 +274,7 @@ class Theme:
 
     def resolve(self, color) -> RGBA:
         """Resolve a color spec against this theme's palette (see
-        :func:`parse_color`)."""
+        ``parse_color``)."""
         return parse_color(color, self.palette)
 
     def with_(self, **changes) -> "Theme":
@@ -333,8 +333,8 @@ _PRESETS = {
 
 
 def get(theme) -> Theme:
-    """Coerce ``theme`` (a :class:`Theme`, a preset name, or ``None``) to a
-    :class:`Theme`. ``None`` -> :data:`default`."""
+    """Coerce ``theme`` (a ``Theme``, a preset name, or ``None``) to a
+    ``Theme``. ``None`` -> ``default``."""
     if theme is None:
         return default
     if isinstance(theme, Theme):

@@ -33,7 +33,7 @@ All of them return the same kind of handle.
 ## Colorbars
 
 The colormapped marks return a handle you pass to
-[`Figure.colorbar`][pyplotrs.figure.Figure.colorbar]; the colorbar is laid out
+[`Figure.colorbar`][pyplotrs.Figure.colorbar]; the colorbar is laid out
 in a reserved band beside its axes, so it never overlaps the data:
 
 ```python

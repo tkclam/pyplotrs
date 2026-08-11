@@ -41,7 +41,7 @@ def test_no_module_is_a_god_module(path):
 def test_figure_module_only_orchestrates():
     """`figure.py` should hold the Figure, the grid helpers and nothing else -
     no axes classes, no drawing primitives."""
-    tree = ast.parse((PKG / "figure.py").read_text())
+    tree = ast.parse((PKG / "_figure.py").read_text())
     defined = {n.name for n in tree.body
                if isinstance(n, (ast.ClassDef, ast.FunctionDef))}
     assert "Figure" in defined
@@ -52,7 +52,7 @@ def test_figure_module_only_orchestrates():
 
 @pytest.mark.parametrize("name,module", [
     ("Axes", "axes"), ("Axes3D", "axes3d"), ("PolarAxes", "polar"),
-    ("Figure", "figure"), ("GridSpec", "figure"),
+    ("Figure", "_figure"), ("GridSpec", "_figure"),
 ])
 def test_public_classes_live_in_their_own_module(name, module):
     mod = __import__(f"pyplotrs.{module}", fromlist=[name])
@@ -69,7 +69,7 @@ def test_the_layering_has_no_cycles():
     """`_const` -> `_util` -> `_draw` -> `_layout` -> axes kinds -> `figure`.
     A cycle here is what makes a god module feel unavoidable."""
     layer = {"_const": 0, "_util": 1, "_draw": 2, "_layout": 2,
-             "axes": 3, "axes3d": 4, "polar": 4, "figure": 5}
+             "axes": 3, "axes3d": 4, "polar": 4, "_figure": 5}
     for name, rank in layer.items():
         tree = ast.parse((PKG / f"{name}.py").read_text())
         for node in tree.body:
@@ -96,5 +96,5 @@ def test_the_drawing_layer_never_imports_figure(name):
     import."""
     tree = ast.parse((PKG / f"{name}.py").read_text())
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == "figure":
-            pytest.fail(f"{name}.py imports figure.py")
+        if isinstance(node, ast.ImportFrom) and node.module == "_figure":
+            pytest.fail(f"{name}.py imports _figure.py")

@@ -1,22 +1,22 @@
 """Built-in colormaps.
 
-A :class:`Colormap` maps a scalar in ``[0, 1]`` to an ``(r, g, b, a)`` byte
+A ``Colormap`` maps a scalar in ``[0, 1]`` to an ``(r, g, b, a)`` byte
 tuple. This is the LUT machinery behind ``Axes.imshow`` / ``Figure.colorbar``.
 
-Every :class:`Colormap` is backed by an exact 256-entry RGB table, indexed
+Every ``Colormap`` is backed by an exact 256-entry RGB table, indexed
 directly - so sampling is always O(1), never interpolation math on the hot
 path. That table comes from one of two places:
 
 * **built-in name** - an exact table sourced from upstream (matplotlib,
-  colorcet, or cmocean - see :func:`available`), bit-for-bit faithful, not an
+  colorcet, or cmocean - see ``available``), bit-for-bit faithful, not an
   approximation. A trailing ``"_r"`` reverses it.
 * **custom stops** - ``Colormap(name, stops=[(0.0, (0, 0, 0)), ...])``
   resamples your control colors to 256 entries in **Oklab** space by default
-  (see :mod:`pyplotrs.color`), so gradients look perceptually smooth rather
+  (see [`pyplotrs.color`][pyplotrs.color]), so gradients look perceptually smooth rather
   than banding the way a naive sRGB lerp does.
 
 Both the table data and all interpolation math run in Rust
-(:mod:`pyplotrs._pyplotrs_core`, backed by the ``pyplotrs-color`` crate).
+(``pyplotrs._pyplotrs_core``, backed by the ``pyplotrs-color`` crate).
 """
 
 from __future__ import annotations
@@ -117,7 +117,7 @@ _CMAP_CACHE: dict[str, Colormap] = {}
 
 def get_cmap(name) -> Colormap:
     """Look up a colormap by name. A ``_r`` suffix reverses it
-    (e.g. ``"viridis_r"``). Passing a :class:`Colormap` returns it unchanged."""
+    (e.g. ``"viridis_r"``). Passing a ``Colormap`` returns it unchanged."""
     if isinstance(name, Colormap):
         return name
     key = str(name)
@@ -137,7 +137,7 @@ def get_cmap(name) -> Colormap:
 def available(category: str | None = None) -> list[str]:
     """Names of built-in continuous colormaps (each also usable with a
     ``"_r"`` suffix to reverse it), optionally filtered to one ``category``
-    (see :data:`CATEGORIES`)."""
+    (see ``CATEGORIES``)."""
     if category is not None and category not in CATEGORIES:
         raise ValueError(f"unknown category {category!r}; choose from {CATEGORIES}")
     return sorted(_core.list_colormaps(category))

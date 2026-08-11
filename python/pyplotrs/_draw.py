@@ -84,14 +84,14 @@ def _colormap_lut(cmap, alpha: float = 1.0) -> bytes:
     """A 256-entry RGBA lookup table sampled from ``cmap`` (1024 bytes).
 
     ``cmap``'s 256-entry RGB table is already materialized (built once, in
-    Rust, at :class:`~pyplotrs.colormaps.Colormap` construction); this just
+    Rust, at [`Colormap`][pyplotrs.colormaps.Colormap] construction); this just
     alpha-scales it into RGBA, also in Rust, and caches the result - it used
     to run on *every* draw of every image and again for each colorbar
     gradient, so building it once and reusing it still matters.
 
     ``alpha`` scales every entry's alpha channel, which is how the colormapped
     marks (image / contourf) honor a mark-level ``alpha``: they have no single
-    color to fold it into the way :meth:`_AxesBase._mark_color` does, so it
+    color to fold it into the way ``_AxesBase._mark_color`` does, so it
     rides the LUT instead and the Rust per-pixel loop needs no new argument. It
     is part of the cache key, so a translucent image cannot poison the opaque
     table (or vice versa).
@@ -111,7 +111,7 @@ def _rgba_values(values, cmap, norm) -> list[tuple[int, int, int, int]]:
     """One RGBA per value, through ``norm`` then ``cmap``.
 
     Runs in Rust whenever the norm names a transform Rust knows
-    (:attr:`pyplotrs.norms.Normalize.code`), which covers linear and log - two
+    ([`pyplotrs.norms.Normalize.code`][pyplotrs.norms.Normalize.code]), which covers linear and log - two
     Python calls per point otherwise, so 200k interpreter round-trips for a
     100k-point scatter. ``TwoSlopeNorm`` and ``BoundaryNorm`` are piecewise and
     have no such transform, so they keep the per-value Python path.
@@ -312,7 +312,7 @@ def _draw_arrow(scene, x0: float, y0: float, x1: float, y1: float, color,
 
 def _measure_legend(scene, entries, theme=None, opts=None):
     """Size a legend box for ``entries``. Returns ``(box_w, box_h, metrics)``
-    where ``metrics`` is a dict reused by :func:`_draw_legend_box` so the box is
+    where ``metrics`` is a dict reused by ``_draw_legend_box`` so the box is
     measured and drawn from one source of truth (lets the figure layout reserve
     exactly the column width the box will occupy).
 

@@ -1,4 +1,4 @@
-""":class:`Axes3D`: 3D marks projected to 2D by an orthographic camera.
+"""``Axes3D``: 3D marks projected to 2D by an orthographic camera.
 
 The camera and the per-vertex projection live in the ``pyplotrs-3d`` crate.
 This module builds primitives, sorts them back-to-front, and emits ordinary 2D
@@ -102,7 +102,7 @@ class Axes3D(_AxesBase):
         """Scatter 3D points at ``(xs, ys, zs)``.
 
         ``markersize`` is a diameter in points; ``size`` is the matplotlib-style
-        area in pt² (see :meth:`Axes.scatter`)."""
+        area in pt² (see ``Axes.scatter``)."""
         _check_marker(marker)
         self._marks3.append({
             "kind": "scatter",
@@ -697,7 +697,7 @@ class Axes3D(_AxesBase):
     def _interactive_payload(self) -> dict:
         """Serialize this 3D axes into a JSON-able dict for the in-browser
         renderer (``_html3d``). Coordinates are pre-normalized into the
-        ``[-0.5, 0.5]^3`` cube (same as :meth:`_draw`'s ``norm``) so the camera
+        ``[-0.5, 0.5]^3`` cube (same as ``_draw``'s ``norm``) so the camera
         is all the JS has to apply; surface face colors are pre-sampled from the
         colormap (depth/order are recomputed per frame). Ticks and theme colors
         come along so the page reproduces the static look."""

@@ -8,7 +8,7 @@ numbers" locator. Data is drawn clipped to the plot area, and the y-axis label
 is rotated via an affine group.
 
 **This module orchestrates; Rust computes.** Coordinate data is held as
-``array.array("d")`` (see :func:`_to_f64`) so it crosses into Rust through the
+``array.array("d")`` (see ``_to_f64``) so it crosses into Rust through the
 buffer protocol as a memcpy rather than a per-element interpreter round-trip,
 and the scans over it - autoscaling, histogram binning, the data-to-device
 transform, polyline simplification - all run on the Rust side. Anything that
@@ -151,11 +151,11 @@ class Figure:
     def add_gridspec(self, nrows: int, ncols: int, *,
                      width_ratios=None, height_ratios=None) -> "GridSpec":
         """Switch this figure to spanning-subplot mode over an ``nrows`` x
-        ``ncols`` grid and return a :class:`GridSpec`. Populate it with
-        :meth:`add_subplot`; existing auto-created axes are cleared.
+        ``ncols`` grid and return a ``GridSpec``. Populate it with
+        ``add_subplot``; existing auto-created axes are cleared.
 
         ``width_ratios``/``height_ratios`` weight the columns and rows (see
-        :func:`subplots`)."""
+        ``subplots``)."""
         self.nrows = nrows
         self.ncols = ncols
         self.axes = []
@@ -167,7 +167,7 @@ class Figure:
         return GridSpec(nrows, ncols)
 
     def add_subplot(self, spec, *, projection: str | None = None) -> "Axes":
-        """Add an axes at a :class:`GridSpec` slice (e.g. ``gs[0, :]`` or
+        """Add an axes at a ``GridSpec`` slice (e.g. ``gs[0, :]`` or
         ``gs[1:, 0]``). Returns the new axes."""
         if self._spans is None:
             self._spans = []
@@ -186,11 +186,11 @@ class Figure:
                fontsize: float | None = None) -> "Figure":
         """Enable a single figure-level legend, collecting the labeled marks of
         every axes into one box placed in a reserved column to the right of the
-        grid. Unlike :meth:`Axes.legend`, this is laid out as its own region and
+        grid. Unlike ``Axes.legend``, this is laid out as its own region and
         so can never overlap the data. ``loc`` currently supports ``"right"``.
 
         ``ncol``/``title``/``frameon``/``fontsize`` work as on
-        :meth:`Axes.legend`; the reserved column is measured from them, so a
+        ``Axes.legend``; the reserved column is measured from them, so a
         two-column figure legend takes a wider, shorter band."""
         self._legend = {
             "loc": loc, "ncol": int(ncol), "title": title,
@@ -218,16 +218,16 @@ class Figure:
     def colorbar(self, mappable: "Mappable", *, label: str | None = None,
                  orientation: str = "vertical", shrink: float = 1.0,
                  ticks=None, format=None) -> "Figure":
-        """Attach a colorbar for ``mappable`` (from :meth:`Axes.imshow` or a
-        colormapped :meth:`Axes.scatter`) in a reserved band beside its axes.
+        """Attach a colorbar for ``mappable`` (from ``Axes.imshow`` or a
+        colormapped ``Axes.scatter``) in a reserved band beside its axes.
         The tick scale follows the mappable's ``norm`` (e.g. log ticks for
-        a :class:`~pyplotrs.norms.LogNorm`).
+        a [`LogNorm`][pyplotrs.norms.LogNorm]).
 
         ``orientation="horizontal"`` puts the bar beneath the plot instead, in
         its own reserved band below the x-axis label. ``shrink`` scales the
         strip's length as a fraction of the plot extent, centered. ``ticks``
         pins the tick values and ``format`` accepts anything
-        :mod:`pyplotrs.ticker` does - a formatter, a ``"{x:.2f}"`` template, or
+        [`pyplotrs.ticker`][pyplotrs.ticker] does - a formatter, a ``"{x:.2f}"`` template, or
         a callable."""
         if orientation not in ("vertical", "horizontal"):
             raise ValueError(
@@ -523,7 +523,7 @@ def subplot_mosaic(mosaic, *, figsize: tuple[float, float] = DEFAULT_FIGSIZE,
 class GridSpec:
     """A lightweight grid geometry for spanning subplots. Create with a figure's
     row/column count, then slice it (NumPy-style) to place an axes across a
-    range of rows/columns via :meth:`Figure.add_subplot`."""
+    range of rows/columns via ``Figure.add_subplot``."""
 
     def __init__(self, nrows: int, ncols: int) -> None:
         self.nrows = nrows

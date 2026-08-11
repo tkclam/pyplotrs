@@ -9,6 +9,11 @@ page shows exactly what its code produces. Run it from the repo root::
 
 It writes ``docs/images/tutorial_*.png``. Keep the code below and the snippets
 on the page in sync - the page quotes them, it does not include them.
+
+The body font is pinned to the bundled Liberation Sans, for the same reason
+``tools/build_gallery_images.py`` pins it: left alone, pyplotrs resolves body
+text to the host's Arial or Helvetica if present, so the committed images could
+only be reproduced on a machine with the same fonts installed.
 """
 from __future__ import annotations
 
@@ -16,6 +21,10 @@ import math
 import os
 
 import pyplotrs as plt
+
+#: Must match `tests/conftest.py` and `tools/build_gallery_images.py`.
+plt.set_font_family("Liberation Sans")
+assert plt.resolved_font_name() == "Liberation Sans"
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "docs", "images")
 

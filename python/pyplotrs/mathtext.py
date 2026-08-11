@@ -32,7 +32,7 @@ def measure(scene, s: str, size: float, font: str = "body") -> tuple[float, floa
     """Return ``(width, ascent, depth)`` of ``s`` (math-aware), in points.
 
     ``font`` selects the upright body face - ``"body"``, ``"body-bold"``,
-    ``"body-italic"``, ``"body-bolditalic"``. It must match what :func:`draw`
+    ``"body-italic"``, ``"body-bolditalic"``. It must match what ``draw``
     will use, since the layout engine sizes its bands from this measurement.
     """
     return scene.measure_math(s, size, font)
@@ -42,7 +42,7 @@ def draw(scene, x: float, baseline: float, s: str, size: float, color,
          font: str = "body") -> None:
     """Render ``s`` with its left edge at ``x`` and baseline at ``baseline``.
 
-    ``font`` selects the upright body face (see :func:`measure`). Math spans are
+    ``font`` selects the upright body face (see ``measure``). Math spans are
     unaffected: their italics come from the math font's own alphanumeric blocks.
     """
     scene.add_math(x, baseline, s, size, color, font)

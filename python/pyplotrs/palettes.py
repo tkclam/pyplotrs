@@ -1,5 +1,5 @@
 """Built-in categorical/qualitative palettes: short lists of colors meant to
-be *distinct*, unlike a :mod:`pyplotrs.colormaps` continuous map.
+be *distinct*, unlike a [`pyplotrs.colormaps`][pyplotrs.colormaps] continuous map.
 
 Curated from matplotlib (``tab10``/``tab20``/``tab20b``/``tab20c``, the
 ColorBrewer qualitative sets ``Set1``-``Set3``/``Pastel1``-``Pastel2``/
@@ -17,7 +17,7 @@ categories), and seaborn's named palettes (``sns_deep``/``sns_muted``/
     mine = themes.default.with_(palette=palettes.get("tab10"))
 
 The theme's own default cycle (Okabe-Ito, colorblind-safe by construction) is
-unaffected - see :mod:`pyplotrs.theme`.
+unaffected - see [`Theme`][pyplotrs.theme.Theme].
 """
 
 from __future__ import annotations

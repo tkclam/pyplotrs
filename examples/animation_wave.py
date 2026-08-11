@@ -1,4 +1,4 @@
-"""An animated GIF: a traveling wave (one frame shown in the gallery)."""
+"""An animated GIF: a traveling wave."""
 import math
 
 import pyplotrs as plt
@@ -12,5 +12,3 @@ def frame(i):
     return fig
 
 plt.animate(frame, frames=40, fps=20).save("animation_wave.gif")
-# Also render a single still frame for a static thumbnail.
-frame(0).save("animation_wave.png")

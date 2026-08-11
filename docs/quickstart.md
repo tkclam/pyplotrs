@@ -6,7 +6,7 @@ build-it-up walkthrough, see the [tutorial](tutorial.md).
 
 ## Your first figure
 
-Everything starts with [`subplots`][pyplotrs.figure.subplots], which returns a
+Everything starts with [`subplots`][pyplotrs.subplots], which returns a
 `Figure` and one or more `Axes`:
 
 ```python

@@ -27,7 +27,7 @@ even grid instead of raising.
 ## Spanning panels: `subplot_mosaic`
 
 An ASCII drawing of the layout is usually clearer than index arithmetic.
-[`subplot_mosaic`][pyplotrs.figure.subplot_mosaic] takes one and hands back a
+[`subplot_mosaic`][pyplotrs.subplot_mosaic] takes one and hands back a
 dict keyed by the labels:
 
 ```python
@@ -50,9 +50,9 @@ triple-quoted form above means what it looks like.
 ## Spanning panels: `GridSpec`
 
 The index-based route, for when the geometry is computed rather than drawn.
-[`Figure.add_gridspec`][pyplotrs.figure.Figure.add_gridspec] returns a
-[`GridSpec`][pyplotrs.figure.GridSpec] you slice NumPy-style, and
-[`add_subplot`][pyplotrs.figure.Figure.add_subplot] places an axes on the slice:
+[`Figure.add_gridspec`][pyplotrs.Figure.add_gridspec] returns a
+[`GridSpec`][pyplotrs.GridSpec] you slice NumPy-style, and
+[`add_subplot`][pyplotrs.Figure.add_subplot] places an axes on the slice:
 
 ```python
 fig = plt.figure(figsize=(500, 320))
@@ -152,7 +152,7 @@ fig.set(suptitle="An overview")
 fig.legend(loc="right", ncol=2, title="condition")
 ```
 
-[`Figure.legend`][pyplotrs.figure.Figure.legend] collects the labeled marks of
+[`Figure.legend`][pyplotrs.Figure.legend] collects the labeled marks of
 every panel — 2D, polar and 3D — de-duplicated by label, into a reserved column
 to the right of the grid. Because the column is part of the layout rather than
 an overlay, a figure legend can never cover data, and the panels shrink to make

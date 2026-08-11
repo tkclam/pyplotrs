@@ -8,14 +8,14 @@ As*), while everything else stays the same crisp pyplotrs SVG.
 How it fits together:
 
 - During the HTML build, ``Figure._build_scene(capture=...)`` wraps the real
-  ``Scene`` in :class:`_MathCapture`. That proxy forwards every call verbatim
+  ``Scene`` in ``_MathCapture``. That proxy forwards every call verbatim
   **except** ``add_math`` for a ``$``-bearing string: it records the run's TeX,
   its final left-edge/baseline, its measured box ``(width, ascent, depth)``, its
   color, and the *composed* group transform in effect (so rotated axis/colorbar
   labels are reproduced) -- and then **drops** the baked glyphs. Because the math
   glyph runs are never added, the bundled STIX math font is not embedded in the
   SVG either, so the SVG stays small.
-- :func:`figure_to_math_html` lays the figure's SVG at a fixed pixel size (1 SVG
+- ``figure_to_math_html`` lays the figure's SVG at a fixed pixel size (1 SVG
   user unit = 1 CSS px) and places one absolutely-positioned ``<div>`` per math
   run, centered on the exact ink box pyplotrs reserved, rotated by the captured
   transform. MathJax (SVG output, fonts embedded) typesets those divs.

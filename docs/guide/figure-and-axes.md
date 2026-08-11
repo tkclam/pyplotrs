@@ -7,7 +7,7 @@ always hold explicit `fig` and `ax` references.
 
 ## Creating figures
 
-The ergonomic entry point is [`subplots`][pyplotrs.figure.subplots]:
+The ergonomic entry point is [`subplots`][pyplotrs.subplots]:
 
 ```python
 import pyplotrs as plt
