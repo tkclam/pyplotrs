@@ -22,6 +22,7 @@ mod png_encode;
 use std::collections::HashMap;
 
 use pyplotrs_core::kurbo::{Affine, PathEl, Point, Vec2};
+use pyplotrs_core::resample;
 use pyplotrs_core::{
     Color, FillRule as CoreFillRule, Group, ImageNode, LineCap as CoreLineCap,
     LineJoin as CoreLineJoin, MarkerNode, Node, PathNode, Scene, Stroke as CoreStroke, TextNode,
@@ -308,6 +309,23 @@ struct StampTiles {
 /// `Sync` and can be shared across the band threads.
 type StampCache = HashMap<usize, StampTiles>;
 
+/// Images already resampled onto their device grid and premultiplied, ready to
+/// blit. Same rationale as [`StampCache`]: both steps depend only on the linear
+/// part of the transform, which a band shift leaves alone, so doing them once
+/// beats redoing them in all ~30 bands of a tall figure.
+///
+/// Keyed by the pixel buffer's address plus the grid, so one image drawn at two
+/// sizes gets an entry each.
+type ImageCache = HashMap<(usize, u32, u32), Pixmap>;
+
+/// Everything a banded render can compute once up front and share, because it
+/// depends on the root transform's linear part alone.
+#[derive(Default)]
+struct RenderCache {
+    stamps: StampCache,
+    images: ImageCache,
+}
+
 fn stamp_key(m: &MarkerNode) -> usize {
     m as *const MarkerNode as usize
 }
@@ -531,26 +549,64 @@ fn blit_tile(
     }
 }
 
-fn render_image(pixmap: &mut PixmapMut, im: &ImageNode, transform: Affine, clip: Option<&Mask>) {
-    let (w, h) = (im.data.width, im.data.height);
-    let Some(size) = IntSize::from_wh(w, h) else {
-        return;
-    };
+/// The pixel grid `im` should carry when drawn under `transform` - its own,
+/// where [`resample::target_grid`] judges a resample not worth its cost.
+fn image_grid(im: &ImageNode, transform: Affine) -> (u32, u32) {
+    let (dx, dy) = resample::device_extent(im.rect, transform);
+    resample::target_grid(im.data.width, im.data.height, dx, dy)
+        .unwrap_or((im.data.width, im.data.height))
+}
+
+/// Resample `im` onto `grid` and premultiply it, ready for `draw_pixmap`.
+///
+/// tiny-skia offers one `FilterQuality` for both axes, and its default is
+/// `Nearest` - right for the magnified axis of a tall image, and wrong for the
+/// reduced one, where it drops rows instead of averaging them. So the grid is
+/// resampled per axis first (see [`resample`]) and the blit that follows is
+/// about a 1:1 copy, where the filter has nothing left to get wrong.
+fn image_pixmap(im: &ImageNode, grid: (u32, u32)) -> Option<Pixmap> {
+    let resampled =
+        (grid != (im.data.width, im.data.height)).then(|| im.data.resampled_to(grid.0, grid.1));
+    let data = resampled.as_ref().unwrap_or(&im.data);
+    let size = IntSize::from_wh(data.width, data.height)?;
     // tiny-skia stores premultiplied RGBA; our IR carries straight RGBA.
-    let mut data = (*im.data.rgba).clone();
-    for px in data.chunks_exact_mut(4) {
-        let a = px[3] as u16;
-        px[0] = (px[0] as u16 * a / 255) as u8;
-        px[1] = (px[1] as u16 * a / 255) as u8;
-        px[2] = (px[2] as u16 * a / 255) as u8;
+    let mut px = (*data.rgba).clone();
+    for p in px.chunks_exact_mut(4) {
+        let a = p[3] as u16;
+        p[0] = (p[0] as u16 * a / 255) as u8;
+        p[1] = (p[1] as u16 * a / 255) as u8;
+        p[2] = (p[2] as u16 * a / 255) as u8;
     }
-    let Some(src) = Pixmap::from_vec(data, size) else {
-        return;
+    Pixmap::from_vec(px, size)
+}
+
+fn render_image(
+    pixmap: &mut PixmapMut,
+    im: &ImageNode,
+    transform: Affine,
+    clip: Option<&Mask>,
+    images: Option<&ImageCache>,
+) {
+    let grid = image_grid(im, transform);
+    let built;
+    // When rendering in bands, this pixmap was built once for the whole canvas
+    // (see [`ImageCache`]); without a cache this call builds its own.
+    let key = (im.data.key() as usize, grid.0, grid.1);
+    let src = match images.and_then(|c| c.get(&key)) {
+        Some(p) => p,
+        None => {
+            built = image_pixmap(im, grid);
+            let Some(p) = &built else { return };
+            p
+        }
     };
     // Map the image's pixel grid to fill the destination rect.
     let img_tf = transform
         * Affine::translate(Vec2::new(im.rect.x0, im.rect.y0))
-        * Affine::scale_non_uniform(im.rect.width() / w as f64, im.rect.height() / h as f64);
+        * Affine::scale_non_uniform(
+            im.rect.width() / src.width() as f64,
+            im.rect.height() / src.height() as f64,
+        );
     pixmap.draw_pixmap(
         0,
         0,
@@ -566,7 +622,7 @@ fn render_group(
     g: &Group,
     transform: Affine,
     clip: Option<&Mask>,
-    stamps: Option<&StampCache>,
+    cache: Option<&RenderCache>,
 ) {
     let child_tf = transform * g.transform;
 
@@ -600,7 +656,7 @@ fn render_group(
         };
         let mut layer_view = layer.as_mut();
         for child in &g.children {
-            render_node(&mut layer_view, child, child_tf, effective_clip, stamps);
+            render_node(&mut layer_view, child, child_tf, effective_clip, cache);
         }
         let paint = PixmapPaint {
             opacity: g.opacity.clamp(0.0, 1.0),
@@ -609,7 +665,7 @@ fn render_group(
         pixmap.draw_pixmap(0, 0, layer.as_ref(), &paint, Transform::identity(), None);
     } else {
         for child in &g.children {
-            render_node(pixmap, child, child_tf, effective_clip, stamps);
+            render_node(pixmap, child, child_tf, effective_clip, cache);
         }
     }
 }
@@ -619,14 +675,14 @@ fn render_node(
     node: &Node,
     transform: Affine,
     clip: Option<&Mask>,
-    stamps: Option<&StampCache>,
+    cache: Option<&RenderCache>,
 ) {
     match node {
         Node::Path(p) => render_path(pixmap, p, transform, clip),
         Node::Text(t) => render_text(pixmap, t, transform, clip),
-        Node::Image(im) => render_image(pixmap, im, transform, clip),
-        Node::Markers(m) => render_markers(pixmap, m, transform, clip, stamps),
-        Node::Group(g) => render_group(pixmap, g, transform, clip, stamps),
+        Node::Image(im) => render_image(pixmap, im, transform, clip, cache.map(|c| &c.images)),
+        Node::Markers(m) => render_markers(pixmap, m, transform, clip, cache.map(|c| &c.stamps)),
+        Node::Group(g) => render_group(pixmap, g, transform, clip, cache),
     }
 }
 
@@ -681,12 +737,21 @@ fn scene_work(nodes: &[Node], transform: Affine) -> u64 {
     work
 }
 
-/// Build the shared marker tile sets for a banded render (see [`StampTiles`]).
-/// Mirrors the eligibility test in `render_markers`, so a node missing from the
-/// cache is exactly one the bands will draw per-point instead.
-fn build_stamp_cache(nodes: &[Node], transform: Affine, out: &mut StampCache) {
+/// Build the work a banded render shares across its bands: marker tile sets
+/// (see [`StampTiles`]) and resampled image pixmaps (see [`ImageCache`]).
+///
+/// The marker half mirrors the eligibility test in `render_markers`, so a node
+/// missing from the cache is exactly one the bands will draw per-point instead.
+fn build_render_cache(nodes: &[Node], transform: Affine, out: &mut RenderCache) {
     for node in nodes {
         match node {
+            Node::Image(im) => {
+                let grid = image_grid(im, transform);
+                if let Some(pm) = image_pixmap(im, grid) {
+                    out.images
+                        .insert((im.data.key() as usize, grid.0, grid.1), pm);
+                }
+            }
             Node::Markers(m) if m.positions.len() >= STAMP_MIN_COUNT => {
                 let Some(path) = to_tiny_skia_path(&m.marker) else {
                     continue;
@@ -704,10 +769,10 @@ fn build_stamp_cache(nodes: &[Node], transform: Affine, out: &mut StampCache) {
                     m.colors.is_some(),
                     transform,
                 ) {
-                    out.insert(stamp_key(m), tiles);
+                    out.stamps.insert(stamp_key(m), tiles);
                 }
             }
-            Node::Group(g) => build_stamp_cache(&g.children, transform * g.transform, out),
+            Node::Group(g) => build_render_cache(&g.children, transform * g.transform, out),
             _ => {}
         }
     }
@@ -809,12 +874,12 @@ fn render_pixmap_banded(
     let bands = force_bands
         .map(|b| b.clamp(1, height.max(1)))
         .unwrap_or_else(|| band_count(width, height, scene_work(&scene.nodes, root)));
-    // The marker sprite tiles depend only on the linear part of the transform,
-    // which a band shift leaves alone - so build them once here rather than
-    // once per band.
-    let stamps = (bands > 1).then(|| {
-        let mut cache = StampCache::new();
-        build_stamp_cache(&scene.nodes, root, &mut cache);
+    // Marker sprite tiles and resampled images depend only on the linear part
+    // of the transform, which a band shift leaves alone - so build them once
+    // here rather than once per band.
+    let cache = (bands > 1).then(|| {
+        let mut cache = RenderCache::default();
+        build_render_cache(&scene.nodes, root, &mut cache);
         cache
     });
 
@@ -832,7 +897,7 @@ fn render_pixmap_banded(
             let band_tf =
                 Affine::translate(Vec2::new(0.0, -((i as u32 * band_rows) as f64))) * root;
             for node in &scene.nodes {
-                render_node(&mut view, node, band_tf, None, stamps.as_ref());
+                render_node(&mut view, node, band_tf, None, cache.as_ref());
             }
         });
 

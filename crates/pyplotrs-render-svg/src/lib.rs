@@ -8,6 +8,7 @@
 
 use base64::Engine;
 use pyplotrs_core::kurbo::{Affine, PathEl};
+use pyplotrs_core::resample;
 use pyplotrs_core::{
     Color, FillRule, Group, ImageNode, MarkerNode, Node, PathNode, Scene, TextNode,
 };
@@ -118,6 +119,11 @@ struct SvgWriter<'a> {
     defs: String,
     clip_counter: usize,
     marker_counter: usize,
+    /// Linear part of the transform accumulated down the group stack. Groups
+    /// emit their own `transform` attribute rather than baking it into
+    /// coordinates, so this is not needed to *place* anything - only to size
+    /// the pixel grid an image is resampled onto (see `render_image`).
+    transform: Affine,
 }
 
 impl SvgWriter<'_> {
@@ -278,7 +284,17 @@ impl SvgWriter<'_> {
     }
 
     fn render_image(&mut self, im: &ImageNode) {
-        let png = rgba_to_png(&im.data.rgba, im.data.width, im.data.height);
+        // `<image>` has one `image-rendering` for both axes, and its default
+        // (`auto`) smooths - which is right for the reduced axis of a tall
+        // image and ruinous for the magnified one, where librsvg spread each
+        // boundary of a 4-column field over 85 pixels. So the grid is
+        // resampled per axis here (see [`resample`]) and what the viewer scales
+        // is already ~1:1 with the page.
+        let (ex, ey) = resample::device_extent(im.rect, self.transform);
+        let resampled = resample::vector_grid(im.data.width, im.data.height, ex, ey)
+            .map(|(w, h)| im.data.resampled_to(w, h));
+        let data = resampled.as_ref().unwrap_or(&im.data);
+        let png = rgba_to_png(&data.rgba, data.width, data.height);
         let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
         writeln!(
             self.body,
@@ -328,9 +344,12 @@ impl SvgWriter<'_> {
             write!(attrs, r#" clip-path="url(#{id})""#).unwrap();
         }
         writeln!(self.body, "<g{attrs}>").unwrap();
+        let outer = self.transform;
+        self.transform = outer * g.transform;
         for child in &g.children {
             self.render_node(child);
         }
+        self.transform = outer;
         self.body.push_str("</g>\n");
     }
 
@@ -368,6 +387,7 @@ pub fn render_svg(scene: &Scene) -> String {
         defs: String::new(),
         clip_counter: 0,
         marker_counter: 0,
+        transform: Affine::IDENTITY,
     };
     for node in &scene.nodes {
         writer.render_node(node);

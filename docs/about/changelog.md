@@ -11,7 +11,25 @@ All notable changes to pyplotrs are documented here. The format is based on
 
 ## Unreleased
 
-Nothing yet.
+### Fixed
+
+- **`imshow` filters each axis on its own terms.** A tall or wide image is
+  magnified along one axis and reduced along the other, and the two want
+  opposite filters — but a backend offers only one for the whole image
+  (tiny-skia's `FilterQuality`, SVG's `image-rendering`, PDF's `/Interpolate`),
+  so whichever it picked was wrong somewhere. `imshow` of a 1000x4 array showed
+  it from both sides: in `.png` every output pixel stayed pure, so four rows in
+  five never reached the canvas and an even field came out as a moire pattern;
+  in `.svg` the four columns smeared into a gradient, which is the same defect
+  matplotlib has (it picks `nearest` only when *both* axes are magnified, so
+  one long axis drags the smoothing filter onto the short one). Images are now
+  resampled onto the grid they will actually occupy before any backend sees
+  them, with a separable box filter that is per-axis by construction: a reduced
+  axis is area-averaged, a magnified one keeps hard block edges with a single
+  pixel of antialiasing. `.png`, `.svg`, `.pdf` and `.html` now agree.
+- Magnified image blocks are evenly sized. Nearest-neighbor rounds each block
+  boundary to a whole pixel, so 100 equal rows across 215 pixels came out as
+  runs of 1, 2 and 3; each boundary now lands at its exact fractional position.
 
 ## 0.1.0 — 2026-08-11
 

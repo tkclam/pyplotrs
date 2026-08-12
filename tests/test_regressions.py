@@ -1224,3 +1224,109 @@ def test_spine_join_rejects_an_unknown_value():
     """A typo has to fail at the theme, not silently draw a different join."""
     with pytest.raises(ValueError, match="spine_join"):
         plt.themes.default.with_(spine_join="mitre")
+
+
+# -- image resampling -------------------------------------------------------
+
+def _gray_row(path, y_frac=0.5, x_from=0.25, x_to=0.9):
+    """One horizontal scanline of red channel across the middle of a figure."""
+    from conftest import read_png
+    w, h, rgba = read_png(path)
+    y = int(h * y_frac)
+    return [rgba[(y * w + x) * 4] for x in range(int(w * x_from), int(w * x_to))]
+
+
+def _gray_block(path, y_from=0.3, y_to=0.7, x_from=0.3, x_to=0.85):
+    from conftest import read_png
+    w, h, rgba = read_png(path)
+    return [rgba[(y * w + x) * 4]
+            for y in range(int(h * y_from), int(h * y_to))
+            for x in range(int(w * x_from), int(w * x_to))]
+
+
+def _imshow_png(tmp_path, name, data, dpi=100):
+    fig, ax = plt.subplots(figsize=(300, 220))
+    ax.imshow(data, cmap="gray", vmin=0.0, vmax=1.0)
+    path = tmp_path / f"{name}.png"
+    fig.save(str(path), dpi=dpi)
+    return path
+
+
+def test_a_reduced_axis_is_averaged_rather_than_dropped(tmp_path):
+    """1000 rows onto ~215 device pixels must average, not sample one in five.
+
+    Nearest-neighbor - what tiny-skia does by default, and what this drew
+    before - kept every output pixel pure black or white and turned an even
+    field into a moire pattern, because four rows in five never reached the
+    canvas at all.
+    """
+    rows = [[float(r % 2)] * 4 for r in range(1000)]
+    px = _gray_block(_imshow_png(tmp_path, "rows", rows))
+    pure = sum(1 for v in px if v in (0, 255)) / len(px)
+    mean = sum(px) / len(px)
+    assert pure < 0.02, f"{pure:.1%} of pixels are pure black or white; rows were dropped"
+    assert 120 <= mean <= 135, f"mean {mean:.1f}, not the average of black and white rows"
+
+
+def test_a_magnified_axis_stays_sharp(tmp_path):
+    """The other half, and matplotlib's actual bug: 4 columns stretched across
+    the page must stay 4 blocks even though the *other* axis is being reduced.
+
+    matplotlib picks `nearest` only when both axes are magnified, so one long
+    axis drags the smoothing filter onto the short one and the columns smear
+    into a gradient.
+    """
+    cols = [[float(c % 2) for c in range(4)] for _ in range(1000)]
+    row = _gray_row(_imshow_png(tmp_path, "cols", cols))
+    # Count pixels that are neither black nor white: one per boundary is the
+    # antialiasing, more than that is a smear.
+    blurred = sum(1 for v in row if 8 < v < 247)
+    assert blurred <= 4, f"{blurred} intermediate pixels across ~3 boundaries: the columns smeared"
+    assert 0 in row and 255 in row, "the blocks lost their extremes"
+
+
+def test_vector_output_is_as_sharp_as_the_raster(tmp_path):
+    """SVG and PDF used to hand the raw grid to the viewer with one filter for
+    both axes, so the same 4 columns that were crisp in the PNG came out as a
+    gradient in a browser. Both now embed a grid already resampled per axis.
+    """
+    import base64
+    import re
+    import struct
+
+    cols = [[float(c % 2) for c in range(4)] for _ in range(1000)]
+    fig, ax = plt.subplots(figsize=(300, 220))
+    ax.imshow(cols, cmap="gray", vmin=0.0, vmax=1.0)
+    svg_path = tmp_path / "cols.svg"
+    fig.save(str(svg_path))
+
+    embedded = re.search(r"data:image/png;base64,([A-Za-z0-9+/=]+)", svg_path.read_text())
+    assert embedded, "the SVG carries no embedded image"
+    png = base64.b64decode(embedded.group(1))
+    width, height = struct.unpack(">II", png[16:24])
+    # The 4 source columns are magnified across ~213 pt, so they must be
+    # embedded at page resolution; the 1000 rows are reduced onto ~173 pt.
+    assert width > 500, f"embedded image is {width} px wide; the columns will smear"
+    assert height < 1000, f"embedded image is {height} px tall; the rows will alias"
+
+
+def test_a_dense_image_is_left_alone_in_vector_output(tmp_path):
+    """Magnifying costs file size, so it has to buy something. An image already
+    carrying a sample per point is embedded untouched - the viewer's own smear
+    is under a point there, and tripling the bytes to shorten it is not a trade
+    worth making.
+    """
+    import base64
+    import re
+    import struct
+
+    field = [[(x * 7 + y * 13) % 97 / 97.0 for x in range(500)] for y in range(500)]
+    fig, ax = plt.subplots(figsize=(400, 300))
+    ax.imshow(field)
+    svg_path = tmp_path / "dense.svg"
+    fig.save(str(svg_path))
+
+    png = base64.b64decode(
+        re.search(r"data:image/png;base64,([A-Za-z0-9+/=]+)", svg_path.read_text()).group(1))
+    assert struct.unpack(">II", png[16:24]) == (500, 500), (
+        "a dense image should be embedded at its own resolution")

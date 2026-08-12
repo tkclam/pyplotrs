@@ -21,6 +21,7 @@ use krilla::tagging::{ContentTag, Tag, TagGroup, TagTree};
 use krilla::text::{Font, GlyphId, KrillaGlyph};
 use krilla::Document;
 use pyplotrs_core::kurbo::{Affine, PathEl};
+use pyplotrs_core::resample;
 use pyplotrs_core::{
     Color, FillRule as CoreFillRule, Group, ImageNode, LineCap as CoreLineCap,
     LineJoin as CoreLineJoin, MarkerNode, Node, PathNode, Scene, Stroke as CoreStroke, TextNode,
@@ -98,6 +99,10 @@ struct PdfRenderer {
     /// krilla `Font`s cached by underlying-buffer identity so each distinct
     /// font is parsed (and later embedded/subsetted) only once.
     fonts: HashMap<*const Vec<u8>, Font>,
+    /// Linear part of the transform accumulated down the group stack. The
+    /// surface keeps its own stack for *placing* geometry; this exists only to
+    /// size the pixel grid an image is resampled onto (see `draw_image`).
+    transform: Affine,
 }
 
 impl PdfRenderer {
@@ -213,11 +218,16 @@ impl PdfRenderer {
     }
 
     fn draw_image(&self, surface: &mut Surface, image: &ImageNode) {
-        let img = krilla::image::Image::from_rgba8(
-            (*image.data.rgba).clone(),
-            image.data.width,
-            image.data.height,
-        );
+        // A PDF image carries one `/Interpolate` flag for both axes, and
+        // viewers disagree about it besides: on a 4-column field poppler kept
+        // the boundaries hard while ghostscript smeared them across 284 pixels.
+        // Resampling per axis here (see [`resample`]) settles it before the
+        // viewer gets a say - what it scales is already ~1:1 with the page.
+        let (ex, ey) = resample::device_extent(image.rect, self.transform);
+        let resampled = resample::vector_grid(image.data.width, image.data.height, ex, ey)
+            .map(|(w, h)| image.data.resampled_to(w, h));
+        let data = resampled.as_ref().unwrap_or(&image.data);
+        let img = krilla::image::Image::from_rgba8((*data.rgba).clone(), data.width, data.height);
         // `draw_image` covers (0,0)..(w,h) in the current space; translate to
         // the destination rect's top-left and let `size` scale it to fill.
         surface.push_transform(&Transform::from_translate(
@@ -256,9 +266,12 @@ impl PdfRenderer {
             surface.push_opacity(NormalizedF32::new(g.opacity).unwrap_or(NormalizedF32::ONE));
             pushed += 1;
         }
+        let outer = self.transform;
+        self.transform = outer * g.transform;
         for child in &g.children {
             self.render_node(surface, child);
         }
+        self.transform = outer;
         for _ in 0..pushed {
             surface.pop();
         }
@@ -316,6 +329,7 @@ fn render_into(document: &mut Document, scene: &Scene, alt: Option<&str>) -> Res
 
     let mut renderer = PdfRenderer {
         fonts: HashMap::new(),
+        transform: Affine::IDENTITY,
     };
 
     let content_id = alt.map(|_| surface.start_tagged(ContentTag::Other));

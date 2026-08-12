@@ -9,6 +9,8 @@
 
 pub use kurbo;
 
+pub mod resample;
+
 use kurbo::{Affine, BezPath, Point, Rect, Size};
 use std::sync::Arc;
 
@@ -205,6 +207,12 @@ impl ImageData {
 
 /// An image composited into the destination `rect` (in the current local
 /// coordinate space). The image's pixel grid is scaled to fill `rect`.
+///
+/// The two axes scale independently, and a backend has only one filter to
+/// cover both - so each backend resamples the pixel grid onto the one it will
+/// actually draw first, via [`resample`]. Read that module before touching an
+/// image path in a renderer: handing the source grid straight to a rasterizer
+/// is what makes a tall image alias and a wide one smear.
 #[derive(Debug, Clone)]
 pub struct ImageNode {
     pub data: ImageData,
