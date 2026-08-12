@@ -77,9 +77,14 @@ Changelog = "https://tkclam.github.io/pyplotrs/about/changelog/"
 # Documentation build: `mkdocs build` renders the site under docs/.
 # mkdocstrings renders the API pages from docstrings (mkdocs.yml declares the
 # plugin, so the build aborts without it); black formats the signatures it emits.
+# mkdocs-jupyter renders docs/notebooks/*.ipynb as pages. It is configured with
+# `execute: false`, so the notebooks' committed output is what the site shows
+# and the docs build needs neither a kernel nor matplotlib; regenerating that
+# output is `tools/build_notebooks.py`, which wants the `dev` extra instead.
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",
+    "mkdocs-jupyter>=0.25",
     "mkdocstrings[python]>=0.26",
     "black>=24",
 ]
@@ -100,10 +105,19 @@ test = [
 # Benchmark-only: `benchmarks/benchmark.py` times pyplotrs head-to-head against matplotlib.
 # Not a runtime dependency of pyplotrs itself. Install with `pip install -e .[bench]`.
 bench = ["matplotlib>=3.8", "numpy>=1.24"]
-# Interactive development: run the verify notebooks under notebooks/ with a Jupyter
-# kernel (e.g. `uv pip install -e .[dev]`, then select the kernel in VS Code/Jupyter).
-# matplotlib is used only as a side-by-side visual reference in the verify notebooks.
-dev = ["ipykernel>=6", "matplotlib>=3.8"]
+# Interactive development: open the documentation notebooks under
+# `docs/notebooks/` with a Jupyter kernel (`uv pip install -e .[dev]`, then
+# select that kernel), and re-execute them with `tools/build_notebooks.py`,
+# which drives a kernel through nbclient. matplotlib and numpy are needed by
+# two of the six notebooks - the ones that compare against matplotlib - and by
+# nothing in pyplotrs itself.
+dev = [
+    "ipykernel>=6",
+    "nbclient>=0.9",
+    "nbformat>=5.9",
+    "matplotlib>=3.8",
+    "numpy>=1.24",
+]
 
 [tool.pytest.ini_options]
 # `--cov-fail-under` is a ratchet, not a target: it is set just below the

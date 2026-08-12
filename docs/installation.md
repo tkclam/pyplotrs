@@ -73,10 +73,10 @@ changes are picked up immediately and only Rust changes need a rebuild. Drop
 
 | Extra | Installs | For |
 |---|---|---|
-| `pyplotrs[docs]` | mkdocs-material, mkdocstrings, black | Building this documentation site |
+| `pyplotrs[docs]` | mkdocs-material, mkdocs-jupyter, mkdocstrings, black | Building this documentation site |
 | `pyplotrs[test]` | pytest | Running the test suite |
 | `pyplotrs[bench]` | matplotlib, numpy | Running the head-to-head benchmarks |
-| `pyplotrs[dev]` | ipykernel, matplotlib | The verify notebooks under `notebooks/` |
+| `pyplotrs[dev]` | ipykernel, nbclient, matplotlib, numpy | Running the [notebooks](notebooks/index.md) and re-executing them |
 
 ```bash
 pip install -e ".[docs]"

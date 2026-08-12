@@ -75,6 +75,25 @@ All notable changes to pyplotrs are documented here. The format is based on
   end, so the axis is bounded by the sample instead of overhanging it by 21.5%.
 - `contour` pins the view to its grid, as `contourf` already did.
 
+### Documentation
+
+- **Six runnable notebooks** under `docs/notebooks/`, rendered into the site and
+  on GitHub from their committed output: a
+  [quickstart](../notebooks/01_quickstart.ipynb), a
+  [coming-from-matplotlib](../notebooks/02_from_matplotlib.ipynb) walkthrough
+  that renders the same data in both libraries side by side, the full
+  [plot-type](../notebooks/03_plot_types.ipynb) vocabulary,
+  [layout and composition](../notebooks/04_layout_and_composition.ipynb),
+  [styling, color and text](../notebooks/05_styling_color_and_text.ipynb), and
+  [output formats and performance](../notebooks/06_output_and_performance.ipynb)
+  with a live benchmark against matplotlib.
+- `tools/build_notebooks.py` re-executes them reproducibly (pinned font, no
+  timing metadata, normalized kernel metadata); `tests/test_notebooks.py` and a
+  CI step keep them running against the current API.
+- Removed `notebooks/verify_core_plots.ipynb`, a development scratchpad whose
+  job — proving each plot type still renders — belongs to
+  `tests/test_golden.py` and `tests/test_plot_types.py`.
+
 ## 0.1.0 — 2026-08-11
 
 The first public release. Everything below is what the package *is*, rather

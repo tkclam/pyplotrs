@@ -22,7 +22,7 @@ fig.save("hello.png")   # 200 dpi by default
 ```
 
 [Get started :material-arrow-right:](quickstart.md){ .md-button .md-button--primary }
-[Work through the tutorial :material-school:](tutorial.md){ .md-button }
+[Run the notebooks :material-notebook:](notebooks/index.md){ .md-button }
 [Browse the gallery :material-image-multiple:](gallery/index.md){ .md-button }
 
 ## Why pyplotrs?

@@ -14,7 +14,7 @@ cd pyplotrs
 uv venv && source .venv/bin/activate     # or: python -m venv .venv
 uv pip install maturin
 maturin develop --release                # builds the Rust core into the venv
-uv pip install -e ".[test,docs,bench]"
+uv pip install -e ".[test,docs,bench,dev]"
 ```
 
 `maturin develop` needs an **activated** virtualenv — it refuses to run
@@ -35,6 +35,7 @@ ruff check .
 pytest -q --strict-markers
 pytest -q --strict-markers -m packaging   # slow: builds and resolves an sdist
 python benchmarks/benchmark.py --check
+python tools/build_notebooks.py --check   # every documentation notebook runs
 mkdocs build --strict
 ```
 
@@ -77,6 +78,20 @@ Match the file you are editing. The two things worth stating:
   explain a decision or a bug that motivated the code — that is the standard.
 
 American English throughout: `color`, `center`, `normalize`, `gray`.
+
+## Committed artifacts
+
+Three things in the tree are generated and committed, so a change that moves
+rendering has to regenerate them or they become claims about an older build:
+
+```bash
+python tools/build_gallery_images.py     # docs/gallery/images/, from examples/
+python tools/build_tutorial_images.py    # docs/images/, for the tutorial page
+python tools/build_notebooks.py          # docs/notebooks/*.ipynb, in place
+```
+
+All three pin the bundled Liberation Sans, so their output is reproducible on a
+machine that has Arial or Helvetica installed and on CI, which has neither.
 
 ## Reporting a bug
 

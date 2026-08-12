@@ -2,7 +2,9 @@
 
 This page gets you from zero to a saved, publication-ready figure in a few
 minutes. It assumes pyplotrs is [installed](installation.md). For a longer,
-build-it-up walkthrough, see the [tutorial](tutorial.md).
+build-it-up walkthrough, see the [tutorial](tutorial.md); to run this page a
+cell at a time instead of reading it, see the
+[quickstart notebook](notebooks/01_quickstart.ipynb).
 
 ## Your first figure
 

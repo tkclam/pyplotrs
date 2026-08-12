@@ -215,6 +215,9 @@ either one leaking into the other.
 
 ## Where to go next
 
+- [The notebooks](notebooks/index.md) — the same material to run rather than
+  read, including this figure built up in
+  [layout and composition](notebooks/04_layout_and_composition.ipynb)
 - [Plot types](guide/plot-types.md) — the full mark vocabulary
 - [Layout](guide/layout.md) — mosaics, spanning panels, insets, twin axes
 - [Scales & ticks](guide/scales-and-ticks.md) — log axes, dates, categories,

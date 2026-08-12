@@ -27,6 +27,9 @@ python/pyplotrs/*.pyd
 # Built documentation site (mkdocs build)
 /site/
 
+# mkdocs-jupyter's conversion cache, written next to mkdocs.yml on every build.
+/.cache/
+
 # Generated example figures (regenerate by running scripts in examples/).
 /examples/output/
 

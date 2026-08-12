@@ -42,6 +42,14 @@ nav:
   - Quickstart: quickstart.md
   - Tutorial: tutorial.md
   - From matplotlib: migrating-from-matplotlib.md
+  - Notebooks:
+      - Overview: notebooks/index.md
+      - 1 · Quickstart: notebooks/01_quickstart.ipynb
+      - 2 · Coming from matplotlib: notebooks/02_from_matplotlib.ipynb
+      - 3 · Plot types: notebooks/03_plot_types.ipynb
+      - 4 · Layout and composition: notebooks/04_layout_and_composition.ipynb
+      - 5 · Styling, color and text: notebooks/05_styling_color_and_text.ipynb
+      - 6 · Output and performance: notebooks/06_output_and_performance.ipynb
   - User guide:
       - Figures & axes: guide/figure-and-axes.md
       - Layout: guide/layout.md
@@ -72,8 +80,22 @@ nav:
       - Security: about/security.md
       - License: about/license.md
 
+# Notebook-to-notebook links are written as file paths so they work on GitHub
+# and in Jupyter; this rewrites them to page URLs for the site. See the module.
+hooks:
+  - tools/mkdocs_hooks.py
+
 plugins:
   - search
+  # Renders docs/notebooks/*.ipynb as pages. `execute: false` on purpose: the
+  # notebooks are committed with their output (see docs/notebooks/index.md), so
+  # the docs build needs no kernel, no matplotlib, and no wall-clock budget -
+  # and it cannot produce a site whose figures differ from the ones on GitHub.
+  # `tools/build_notebooks.py` is what re-runs them.
+  - mkdocs-jupyter:
+      execute: false
+      include_source: true
+      ignore_h1_titles: false
   - mkdocstrings:
       handlers:
         python:

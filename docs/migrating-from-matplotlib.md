@@ -7,6 +7,12 @@ differences, so you can port a script without guessing.
 If a name exists in both libraries it means the same thing. The differences
 below are the ones worth knowing before you start.
 
+!!! tip "See it rather than read it"
+    The [coming-from-matplotlib notebook](notebooks/02_from_matplotlib.ipynb)
+    is this page with the pictures: ten plot types rendered by both libraries
+    from the same data, side by side, so the differences in the defaults are
+    visible rather than described.
+
 ## The five that matter
 
 ### 1. There is no pyplot state machine

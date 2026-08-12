@@ -101,6 +101,13 @@ Full docs live at **<https://tkclam.github.io/pyplotrs/>**:
   figure
 - [Tutorial](https://tkclam.github.io/pyplotrs/tutorial/) — one publication
   figure, built step by step
+- [Notebooks](docs/notebooks/) — six runnable notebooks, committed with their
+  output: [quickstart](docs/notebooks/01_quickstart.ipynb),
+  [coming from matplotlib](docs/notebooks/02_from_matplotlib.ipynb) (rendered
+  side by side against it), [plot types](docs/notebooks/03_plot_types.ipynb),
+  [layout](docs/notebooks/04_layout_and_composition.ipynb),
+  [styling and color](docs/notebooks/05_styling_color_and_text.ipynb), and
+  [output and performance](docs/notebooks/06_output_and_performance.ipynb)
 - [Coming from matplotlib](https://tkclam.github.io/pyplotrs/migrating-from-matplotlib/)
   — the differences, with a translation table
 - [User guide](https://tkclam.github.io/pyplotrs/guide/figure-and-axes/) —

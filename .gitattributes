@@ -24,3 +24,8 @@ docs/**/*.gif                          binary
 
 # Documentation is not code.
 docs/**                                linguist-documentation
+
+# The documentation notebooks: hand-written cells, but every output is a base64
+# blob written by `tools/build_notebooks.py`. `linguist-generated` collapses
+# them in a pull request by default - the diff is still there when you open it.
+docs/notebooks/*.ipynb                 linguist-generated
