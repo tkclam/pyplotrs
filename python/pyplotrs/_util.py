@@ -12,7 +12,7 @@ import math
 from array import array
 
 from . import _pyplotrs_core as _core
-from ._const import _DATA_PAD, _UNIT_TO_PT
+from ._const import _DATA_PAD, _DEGENERATE_ABS, _DEGENERATE_REL, _UNIT_TO_PT
 
 
 def _figsize_to_points(figsize, units: str) -> tuple[float, float]:
@@ -212,17 +212,181 @@ def _data_range(values, pad: float = _DATA_PAD) -> tuple[float, float]:
     return _pad_range(_core.data_range(_to_f64(values)))
 
 
+def _expand_degenerate(lo: float, hi: float) -> tuple[float, float]:
+    """Widen a zero-span range so the axis has something to show.
+
+    The expansion is *relative* to the value, as matplotlib's ``nonsingular``
+    is: a constant series at y=1000 becomes (950, 1050), not (999.5, 1000.5).
+    The absolute half-unit this replaced produced three tick labels reading
+    999.5 / 1000 / 1000.5, which is noise rather than a scale.
+
+    ``_DEGENERATE_ABS`` is the floor for a value with no magnitude to scale
+    from: exactly zero, where the relative term is also zero, or a subnormal
+    where it underflows. matplotlib expands a constant zero to (-0.05, 0.05);
+    the wider half-unit here is a deliberate difference, on the grounds that an
+    all-zero series has no scale of its own to respect and round ticks read
+    better than an arbitrary narrow window.
+    """
+    if lo != hi:
+        return lo, hi
+    d = abs(lo) * _DEGENERATE_REL
+    if not (d > 0.0) or not math.isfinite(d):
+        d = _DEGENERATE_ABS
+    return lo - d, hi + d
+
+
 def _pad_range(bounds: tuple[float, float] | None,
                pad: float = _DATA_PAD) -> tuple[float, float]:
     """Apply the data margin to a raw ``(lo, hi)``; ``None`` means no data."""
     if bounds is None:
         return (0.0, 1.0)
-    lo, hi = bounds
-    if lo == hi:
-        lo -= 0.5
-        hi += 0.5
-    span = hi - lo
-    return lo - span * pad, hi + span * pad
+    lo, hi = _expand_degenerate(*bounds)
+    delta = (hi - lo) * pad
+    # A span near the float ceiling overflows to inf, and inf padding turns a
+    # finite range into (-inf, inf) - an axis with no ticks and nothing drawn.
+    # matplotlib zeroes a non-finite delta for the same reason.
+    if not math.isfinite(delta):
+        return lo, hi
+    return lo - delta, hi + delta
+
+
+def _clamp_sticky(rng: tuple[float, float],
+                  bounds: tuple[float, float] | None,
+                  sticky: list[float]) -> tuple[float, float]:
+    """Keep a padded range from crossing a mark's own hard boundary.
+
+    A *sticky* value is a place where data cannot exist rather than a place it
+    happens to stop: the floor of a stack, the base of a bar, the edge of an
+    image. Padding past one invents whitespace that reads as "there could be
+    something here", so the margin is clamped at it - this is what puts a
+    stackplot flush on the x spine instead of floating 5% above it.
+
+    A sticky only binds on the side whose data limit actually reaches it, which
+    is why a bar chart straddling zero still gets a margin at both ends. The
+    tolerance is relative to the span with no absolute term, so it behaves the
+    same for data measured in nanometers and in parsecs.
+    """
+    if bounds is None or not sticky:
+        return rng
+    lo, hi = rng
+    dlo, dhi = bounds
+    tol = 1e-5 * abs(dhi - dlo)
+    below = [s for s in sticky if s <= dlo + tol]
+    above = [s for s in sticky if s >= dhi - tol]
+    if below:
+        lo = max(lo, max(below))
+    if above:
+        hi = min(hi, min(above))
+    # A mark can pin both ends (an image does), and a degenerate extent would
+    # then clamp the range to a single value. Leave the padded range alone
+    # rather than hand back an axis of zero width.
+    return (lo, hi) if lo < hi else rng
+
+
+def _check_margin(name: str, value) -> float:
+    """Validate an autoscale margin. Must be > -0.5, as matplotlib requires.
+
+    At exactly -0.5 the two ends meet and the axis has zero width; below it they
+    cross and the axis silently inverts. Neither is anything a caller means, and
+    both surface far from the call - as a blank panel, or as a chart that reads
+    backwards - so this rejects them at the point of the mistake.
+    """
+    v = float(value)
+    if not (v > -0.5):
+        raise ValueError(f"{name} must be greater than -0.5; got {value!r}")
+    if not math.isfinite(v):
+        raise ValueError(f"{name} must be finite; got {value!r}")
+    return v
+
+
+def _fold_guides(patches, refs, xs: "_RangeAcc", ys: "_RangeAcc") -> None:
+    """Fold patches and reference guides into the running axis bounds.
+
+    A patch contributes its whole bounding box. A guide contributes only the
+    coordinate it is *positioned* at, never the one it spans - `axhline` pins a
+    y and stretches across an axes *fraction* of x, which is not data. Leaving
+    guides out altogether, as this used to, drew them outside the frame:
+    `axhline(5)` over data in 0..1 simply wasn't there, with no error to say so.
+    `axline` still contributes nothing; it is infinite and always on screen.
+
+    Emptiness is then settled per axis rather than once for both, because the
+    two can now diverge: a lone `axhline` gives y a bound and leaves x with none.
+    """
+    for p in patches:
+        bx, by = _patch_bbox(p)
+        xs.add(*bx)
+        ys.add(*by)
+    for r in refs:
+        kind = r["kind"]
+        if kind == "axhline":
+            ys.add(r["y"])
+        elif kind == "axvline":
+            xs.add(r["x"])
+        elif kind == "axhspan":
+            ys.add(r["lo"], r["hi"])
+        elif kind == "axvspan":
+            xs.add(r["lo"], r["hi"])
+    if xs.empty:
+        xs.add(0.0, 1.0)
+    if ys.empty:
+        ys.add(0.0, 1.0)
+
+
+def _axis_range(scale, acc: "_RangeAcc", explicit, pad: float,
+            sticky: list[float]) -> tuple[float, float]:
+    """One axis' view range: domain-clip, pad, then clamp against stickies.
+
+    The margin is applied in *transformed* space, so it means the same thing
+    on every scale: 5% of the visible width. On a log axis that is 5% of the
+    decade span - a multiplicative margin - rather than 5% of the raw
+    numeric range, which would be swallowed entirely at the low end.
+
+    Each scale used to compute its own padded range from a flat scan of the
+    values, which had two costs: it hardcoded the 5% and so ignored
+    ``xmargin``/``ymargin`` outside the linear case, and it could not see the
+    bounds a raw value scan doesn't contain - a bar's base, an image's
+    extent - so those marks lost their geometry the moment the axis went
+    logarithmic. Scales now own only their *domain*; the margin lives here.
+    """
+    if explicit:
+        return explicit
+    fixed = scale.fixed_range()
+    if fixed is not None:
+        return fixed
+    bounds = scale.clip_bounds(acc.bounds(), acc.arrays())
+    if bounds is None:
+        return scale.empty_range()
+    if scale.is_identity:
+        rng = _pad_range(bounds, pad)
+    else:
+        tlo, thi = scale.transform(bounds[0]), scale.transform(bounds[1])
+        # Degenerate ranges expand by a fixed amount *in transformed space*,
+        # which is the meaningful unit there: half a decade on a log axis,
+        # not 5% of a logarithm.
+        if tlo == thi:
+            tlo, thi = tlo - _DEGENERATE_ABS, thi + _DEGENERATE_ABS
+        delta = (thi - tlo) * pad
+        if not math.isfinite(delta):
+            delta = 0.0
+        rng = (scale.inverse(tlo - delta), scale.inverse(thi + delta))
+    return _clamp_sticky(rng, bounds, sticky)
+
+
+def _union_ranges(own: tuple[float, float],
+                  siblings: list[tuple[float, float]]) -> tuple[float, float]:
+    """Widen ``own`` to cover every sibling range, preserving its direction.
+
+    A shared axis is a union, and a union has no direction of its own - but the
+    axis does. Taking a plain ``min``/``max`` over the endpoints silently
+    discarded it: an axes asked for a descending y (``yinverted=True``) inside a
+    ``sharey`` row came back ascending, and its data was drawn upside down
+    against a frame nobody asked for. Compare in ascending space, then restore
+    the direction this axes was set to.
+    """
+    descending = own[0] > own[1]
+    lo = min(min(r) for r in siblings)
+    hi = max(max(r) for r in siblings)
+    return (hi, lo) if descending else (lo, hi)
 
 
 class _RangeAcc:
@@ -259,6 +423,25 @@ class _RangeAcc:
             return
         self._arrays.append(values)
         self._fold(_core.data_range(values))
+
+    def add_pairs(self, xs, ys, other: "_RangeAcc") -> None:
+        """Fold a series into ``self`` (x) and ``other`` (y) as *vertices*.
+
+        Folding the two coordinate arrays separately would let a point that is
+        never drawn still move an axis: ``(100.0, NaN)`` has no y to plot, but
+        an independent x scan sees the 100 and stretches x out to it. The paired
+        reduction runs in Rust and drops the whole vertex, as matplotlib does.
+        """
+        if len(xs) == 0 or len(ys) == 0:
+            return
+        # Retained for the domain-clipping scan a non-linear scale runs; that
+        # scan is per-axis by nature, so it keeps the unpaired arrays.
+        self._arrays.append(xs)
+        other._arrays.append(ys)
+        bounds = _core.paired_range(xs, ys)
+        if bounds is not None:
+            self._fold(bounds[0])
+            other._fold(bounds[1])
 
     def add_offsets(self, values, offsets, *, two_sided: bool = True) -> None:
         """Fold in ``values + offsets``, and ``values - offsets`` too when

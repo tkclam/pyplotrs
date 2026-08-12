@@ -97,18 +97,40 @@ class Scale:
     def inverse(self, t: float) -> float:
         return t
 
-    def data_limits(self, values: Sequence[float]) -> tuple[float, float]:
-        """Padded ``(lo, hi)`` view limits, in *data* space, for finite data on
-        this scale. Only consulted for non-linear scales (the linear path keeps
-        the figure's existing mark-aware autoscaling). Default: linear pad."""
-        finite = [v for v in values if math.isfinite(v)]
-        if not finite:
-            return (0.0, 1.0)
-        lo, hi = min(finite), max(finite)
-        if lo == hi:
-            lo, hi = lo - 0.5, hi + 0.5
-        span = hi - lo
-        return (lo - span * 0.05, hi + span * 0.05)
+    # -- autoscaling hooks --------------------------------------------------
+    #
+    # A scale does *not* compute its own view range. `Axes._ranges` owns that:
+    # it folds every mark's bounds (including the ones a raw value scan can't
+    # see, like a bar's base or an image's extent), pads once in *transformed*
+    # space, and clamps against the marks' sticky bounds. A log axis therefore
+    # gets a multiplicative margin for free, and `xmargin`/`ymargin` work on
+    # every scale - neither of which was true when each scale padded itself
+    # with a hardcoded 0.05.
+    #
+    # What a scale still owns is its *domain*: which data it can represent, and
+    # what to show when none of it qualifies.
+
+    def fixed_range(self) -> tuple[float, float] | None:
+        """A view range this scale pins regardless of the data, or ``None``.
+
+        Only a categorical axis has one: its window is a property of the
+        category list, not of the values plotted against it."""
+        return None
+
+    def clip_bounds(self, bounds: tuple[float, float] | None,
+                    arrays: Sequence) -> tuple[float, float] | None:
+        """Restrict raw ``(lo, hi)`` data bounds to this scale's domain.
+
+        Returns unpadded bounds in *data* space, or ``None`` when the data holds
+        nothing this scale can show. ``arrays`` is every contributed coordinate
+        array, for the domains that can't be decided from the bounds alone (a
+        log axis needs the smallest *positive* value, which the overall minimum
+        does not give it)."""
+        return bounds
+
+    def empty_range(self) -> tuple[float, float]:
+        """The view to show when ``clip_bounds`` finds nothing representable."""
+        return (0.0, 1.0)
 
     def ticks(self, lo: float, hi: float, max_ticks: int) -> list[Tick]:
         """Major ticks as ``(value, label)`` pairs, value in *data* space."""
@@ -165,16 +187,23 @@ class LogScale(Scale):
     def inverse(self, t: float) -> float:
         return 10.0 ** t
 
-    def data_limits(self, values: Sequence[float]) -> tuple[float, float]:
-        pos = [v for v in values if v > 0 and math.isfinite(v)]
-        if not pos:
-            return (0.1, 1.0)
-        lo, hi = min(pos), max(pos)
-        llo, lhi = math.log10(lo), math.log10(hi)
-        if llo == lhi:
-            llo, lhi = llo - 0.5, lhi + 0.5
-        pad = (lhi - llo) * 0.05
-        return (10.0 ** (llo - pad), 10.0 ** (lhi + pad))
+    def clip_bounds(self, bounds, arrays):
+        # The overall minimum is useless here - it is routinely <= 0, which this
+        # scale cannot place. The smallest *positive* value is the real lower
+        # bound, and the scan for it runs in Rust over each array in turn.
+        lo = hi = None
+        for a in arrays:
+            r = _core.positive_range(a)
+            if r is None:
+                continue
+            if lo is None or r[0] < lo:
+                lo = r[0]
+            if hi is None or r[1] > hi:
+                hi = r[1]
+        return None if lo is None else (lo, hi)
+
+    def empty_range(self) -> tuple[float, float]:
+        return (0.1, 1.0)
 
     def ticks(self, lo: float, hi: float, max_ticks: int = 7) -> list[Tick]:
         lo = max(lo, 1e-300)
@@ -236,16 +265,11 @@ class SymlogScale(Scale):
             a / _SYMLOG_LINTHRESH - _SYMLOG_LINSCALE_ADJ
         )
 
-    def data_limits(self, values: Sequence[float]) -> tuple[float, float]:
-        finite = [v for v in values if math.isfinite(v)]
-        if not finite:
-            return (-1.0, 1.0)
-        lo, hi = min(finite), max(finite)
-        tlo, thi = self.transform(lo), self.transform(hi)
-        if tlo == thi:
-            tlo, thi = tlo - 0.5, thi + 0.5
-        pad = (thi - tlo) * 0.05
-        return (self.inverse(tlo - pad), self.inverse(thi + pad))
+    # Symlog represents every real, so it needs no domain clipping; it inherits
+    # `clip_bounds`. Only the no-data fallback is its own - a symlog axis is
+    # centered on zero, so an empty one shows (-1, 1) rather than (0, 1).
+    def empty_range(self) -> tuple[float, float]:
+        return (-1.0, 1.0)
 
     def ticks(self, lo: float, hi: float, max_ticks: int = 7) -> list[Tick]:
         vals: set[float] = set()
@@ -286,16 +310,23 @@ class LogitScale(Scale):
         e = 10.0 ** t
         return e / (1.0 + e)
 
-    def data_limits(self, values: Sequence[float]) -> tuple[float, float]:
-        inside = [v for v in values if 0.0 < v < 1.0 and math.isfinite(v)]
-        if not inside:
-            return (0.01, 0.99)
-        lo, hi = min(inside), max(inside)
-        tlo, thi = self.transform(lo), self.transform(hi)
-        if tlo == thi:
-            tlo, thi = tlo - 0.5, thi + 0.5
-        pad = (thi - tlo) * 0.05
-        return (self.inverse(tlo - pad), self.inverse(thi + pad))
+    def clip_bounds(self, bounds, arrays):
+        # Only the open interval (0, 1) is representable: 0 and 1 map to -inf
+        # and +inf. Like the log scale, the overall min/max is the wrong summary
+        # (a single 0.0 would drag the lower bound to -inf), so this looks at
+        # the values.
+        lo = hi = None
+        for a in arrays:
+            for v in a:
+                if 0.0 < v < 1.0:
+                    if lo is None or v < lo:
+                        lo = v
+                    if hi is None or v > hi:
+                        hi = v
+        return None if lo is None else (lo, hi)
+
+    def empty_range(self) -> tuple[float, float]:
+        return (0.01, 0.99)
 
     def ticks(self, lo: float, hi: float, max_ticks: int = 7) -> list[Tick]:
         # Conventional logit gridline positions, symmetric about 0.5; kept sparse
@@ -318,7 +349,7 @@ class CategoricalScale(Scale):
 
     name = "categorical"
     code = "linear"
-    is_identity = False  # so the figure uses ``data_limits`` for the view range
+    is_identity = False  # so the figure uses ``fixed_range`` for the view range
 
     def __init__(self, categories: Sequence) -> None:
         self.categories = [str(c) for c in categories]
@@ -330,7 +361,10 @@ class CategoricalScale(Scale):
     def inverse(self, t: float) -> float:
         return t
 
-    def data_limits(self, values: Sequence[float]) -> tuple[float, float]:
+    def fixed_range(self) -> tuple[float, float]:
+        # Half a slot of air either side of the first and last category, and no
+        # data margin on top: the window belongs to the category list, so it
+        # must not move when a bar is drawn narrower or a series is added.
         n = len(self.categories)
         return (-0.5, (n - 1) + 0.5) if n else (-0.5, 0.5)
 

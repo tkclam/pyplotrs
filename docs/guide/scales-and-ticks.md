@@ -71,7 +71,17 @@ ax.set(yinverted=True)               # y descends, and still autoscales
 
 `None` means "leave alone", so it cannot double as a reset — that is what
 `"auto"` is for. Autoscaling pads the data range by 5% on each side by default;
-`xmargin`/`ymargin` (or `margin` for both) replace that fraction.
+`xmargin`/`ymargin` (or `margin` for both) replace that fraction, on every scale
+— on a log axis the padding is 5% of the *decade* span, so it looks the same at
+both ends. A margin of -0.5 or below is rejected: it would collapse or invert
+the axis.
+
+The padding stops where a mark **rests on** a value rather than merely reaching
+it — a stacked area's floor, a bar's base, an image's extent — so those marks sit
+flush against the spine instead of floating above it. It is per mark and per
+direction, so a line drawn past an image still gets its own margin. A mark that
+merely stops somewhere keeps the padding: `fill_between(x, y, 0)` is padded
+below zero, because there 0 is just another curve.
 
 `yinverted` flips the direction without pinning numbers, which is what you want
 for depth profiles or image-like axes that must keep autoscaling. Non-finite

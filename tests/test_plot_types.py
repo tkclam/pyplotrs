@@ -91,13 +91,32 @@ def test_hlines_and_vlines_autoscale_to_data():
     assert ylo <= 1.0 and yhi >= 3.0
 
 
-def test_axhline_still_does_not_autoscale():
-    """The distinction matters: a guide must not stretch the view."""
+def test_axhline_autoscales_in_its_own_direction_only():
+    """A guide is drawn where it was asked for, or it may as well not exist.
+
+    This used to assert the opposite - that `axhline` never moved the view -
+    and the cost was that `axhline(500)` over data in 0..1 was simply *not
+    there*: the line landed outside the frame and the caller got a chart with
+    no threshold on it and no error. Contributing the coordinate it is
+    positioned at (and only that one: the axes-fraction span it covers is not
+    data) keeps it visible, and matches matplotlib.
+    """
     fig, ax = plt.subplots()
     ax.line([0, 1], [0, 1])
     ax.axhline(500.0)
-    _, (ylo, yhi) = ax._ranges()
-    assert yhi < 100.0, "axhline should not have pulled the y range to 500"
+    (xlo, xhi), (ylo, yhi) = ax._ranges()
+    assert yhi >= 500.0, "axhline should be inside the frame it was added to"
+    # The span is in axes fractions, so it must not reach into x.
+    assert xhi < 2.0, "axhline should not have stretched x"
+
+
+def test_axvspan_contributes_its_band_but_not_its_span():
+    fig, ax = plt.subplots()
+    ax.line([0, 1], [0, 1])
+    ax.axvspan(3.0, 4.0)
+    (xlo, xhi), (_, yhi) = ax._ranges()
+    assert xhi >= 4.0
+    assert yhi < 2.0
 
 
 def test_fill_betweenx_is_the_transpose_of_fill_between():

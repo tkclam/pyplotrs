@@ -53,6 +53,21 @@ _CUBE_FILL = 0.86  # fraction of the plot rect the projected cube fills
 
 _DATA_PAD = 0.05  # fraction of range added as margin around data
 
+#: Expansion applied to a *degenerate* (zero-span) range, before `_DATA_PAD`.
+#: `_DEGENERATE_REL` is a fraction of the value's own magnitude, so a constant
+#: series lands on a scale that means something at any size; `_DEGENERATE_ABS`
+#: is the floor for a value that has no magnitude to scale from (zero, or a
+#: subnormal where the relative term underflows). See `_util._expand_degenerate`.
+_DEGENERATE_REL = 0.05
+_DEGENERATE_ABS = 0.5
+
+#: Half-width of the category slot a boxplot reserves per position, in data
+#: units. The value axis is sized from this rather than from `widths`, so
+#: narrowing the boxes thins the glyphs instead of zooming the axis in on them.
+#: 0.5 matches matplotlib and puts adjacent integer positions exactly edge to
+#: edge.
+_BOX_SLOT = 0.5
+
 #: Pie slice labels. `_PIE_LABEL_R` is where a label's anchor sits, in wedge
 #: radii, so the text clears the rim. A label's *width* is a device length the
 #: data limits know nothing about, so the pie is sized in device space instead

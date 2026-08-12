@@ -411,6 +411,47 @@ fn positive_range(values: F64Data) -> Option<(f64, f64)> {
     }
 }
 
+/// Finite x and y bounds over the **vertices** of a series, skipping any
+/// vertex where either coordinate is non-finite.
+///
+/// Reducing the two coordinate arrays separately is not the same thing, and the
+/// difference is visible on real data: a point at `(100.0, NaN)` is not drawn,
+/// but an independent scan of the x array still sees the 100 and stretches the
+/// x axis out to it, leaving the plotted data crushed into a corner next to a
+/// wide empty margin. Pairing the scan drops the whole vertex, as matplotlib
+/// does. `None` when no vertex has both coordinates finite.
+#[pyfunction]
+fn paired_range(xs: F64Data, ys: F64Data) -> Option<((f64, f64), (f64, f64))> {
+    let (mut xlo, mut xhi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let (mut ylo, mut yhi) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut any = false;
+    let n = xs.len().min(ys.len());
+    let (xs, ys) = (xs.as_slice(), ys.as_slice());
+    for i in 0..n {
+        let (x, y) = (xs[i], ys[i]);
+        if x.is_finite() && y.is_finite() {
+            any = true;
+            if x < xlo {
+                xlo = x;
+            }
+            if x > xhi {
+                xhi = x;
+            }
+            if y < ylo {
+                ylo = y;
+            }
+            if y > yhi {
+                yhi = y;
+            }
+        }
+    }
+    if any {
+        Some(((xlo, xhi), (ylo, yhi)))
+    } else {
+        None
+    }
+}
+
 /// Finite min/max over `values[i] + offsets[i]`, and - when `two_sided` -
 /// `values[i] - offsets[i]` as well, without materializing either sequence.
 ///
@@ -2533,6 +2574,7 @@ fn _pyplotrs_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(solve_layout, m)?)?;
     m.add_function(wrap_pyfunction!(data_range, m)?)?;
     m.add_function(wrap_pyfunction!(positive_range, m)?)?;
+    m.add_function(wrap_pyfunction!(paired_range, m)?)?;
     m.add_function(wrap_pyfunction!(offset_range, m)?)?;
     m.add_function(wrap_pyfunction!(histogram, m)?)?;
     m.add_function(wrap_pyfunction!(map_colors, m)?)?;

@@ -19,6 +19,7 @@ from . import theme as _theme
 from . import ticker as _ticker
 from ._const import (
     _AXIS_LABEL_GAP,
+    _BOX_SLOT,
     _CBAR_GAP,
     _CBAR_TICK_GAP,
     _CBAR_TICK_LEN,
@@ -57,18 +58,20 @@ from ._util import (
     _NUMERIC_BUFFER_FORMATS,
     _as_seq,
     _auto_levels,
+    _axis_range,
     _boxstats,
+    _check_margin,
     _clip_segment,
-    _concat,
     _edges_from_centers,
+    _expand_degenerate,
     _field_args,
     _flatten2d,
+    _fold_guides,
     _interp_coord,
     _is_2d,
     _is_uniform,
     _level_edges,
     _matplotlib_hint,
-    _patch_bbox,
     _RangeAcc,
     _require_same_length,
     _spine_ends,
@@ -77,6 +80,7 @@ from ._util import (
     _subdivide,
     _to_f64,
     _to_f64_grid,
+    _union_ranges,
     _with_alpha,
 )
 from .mappable import Mappable
@@ -499,14 +503,18 @@ class Axes(_AxesBase):
         discrete categories at the default single-column figure size."""
         xs = self._coords(x, "x")
         heights = [float(v) for v in height]
+        bottoms = _as_seq(bottom, len(xs))
         _require_same_length("bar", x=xs, height=heights)
         self._marks.append({
             "zorder": float(zorder),
             "kind": "bar",
             "xs": xs,
             "heights": heights,
-            "bottoms": _as_seq(bottom, len(xs)),
+            "bottoms": bottoms,
             "width": float(width),
+            # Bars rest on their bases. Only the extreme bases can ever bind,
+            # so two values stand in for all of them.
+            "sticky_y": [min(bottoms), max(bottoms)] if bottoms else [],
             "color": self._mark_color(color, alpha),
             "label": label,
             "edgecolor": None if edgecolor is None else self._theme.resolve(edgecolor),
@@ -534,6 +542,7 @@ class Axes(_AxesBase):
             "kind": "hist",
             "edges": edges,
             "counts": counts,
+            "sticky_y": [0.0],
             "color": self._mark_color(color, alpha),
             "label": label,
         })
@@ -658,11 +667,13 @@ class Axes(_AxesBase):
         ``y`` may be strings (categories), which set a categorical y-axis."""
         ys = self._coords(y, "y")
         widths = [float(v) for v in width]
+        lefts = _as_seq(left, len(ys))
         _require_same_length("barh", y=ys, width=widths)
         self._marks.append({
             "zorder": float(zorder),
             "kind": "barh", "ys": ys, "widths": widths,
-            "lefts": _as_seq(left, len(ys)), "height": float(height),
+            "lefts": lefts, "height": float(height),
+            "sticky_x": [min(lefts), max(lefts)] if lefts else [],
             "color": self._mark_color(color, alpha), "label": label,
             "edgecolor": None if edgecolor is None else self._theme.resolve(edgecolor),
         })
@@ -679,11 +690,16 @@ class Axes(_AxesBase):
         stats = [_boxstats([float(v) for v in g]) for g in groups]
         positions = ([float(p) for p in positions] if positions is not None
                      else [float(i + 1) for i in range(len(groups))])
+        # The `max` keeps a box wider than one slot from clipping (see _BOX_SLOT).
+        slot = max(_BOX_SLOT, float(widths) / 2.0)
         self._marks.append({
             "zorder": float(zorder),
             "kind": "boxplot", "stats": stats, "positions": positions,
             "width": float(widths), "color": self._mark_color(color, alpha),
             "showfliers": showfliers, "label": label,
+            "slot": slot,
+            "sticky_x": ([min(positions) - slot, max(positions) + slot]
+                         if positions else []),
         })
         return self
 
@@ -701,9 +717,11 @@ class Axes(_AxesBase):
             if not vals:
                 violins.append(([], []))
                 continue
-            lo, hi = min(vals), max(vals)
-            pad = (hi - lo) * 0.15 or 1.0
-            grid = [lo - pad + (hi - lo + 2 * pad) * i / (points - 1) for i in range(points)]
+            # Over the data range exactly, as matplotlib does. Evaluating 15%
+            # past each end drew KDE tails the sample never reached, and - the
+            # whole grid fed autoscaling - padded 5% beyond those on top.
+            lo, hi = _expand_degenerate(min(vals), max(vals))
+            grid = [lo + (hi - lo) * i / (points - 1) for i in range(points)]
             dens = _core.gaussian_kde(vals, grid, 0.0)
             violins.append((grid, dens))
         self._marks.append({
@@ -802,6 +820,10 @@ class Axes(_AxesBase):
             "vmax": hi,
             "norm_code": norm_code,
             "extent": extent,
+            # Covers its extent exactly and stops. Per-mark and per-axis, so a
+            # line drawn beyond the image still gets its own margin.
+            "sticky_x": [extent[0], extent[1]],
+            "sticky_y": [extent[2], extent[3]],
             "origin": origin,
             "alpha": float(alpha),
             "label": label,
@@ -847,6 +869,7 @@ class Axes(_AxesBase):
                 "zorder": float(zorder),
                 "kind": "fill", "xs": xs, "y1": top,
                 "y2": _to_f64(_as_seq(baseline, len(xs))),
+                "sticky_y": [float(baseline)],
                 "color": self._next_color(color), "alpha": 0.3, "label": label,
             })
         else:
@@ -855,6 +878,7 @@ class Axes(_AxesBase):
             self._marks.append({
                 "zorder": float(zorder),
                 "kind": "line", "xs": px, "ys": py, "label": label,
+                "sticky_y": [float(baseline)],
                 "color": self._mark_color(color, alpha),
                 "linewidth": self._theme.line_width if linewidth is None else float(linewidth),
                 "linestyle": "solid", "marker": None, "markersize": 5.0, "simplify": False,
@@ -1009,7 +1033,9 @@ class Axes(_AxesBase):
         self._marks.append({"zorder": float(zorder),
                             "kind": "quadmesh", "quads": quads, "label": label,
                             "color": _with_alpha(cm(0.5), alpha),
-                            "extent": (xe[0], xe[-1], ye[0], ye[-1])})
+                            "extent": (xe[0], xe[-1], ye[0], ye[-1]),
+                            "sticky_x": [xe[0], xe[-1]],
+                            "sticky_y": [ye[0], ye[-1]]})
         return Mappable(self, cm, nrm.vmin, nrm.vmax)
 
     def contour(self, *args, levels=None, colors=None, cmap=None,
@@ -1041,6 +1067,9 @@ class Axes(_AxesBase):
             # Legend key: the middle level's color stands for the line set.
             "color": lcolors[len(lcolors) // 2] if lcolors else self._theme.palette[0],
             "extent": (min(xc), max(xc), min(yc), max(yc)),
+            # The field is only defined on its grid, so the view stops there.
+            "sticky_x": [min(xc), max(xc)],
+            "sticky_y": [min(yc), max(yc)],
         })
         return self
 
@@ -1074,6 +1103,8 @@ class Axes(_AxesBase):
             "kind": "contourf", "img": bytes(img), "uw": uw, "uh": uh,
             "label": label, "color": _with_alpha(cm(0.5), alpha),
             "extent": (min(xc), max(xc), min(yc), max(yc)),
+            "sticky_x": [min(xc), max(xc)],
+            "sticky_y": [min(yc), max(yc)],
         })
         return Mappable(self, cm, edges[0], edges[-1], norm=nrm)
 
@@ -1144,6 +1175,13 @@ class Axes(_AxesBase):
             self.fill_between(xs, upper, lower, alpha=alpha, zorder=zorder,
                               color=(colors[i % len(colors)] if colors else None),
                               label=(labels[i] if labels and i < len(labels) else None))
+            if i == 0:
+                # Only the first band rests on the floor, and the floor is the
+                # whole reading: a stack hovering above the spine misreports
+                # where the total starts. Sticks at this stack's *own* baseline,
+                # not the literal zero matplotlib uses (stackplot.py:135) -
+                # `baseline=100` should sit on 100, which matplotlib gets wrong.
+                self._marks[-1]["sticky_y"] = [float(baseline)]
             lower = upper
         return self
 
@@ -1232,8 +1270,10 @@ class Axes(_AxesBase):
                 color=None, linewidth: float | None = None,
                 linestyle: str = "solid") -> "Axes":
         """Draw a horizontal reference line at data ``y`` spanning the axes
-        fraction ``xmin..xmax`` (0 = left edge, 1 = right). Reference lines are
-        guides: they are drawn over the data but never affect autoscaling."""
+        fraction ``xmin..xmax`` (0 = left edge, 1 = right).
+
+        ``y`` is folded into the y limits so the guide cannot land outside the
+        frame; ``xmin``/``xmax`` are axes fractions, not data, so x is untouched."""
         self._refs.append({
             "kind": "axhline", "y": float(y), "min": float(xmin), "max": float(xmax),
             "color": self._theme.resolve(color) if color is not None else self._theme.text_color,
@@ -1246,7 +1286,8 @@ class Axes(_AxesBase):
                 color=None, linewidth: float | None = None,
                 linestyle: str = "solid") -> "Axes":
         """Draw a vertical reference line at data ``x`` spanning the axes
-        fraction ``ymin..ymax``. See ``axhline``."""
+        fraction ``ymin..ymax``. ``x`` is folded into the x limits so the guide
+        stays inside the frame; ``ymin``/``ymax`` are fractions. See ``axhline``."""
         self._refs.append({
             "kind": "axvline", "x": float(x), "min": float(ymin), "max": float(ymax),
             "color": self._theme.resolve(color) if color is not None else self._theme.text_color,
@@ -1258,7 +1299,8 @@ class Axes(_AxesBase):
     def axhspan(self, ymin: float, ymax: float, *, xmin: float = 0.0, xmax: float = 1.0,
                 color=None, alpha: float = 0.3) -> "Axes":
         """Shade the horizontal band between data ``ymin`` and ``ymax`` (spanning
-        the axes fraction ``xmin..xmax`` in x). Drawn behind the data."""
+        the axes fraction ``xmin..xmax`` in x). Drawn behind the data; the band
+        is folded into the y limits so it stays visible."""
         self._refs.append({
             "kind": "axhspan", "lo": float(ymin), "hi": float(ymax),
             "min": float(xmin), "max": float(xmax),
@@ -1269,7 +1311,8 @@ class Axes(_AxesBase):
     def axvspan(self, xmin: float, xmax: float, *, ymin: float = 0.0, ymax: float = 1.0,
                 color=None, alpha: float = 0.3) -> "Axes":
         """Shade the vertical band between data ``xmin`` and ``xmax`` (spanning
-        the axes fraction ``ymin..ymax`` in y). Drawn behind the data."""
+        the axes fraction ``ymin..ymax`` in y). Drawn behind the data; the band
+        is folded into the x limits so it stays visible."""
         self._refs.append({
             "kind": "axvspan", "lo": float(xmin), "hi": float(xmax),
             "min": float(ymin), "max": float(ymax),
@@ -1280,7 +1323,9 @@ class Axes(_AxesBase):
     def axline(self, xy1, *, xy2=None, slope: float | None = None, color=None,
                linewidth: float | None = None, linestyle: str = "solid") -> "Axes":
         """Draw an infinite line through ``xy1``, defined by a second point
-        ``xy2`` or a ``slope``. Clipped to the plot rect; not autoscaled."""
+        ``xy2`` or a ``slope``. Clipped to the plot rect. Alone among the
+        guides it contributes nothing to the limits - it is infinite, so it has
+        no extent to contribute and is always on screen already."""
         if (xy2 is None) == (slope is None):
             raise ValueError("axline requires exactly one of xy2= or slope=")
         self._refs.append({
@@ -1566,9 +1611,9 @@ class Axes(_AxesBase):
             xmargin = margin if xmargin is None else xmargin
             ymargin = margin if ymargin is None else ymargin
         if xmargin is not None:
-            self._xmargin = float(xmargin)
+            self._xmargin = _check_margin("xmargin", xmargin)
         if ymargin is not None:
-            self._ymargin = float(ymargin)
+            self._ymargin = _check_margin("ymargin", ymargin)
         if xinverted is not None:
             self._xinverted = bool(xinverted)
         if yinverted is not None:
@@ -1652,9 +1697,9 @@ class Axes(_AxesBase):
             return own
         xr, yr = own
         if fig.sharex:
-            xr = (min(r[0][0] for r in siblings), max(r[0][1] for r in siblings))
+            xr = _union_ranges(xr, [r[0] for r in siblings])
         if fig.sharey:
-            yr = (min(r[1][0] for r in siblings), max(r[1][1] for r in siblings))
+            yr = _union_ranges(yr, [r[1] for r in siblings])
         return xr, yr
 
     def _xtick_pairs(self) -> list[tuple[float, str]]:
@@ -1714,15 +1759,22 @@ class Axes(_AxesBase):
         """
         xs = _RangeAcc()
         ys = _RangeAcc()
-        has_bar = False
-        has_image = False
+        # Sticky bounds: values a mark rests *on* rather than merely reaches -
+        # a bar's base, a stack's floor, an image's edge. Recorded by each mark
+        # at construction; the margin is clamped at them (see `_clamp_sticky`).
+        sticky_x: list[float] = []
+        sticky_y: list[float] = []
         for m in self._marks:
             k = m["kind"]
+            sx = m.get("sticky_x")
+            if sx:
+                sticky_x.extend(sx)
+            sy = m.get("sticky_y")
+            if sy:
+                sticky_y.extend(sy)
             if k in ("line", "scatter"):
-                xs.add_array(m["xs"])
-                ys.add_array(m["ys"])
+                xs.add_pairs(m["xs"], m["ys"], ys)
             elif k == "bar":
-                has_bar = True
                 hw = m["width"] / 2.0
                 bx = _core.data_range(m["xs"])
                 if bx is not None:
@@ -1730,7 +1782,6 @@ class Axes(_AxesBase):
                 ys.add_array(m["bottoms"])
                 ys.add_offsets(m["bottoms"], m["heights"], two_sided=False)
             elif k == "hist":
-                has_bar = True
                 xs.add(m["edges"][0], m["edges"][-1])
                 ys.add_array(m["counts"])
                 ys.add(0.0)
@@ -1757,12 +1808,10 @@ class Axes(_AxesBase):
                 if m["xerr"] is not None and len(m["xerr"]):
                     xs.add_offsets(m["xs"], m["xerr"])
             elif k == "image":
-                has_image = True
                 x0, x1, y0, y1 = m["extent"]
                 xs.add(x0, x1)
                 ys.add(y0, y1)
             elif k == "barh":
-                has_bar = True
                 hh = m["height"] / 2.0
                 by = _core.data_range(m["ys"])
                 if by is not None:
@@ -1789,11 +1838,13 @@ class Axes(_AxesBase):
                         ys.add_array(_to_f64(row))
                         xs.add(off - half, off + half)
             elif k == "boxplot":
-                hw = m["width"] / 2.0
+                hw = m["slot"]
                 for pos, st in zip(m["positions"], m["stats"]):
                     xs.add(pos - hw, pos + hw)
                     ys.add(st["lo"], st["hi"])
-                    if st["fliers"]:
+                    # Fliers that aren't drawn must not move the axis: scaling
+                    # to a hidden outlier squeezes the visible box to nothing.
+                    if st["fliers"] and m["showfliers"]:
                         ys.add_array(_to_f64(st["fliers"]))
             elif k == "violin":
                 hw = m["width"] / 2.0
@@ -1810,7 +1861,6 @@ class Axes(_AxesBase):
                     xs.add(cx - hx, cx + hx)
                     ys.add(cy - hy, cy + hy)
             elif k in ("quadmesh", "contourf"):
-                has_image = True
                 x0, x1, y0, y1 = m["extent"]
                 xs.add(x0, x1)
                 ys.add(y0, y1)
@@ -1830,47 +1880,12 @@ class Axes(_AxesBase):
                 xs.add(-r, r)
                 ys.add(-r, r)
 
-        # Patches contribute their bounding box (reference lines/spans do not).
-        for p in self._patches:
-            bx, by = _patch_bbox(p)
-            xs.add(*bx)
-            ys.add(*by)
+        _fold_guides(self._patches, self._refs, xs, ys)
 
-        if xs.empty:
-            xs.add(0.0, 1.0)
-            ys.add(0.0, 1.0)
-
-        # Images set tight limits exactly at their extent (no data margin).
         xpad = _DATA_PAD if self._xmargin is None else self._xmargin
         ypad = _DATA_PAD if self._ymargin is None else self._ymargin
-        if self._xlim:
-            xr = self._xlim
-        elif has_image:
-            xr = xs.bounds() or (0.0, 1.0)
-        else:
-            xr = xs.padded(xpad)
-
-        if self._ylim:
-            yr = self._ylim
-        elif has_image:
-            yr = ys.bounds() or (0.0, 1.0)
-        elif has_bar:
-            lo, hi = ys.bounds() or (0.0, 1.0)
-            # Bars are read against a baseline, so a non-negative series keeps
-            # zero in view rather than floating above it.
-            yr = (0.0, hi + (hi or 1.0) * ypad) if lo >= 0.0 else ys.padded(ypad)
-        else:
-            yr = ys.padded(ypad)
-
-        # Non-linear scales own their autoscaling (positive-domain clipping and
-        # transformed-space padding), unless the user pinned explicit limits.
-        # This is the one path that still needs the values rather than the
-        # bounds, so it pays for a concatenation - non-linear scales are the
-        # uncommon case, and the arrays were retained by reference anyway.
-        if not self._xscale.is_identity and not self._xlim:
-            xr = self._xscale.data_limits(_concat(xs.arrays()))
-        if not self._yscale.is_identity and not self._ylim:
-            yr = self._yscale.data_limits(_concat(ys.arrays()))
+        xr = _axis_range(self._xscale, xs, self._xlim, xpad, sticky_x)
+        yr = _axis_range(self._yscale, ys, self._ylim, ypad, sticky_y)
 
         # Inversion is applied last, on whatever range we ended up with, so it
         # composes with autoscaling. Writing `xlim=(hi, lo)` still works and is

@@ -63,9 +63,10 @@ in one call. See [scales & ticks](scales-and-ticks.md).
 ## Bars & categories
 
 [`bar`][pyplotrs.axes.Axes.bar] draws vertical bars;
-[`barh`][pyplotrs.axes.Axes.barh] horizontal ones. The value axis is forced to
-include the 0 baseline when all values are non-negative, and **string positions
-give a categorical axis**:
+[`barh`][pyplotrs.axes.Axes.barh] horizontal ones. Bars sit flush on their own
+base — the value axis stops there rather than padding past it, whether that base
+is the default 0 or a `bottom`/`left` you passed — and **string positions give a
+categorical axis**:
 
 ```python
 ax.bar(["ash", "birch", "cedar"], [12, 19, 7])
@@ -193,8 +194,12 @@ handle for [`Figure.colorbar`](../api/figure.md).
 
 ## Guides & shapes
 
-Guides are drawn over the data and **never affect autoscaling** — they mark a
-threshold rather than plotting one.
+Guides are drawn over the data and mark a threshold rather than plotting one,
+but they still have to be **visible**: a guide contributes the coordinate it
+sits at, so `axhline(500)` over data in `0..1` widens y to include 500 instead
+of landing outside the frame. It does *not* contribute the direction it spans —
+that span is an axes fraction, not data — so `axhline` never touches x.
+`axline` is the exception: it is infinite and has no extent to contribute.
 
 | Method | What it draws |
 |---|---|
@@ -204,9 +209,9 @@ threshold rather than plotting one.
 | `hlines(y, xmin, xmax)` / `vlines(x, ymin, ymax)` | **Data**-coordinate segments that *do* autoscale |
 
 !!! tip "`hlines` vs `axhline`"
-    `hlines` takes data coordinates and participates in autoscaling; `axhline`
-    spans a fraction of the axes and never moves the view. Reach for `axhline`
-    to mark a threshold, `hlines` to plot data.
+    `hlines` takes data coordinates in **both** directions, so it autoscales in
+    both. `axhline` spans a *fraction of the axes* in x, so only its `y` moves
+    the view. Reach for `axhline` to mark a threshold, `hlines` to plot data.
 
 Patches are shapes in data space, with `facecolor` / `edgecolor` / `linewidth` /
 `linestyle` / `alpha` / `fill` / `hatch`:

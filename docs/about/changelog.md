@@ -30,6 +30,50 @@ All notable changes to pyplotrs are documented here. The format is based on
 - Magnified image blocks are evenly sized. Nearest-neighbor rounds each block
   boundary to a whole pixel, so 100 equal rows across 215 pixels came out as
   runs of 1, 2 and 3; each boundary now lands at its exact fractional position.
+- **Marks now sit flush against the spine they rest on.** Autoscaling padded
+  every axis by 5% unconditionally, so a `stackplot` floated above the x spine
+  with a strip of background beneath it, and the total looked like it started
+  somewhere other than where it did. Each mark now records the values it *rests
+  on* — a stack's floor, a bar's base, an image's extent — and the margin is
+  clamped there. The margin is unchanged everywhere a mark merely *stops*:
+  `fill_between(x, y, 0)` still gets its 5%, because 0 is just another curve.
+- `bar(bottom=...)` and `barh(left=...)` sit on the base they were given. The
+  baseline was forced to zero, which squeezed `bar(bottom=10)` into the top
+  third of an otherwise empty panel; `barh` had no baseline handling at all, so
+  its bars floated off their value axis in every case.
+- **`xmargin`/`ymargin` now work on every scale.** Each scale padded itself with
+  a hardcoded 5%, so the margin arguments were silently ignored on log, symlog,
+  logit, date and categorical axes. The margin is now applied once, in
+  transformed space — on a log axis it is 5% of the *decade* span, so it means
+  the same thing at both ends — and mark-aware bounds such as an image extent
+  survive the switch to a non-linear scale.
+- `axhline`, `axvline`, `axhspan` and `axvspan` contribute the coordinate they
+  are positioned at, so a guide can no longer land outside the frame and go
+  missing. They still contribute nothing to the direction they span, which is an
+  axes fraction rather than data. `axline` is unchanged: it is infinite.
+- `boxplot(showfliers=False)` no longer scales the value axis to the outliers it
+  is hiding, which had squeezed the visible box into an eighth of the panel.
+- A constant series expands relative to its own value rather than by a fixed
+  half-unit, so a flat line at y=1000 gets a readable scale instead of ticks
+  reading 999.5 / 1000 / 1000.5.
+- A vertex with a non-finite coordinate no longer moves the other axis: `(100,
+  NaN)` is not drawn, but an independent scan of x used to stretch the axis to
+  reach it.
+- A margin of -0.5 or below is rejected instead of silently producing a
+  zero-width or inverted axis, and a span near the float ceiling no longer pads
+  to infinity.
+- `sharex`/`sharey` preserve an inverted panel's direction. The union was taken
+  with a plain min/max over the endpoints, so a panel set to `yinverted=True`
+  inside a shared row came back ascending.
+
+### Changed
+
+- A `boxplot`'s category axis is sized from the category slot rather than from
+  `widths`, so narrowing the boxes thins the glyphs instead of zooming the axis
+  in on them — every width used to fill about 91% of the axis.
+- `violinplot` evaluates its KDE over the data range rather than 15% past each
+  end, so the axis is bounded by the sample instead of overhanging it by 21.5%.
+- `contour` pins the view to its grid, as `contourf` already did.
 
 ## 0.1.0 — 2026-08-11
 
