@@ -194,9 +194,8 @@ PNG into the current directory.)
 
 <div class="grid" markdown>
 ![default](images/theme_default.png)
-![nature](images/theme_nature.png)
 ![grayscale](images/theme_grayscale.png)
-![presentation](images/theme_presentation.png)
+![dark](images/theme_dark.png)
 </div>
 
 ```python
