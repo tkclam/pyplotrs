@@ -33,6 +33,11 @@ _TITLE_GAP = 4.0
 
 _OUTER_MARGIN = 6.0
 _INLINE_DPI = 150.0  # raster resolution for Jupyter `_repr_png_` inline display
+#: Raster resolution for an inline `Animation`. Lower than a still figure's,
+#: because an animation multiplies the resolution by its frame count and the
+#: result is stored base64-encoded inside the `.ipynb`: the guide's 60-frame
+#: 360x220pt wave is 297 KB here against 469 KB at 150.
+_INLINE_ANIM_DPI = 100.0
 
 _WSPACE = 26.0
 _HSPACE = 24.0

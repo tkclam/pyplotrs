@@ -52,10 +52,40 @@ anim.save("out.gif", dpi=150, fps=12)
 
 `dpi` sets the raster resolution (default 100, lower than `Figure.save`'s 200
 because an animation is many frames), and `fps` overrides the rate given at
-construction.
+construction. `format=` overrides the extension when the path has none.
 
 Every frame must share the same figure size — the animation canvas is fixed, and
 a mismatch raises `ValueError` naming the frame size that differed.
+
+`render` is called once per frame **per save**, so writing two formats from one
+`Animation` builds every figure twice — and a callback that draws on random
+numbers would not even build the same one twice. When that matters, encode once
+and write the bytes yourself:
+
+```python
+data = anim.to_bytes("gif", dpi=150)
+Path("out.gif").write_bytes(data)
+```
+
+[`to_bytes`][pyplotrs.animation.Animation.to_bytes] is what `save` is built on;
+it is also the way out when the destination is not a file — an HTTP response, a
+zip member, a `BytesIO`.
+
+## In a notebook
+
+A bare `anim` in a cell plays, the way a bare `fig` renders as a PNG:
+
+```python
+anim = pp.animate(render, frames=60, fps=24)
+anim          # plays inline
+```
+
+The inline render is a GIF at 100 dpi — `image/gif` is the one animated format
+every notebook frontend plays, and an animation multiplies a still figure's
+resolution by its frame count into a file you may well commit. Over 20 MB it
+raises rather than quietly dropping frames; `save` at your own `dpi` is the
+answer there. Note that displaying an animation runs `render` once per frame,
+just as saving does, so a callback with side effects runs again on every echo.
 
 !!! tip "Iterable frames"
     `frames` can be any iterable, so you can drive the animation from data

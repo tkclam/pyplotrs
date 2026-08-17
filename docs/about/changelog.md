@@ -36,6 +36,19 @@ All notable changes to pyplotrs are documented here. The format is based on
   resolves innermost-first, and a color that does not parse costs the color and
   not the term it wraps. Fraction bars, radical rules and accents take the color
   along with the glyphs, and the text stays real, selectable text in PDF/SVG.
+- **Animations display inline in notebooks.** A bare `anim` in a cell now plays,
+  the way a bare `fig` renders as a PNG. `Animation` grew a `_repr_mimebundle_`
+  emitting an `image/gif` — the one animated format every frontend plays — and
+  a `__repr__` that says how many frames at what rate. It replaces the
+  save-to-disk-and-read-it-back dance the project's own notebook was doing. The
+  inline render is 100 dpi (`_INLINE_ANIM_DPI`, below a still figure's 150,
+  since an animation multiplies that by its frame count and lands base64-encoded
+  in the `.ipynb`) and refuses over 20 MB rather than silently truncating.
+- **`Animation.to_bytes(format, *, dpi, fps)`** — the encoded animation, without
+  a file. `save` is now a thin wrapper over it. Reach for it when the
+  destination is an HTTP response, a zip member or a `BytesIO`.
+- **`Animation.save` takes a `format=` override** for a path without a useful
+  extension, mirroring the extension sniff.
 - **`set_mathtext_fontset()` / `get_mathtext_fontset()`** — which family `$...$`
   math is drawn in, pyplotrs' analog of matplotlib's
   `rcParams["mathtext.fontset"]`. `"sans"` is the new default (see **Changed**);
@@ -149,6 +162,9 @@ All notable changes to pyplotrs are documented here. The format is based on
 
 ### Fixed
 
+- **`Animation.save` accepts a `pathlib.Path`.** It sniffed the extension with
+  `"." in path`, which raises `TypeError: argument of type 'PosixPath' is not
+  iterable` — while `Figure.save` had taken one all along.
 - **The separator hairline follows the page when the plot area is unset.** The
   chain that keeps histogram-bin and pie-wedge seams reading as "the background
   showing through" stopped at `axes_facecolor` and then jumped to white — so a

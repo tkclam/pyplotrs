@@ -165,6 +165,43 @@ def test_apng_output_is_an_animated_png(tmp_path):
     assert num_frames == 4, f"acTL claims {num_frames} frames"
 
 
+def test_animation_to_bytes_matches_what_save_writes(tmp_path):
+    """`save` is a thin wrapper over `to_bytes`; the two must not drift."""
+    anim = pp.animate(_wave, frames=3, fps=10)
+    for fmt, name in (("gif", "a.gif"), ("apng", "a.apng")):
+        out = tmp_path / name
+        anim.save(out, dpi=80)
+        assert anim.to_bytes(fmt, dpi=80) == out.read_bytes()
+
+
+def test_animation_accepts_a_path_and_a_format_override(tmp_path):
+    """`Figure.save` has always taken a `pathlib.Path`; `Animation.save` used to
+    raise `TypeError` on one, because it sniffed the extension with `"." in
+    path`. A path with no extension needs `format=`."""
+    anim = pp.animate(_wave, frames=2, fps=10)
+    anim.save(tmp_path / "p.gif", dpi=72)
+    assert (tmp_path / "p.gif").read_bytes()[:6] in (b"GIF87a", b"GIF89a")
+
+    anim.save(tmp_path / "noext", dpi=72, format="gif")
+    assert (tmp_path / "noext").read_bytes()[:6] in (b"GIF87a", b"GIF89a")
+
+    for bad in ("mp4", "webm", ""):
+        with pytest.raises(ValueError, match="unsupported animation format"):
+            anim.to_bytes(bad)
+
+
+def test_animation_displays_inline_in_a_notebook():
+    """A bare `anim` in a cell has to render, the way a bare `fig` does -
+    otherwise every notebook has to save to disk and read the file back."""
+    anim = pp.animate(_wave, frames=3, fps=10)
+    bundle = anim._repr_mimebundle_()
+    assert bundle["image/gif"][:6] in (b"GIF87a", b"GIF89a")
+    assert "3 frames" in bundle["text/plain"]
+    # `include`/`exclude` are part of the protocol, and IPython does pass them.
+    assert set(anim._repr_mimebundle_(include={"image/gif"})) == {"image/gif"}
+    assert "image/gif" not in anim._repr_mimebundle_(exclude={"image/gif"})
+
+
 def test_animation_frames_actually_differ(tmp_path):
     """A renderer that ignored the frame index would still produce a valid
     animated file - of the same picture N times."""
