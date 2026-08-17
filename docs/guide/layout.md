@@ -15,8 +15,8 @@ placed inside other axes, and second axes stacked on the same cell.
 `width_ratios` and `height_ratios` weight the columns and rows:
 
 ```python
-fig, axs = plt.subplots(1, 2, width_ratios=[3, 1])   # wide panel, narrow panel
-fig, axs = plt.subplots(2, 1, height_ratios=[3, 1])  # plot over a residual strip
+fig, axs = pp.subplots(1, 2, width_ratios=[3, 1])   # wide panel, narrow panel
+fig, axs = pp.subplots(2, 1, height_ratios=[3, 1])  # plot over a residual strip
 ```
 
 Only the proportions matter — `[3, 1]` and `[0.75, 0.25]` are the same — and the
@@ -31,7 +31,7 @@ An ASCII drawing of the layout is usually clearer than index arithmetic.
 dict keyed by the labels:
 
 ```python
-fig, axd = plt.subplot_mosaic(
+fig, axd = pp.subplot_mosaic(
     """
     AAB
     AAC
@@ -55,7 +55,7 @@ The index-based route, for when the geometry is computed rather than drawn.
 [`add_subplot`][pyplotrs.Figure.add_subplot] places an axes on the slice:
 
 ```python
-fig = plt.figure(figsize=(500, 320))
+fig = pp.figure(figsize=(500, 320))
 gs = fig.add_gridspec(2, 3, height_ratios=[2, 1])
 
 main  = fig.add_subplot(gs[0, :2])     # top-left, two columns wide
@@ -64,7 +64,7 @@ under = fig.add_subplot(gs[1, 0])
 polar = fig.add_subplot(gs[1, 1], projection="polar")
 ```
 
-[`plt.figure()`][pyplotrs.figure] creates a figure with **no** axes, which is
+[`pp.figure()`][pyplotrs.figure] creates a figure with **no** axes, which is
 what you want when every panel is placed by hand. `add_subplot` takes the same
 `projection` argument as `subplots`, so a single figure can mix 2D, polar and
 3D panels.
@@ -75,7 +75,7 @@ what you want when every panel is placed by hand. `add_subplot` takes the same
 are directly comparable:
 
 ```python
-fig, axs = plt.subplots(1, 3, sharey=True)
+fig, axs = pp.subplots(1, 3, sharey=True)
 for k, ax in enumerate(axs):
     ax.line(xs, [f(x, k) for x in xs])
 ```
@@ -99,7 +99,7 @@ to put two quantities in different units on one panel.
 [`twiny`][pyplotrs.axes.Axes.twiny] is the transpose.
 
 ```python
-fig, ax = plt.subplots()
+fig, ax = pp.subplots()
 ax.line(t, voltage, label="V")
 ax.set(xlabel="t (s)", ylabel="volts")
 

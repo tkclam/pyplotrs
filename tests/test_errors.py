@@ -19,7 +19,7 @@ Two failure modes are covered:
 
 from __future__ import annotations
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 
 # -- mismatched array lengths ------------------------------------------------
@@ -45,7 +45,7 @@ _MISMATCHED = [
 
 @pytest.mark.parametrize("name,call", _MISMATCHED, ids=[n for n, _ in _MISMATCHED])
 def test_mismatched_lengths_raise(name, call):
-    _fig, ax = plt.subplots()
+    _fig, ax = pp.subplots()
     with pytest.raises(ValueError, match="equal length"):
         call(ax)
 
@@ -54,7 +54,7 @@ def test_mismatched_lengths_raise(name, call):
 def test_the_length_error_names_the_mark_and_both_lengths(name, call):
     """A message has to say which call was wrong and by how much - the caller
     has usually just built both arrays and needs to know which one is short."""
-    _fig, ax = plt.subplots()
+    _fig, ax = pp.subplots()
     with pytest.raises(ValueError) as excinfo:
         call(ax)
     message = str(excinfo.value)
@@ -66,7 +66,7 @@ def test_the_length_error_names_the_mark_and_both_lengths(name, call):
 def test_equal_lengths_are_still_accepted():
     """The guard must not reject the shapes that were always legal, including
     the scalar-broadcast forms (`fill_between`'s `y2`, `errorbar`'s `yerr`)."""
-    _fig, ax = plt.subplots()
+    _fig, ax = pp.subplots()
     ax.line([1, 2, 3], [1, 2, 3])
     ax.bar(["a", "b"], [1, 2])
     ax.fill_between([1, 2, 3], [1, 2, 3], 0.0)
@@ -78,7 +78,7 @@ def test_equal_lengths_are_still_accepted():
 def test_truncation_no_longer_corrupts_the_axis_limits():
     """The specific figure the old behavior produced: two drawn points, an axis
     running to five."""
-    _fig, ax = plt.subplots()
+    _fig, ax = pp.subplots()
     with pytest.raises(ValueError):
         ax.line([1, 2, 3, 4, 5], [10, 20])
     assert ax._marks == [], "a rejected call must not leave a partial mark behind"
@@ -96,13 +96,13 @@ def _ragged_grid():
 
 @pytest.mark.parametrize("method", ["contour", "contourf"])
 def test_ragged_grid_raises_valueerror_not_panic(method):
-    _fig, ax = plt.subplots()
+    _fig, ax = pp.subplots()
     with pytest.raises(ValueError, match="same length"):
         getattr(ax, method)(_ragged_grid())
 
 
 def test_ragged_grid_raises_for_contour3d():
-    _fig, ax = plt.subplots(projection="3d")
+    _fig, ax = pp.subplots(projection="3d")
     with pytest.raises(ValueError, match="same length"):
         ax.contour3d([0, 1, 2, 3, 4], [0, 1, 2], _ragged_grid())
 
@@ -111,7 +111,7 @@ def test_ragged_grid_raises_for_contour3d():
 def test_hist2d_rejects_a_non_positive_bin_count(bins):
     """`bins=0` reached the kernel and computed `nx - 1` in `usize`, which wraps
     to 18446744073709551615 and indexes an empty buffer."""
-    _fig, ax = plt.subplots()
+    _fig, ax = pp.subplots()
     with pytest.raises(ValueError, match="bins"):
         ax.hist2d([0.1, 0.5], [0.2, 0.6], bins=bins)
 
@@ -120,7 +120,7 @@ def test_colormap_rejects_a_non_finite_stop():
     """Sorting the stops used `partial_cmp().unwrap()`, and NaN compares to
     nothing, so a NaN position unwrapped a None."""
     with pytest.raises(ValueError, match="finite"):
-        plt.Colormap("bad", stops=[(float("nan"), (0, 0, 0)), (1.0, (255, 255, 255))])
+        pp.Colormap("bad", stops=[(float("nan"), (0, 0, 0)), (1.0, (255, 255, 255))])
 
 
 def test_no_public_call_raises_baseexception_only():
@@ -137,7 +137,7 @@ def test_no_public_call_raises_baseexception_only():
         lambda ax: ax.line([1, 2, 3], [1, 2]),
     ]
     for call in calls:
-        _fig, ax = plt.subplots()
+        _fig, ax = pp.subplots()
         try:
             call(ax)
         except Exception:
@@ -156,14 +156,14 @@ def test_non_positive_dpi_raises(tmp_path, dpi):
     """`dpi=-5` rendered at 72 dpi and said nothing, so you got a small figure
     with no indication the argument had been discarded. The *upper* bound was
     already guarded with a good message, so only the bottom was open."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1], [0, 1])
     with pytest.raises(ValueError, match="positive, finite"):
         fig.save(str(tmp_path / "f.png"), dpi=dpi)
 
 
 def test_a_sane_dpi_still_works(tmp_path):
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1], [0, 1])
     for dpi in (72, 100.0, 300, 600):
         out = tmp_path / f"d{dpi}.png"
@@ -176,7 +176,7 @@ def test_unknown_linestyle_raises(linestyle):
     """An unrecognized name drew a solid line. `"dashdotted"` is a real
     matplotlib spelling, so this was silently wrong rather than merely
     unsupported."""
-    _fig, ax = plt.subplots()
+    _fig, ax = pp.subplots()
     with pytest.raises(ValueError, match="unknown linestyle"):
         ax.line([0, 1], [0, 1], linestyle=linestyle)
         _render(ax)
@@ -194,7 +194,7 @@ def _render(ax):
 @pytest.mark.parametrize("style", ["solid", "-", "dashed", "--", "dotted", ":",
                                    "dashdot", "-.", "none", None])
 def test_known_linestyles_are_all_accepted(style):
-    _fig, ax = plt.subplots()
+    _fig, ax = pp.subplots()
     ax.line([0, 1], [0, 1], linestyle=style)
     _render(ax)
 
@@ -203,21 +203,21 @@ def test_known_linestyles_are_all_accepted(style):
 def test_unknown_marker_raises(marker):
     """An unrecognized shape fell through to the circle branch, so `marker="*"`
     - which matplotlib draws as a star - silently drew a dot."""
-    _fig, ax = plt.subplots()
+    _fig, ax = pp.subplots()
     with pytest.raises(ValueError, match="unknown marker"):
         ax.scatter([0, 1], [0, 1], marker=marker)
 
 
 @pytest.mark.parametrize("marker", ["o", "s", "^", "v", "D", "+", "x"])
 def test_known_markers_are_all_accepted(marker):
-    _fig, ax = plt.subplots()
+    _fig, ax = pp.subplots()
     ax.scatter([0, 1], [0, 1], marker=marker)
     _render(ax)
 
 
 @pytest.mark.parametrize("bins", [0, -3])
 def test_hist_rejects_a_non_positive_bin_count(bins):
-    _fig, ax = plt.subplots()
+    _fig, ax = pp.subplots()
     with pytest.raises(ValueError, match="bins"):
         ax.hist([1.0, 2.0, 3.0], bins=bins)
 
@@ -231,12 +231,12 @@ def test_hist_rejects_a_non_positive_bin_count(bins):
 def test_no_public_object_reprs_as_a_bare_address():
     from pyplotrs import norms, scales, ticker
 
-    fig, ax = plt.subplots(2, 2)
+    fig, ax = pp.subplots(2, 2)
     objects = [
         fig, ax[0][0], fig.add_gridspec(2, 2),
-        plt.subplots(projection="3d")[1], plt.subplots(projection="polar")[1],
-        plt.themes.default, plt.themes.default.with_(title_size=14),
-        plt.get_cmap("viridis"),
+        pp.subplots(projection="3d")[1], pp.subplots(projection="polar")[1],
+        pp.themes.default, pp.themes.default.with_(title_size=14),
+        pp.get_cmap("viridis"),
         scales.LinearScale(), scales.LogScale(), scales.SymlogScale(),
         scales.LogitScale(), scales.CategoricalScale(["a", "b"]), scales.DateScale(),
         norms.Normalize(0, 1), norms.LogNorm(), norms.TwoSlopeNorm(0.0),
@@ -252,20 +252,20 @@ def test_no_public_object_reprs_as_a_bare_address():
 
 def test_the_theme_repr_names_a_builtin_and_stays_short():
     """The dataclass-generated repr was ~1000 characters of raw RGBA tuples."""
-    assert repr(plt.themes.nature) == "<Theme 'nature'>"
-    derived = repr(plt.themes.default.with_(title_size=14))
+    assert repr(pp.themes.nature) == "<Theme 'nature'>"
+    derived = repr(pp.themes.default.with_(title_size=14))
     assert "derived" in derived and len(derived) < 100, derived
 
 
 def test_the_figure_repr_reports_its_shape():
-    fig, axs = plt.subplots(2, 3, figsize=(400, 300))
+    fig, axs = pp.subplots(2, 3, figsize=(400, 300))
     axs[0][0].line([1, 2], [1, 2])
     text = repr(fig)
     assert "2x3" in text and "6 axes" in text and "1 mark" in text, text
 
 
 def test_the_axes_repr_reports_its_title_and_marks():
-    _fig, ax = plt.subplots()
+    _fig, ax = pp.subplots()
     ax.set(title="Damped sinusoids")
     ax.line([1, 2], [1, 2])
     ax.scatter([1], [1])
@@ -289,7 +289,7 @@ def test_the_axes_repr_reports_its_title_and_marks():
     ("grid", "ax.set(grid"),
 ])
 def test_matplotlib_axes_names_explain_themselves(name, expected):
-    _fig, ax = plt.subplots()
+    _fig, ax = pp.subplots()
     with pytest.raises(AttributeError) as excinfo:
         getattr(ax, name)
     message = str(excinfo.value)
@@ -304,7 +304,7 @@ def test_matplotlib_axes_names_explain_themselves(name, expected):
     ("gca", "there is no current figure"),
 ])
 def test_matplotlib_figure_names_explain_themselves(name, expected):
-    fig, _ax = plt.subplots()
+    fig, _ax = pp.subplots()
     with pytest.raises(AttributeError) as excinfo:
         getattr(fig, name)
     assert expected in str(excinfo.value)
@@ -313,14 +313,14 @@ def test_matplotlib_figure_names_explain_themselves(name, expected):
 def test_the_names_are_not_silently_aliased():
     """The point is to explain the rename, not undo it. If `ax.plot` started
     working, the one-name-per-concept rule would be decorative."""
-    _fig, ax = plt.subplots()
+    _fig, ax = pp.subplots()
     for name in ("plot", "set_xlabel", "set_title"):
         assert not hasattr(ax, name), f"{name} should not exist, only explain"
 
 
 def test_an_ordinary_typo_still_gets_an_ordinary_error():
     """The hook must not swallow every failed lookup into a matplotlib lecture."""
-    _fig, ax = plt.subplots()
+    _fig, ax = pp.subplots()
     missing = "definitely_not_a_method"  # via a variable: `ax.<literal>` is a
     with pytest.raises(AttributeError) as excinfo:  # "useless expression" to
         getattr(ax, missing)                        # the linter, and B009 to
@@ -332,7 +332,7 @@ def test_the_hint_table_names_only_absent_methods():
     the hint would be unreachable, and wrong if it ever were reached."""
     from pyplotrs._util import _MATPLOTLIB_EQUIVALENTS
 
-    _fig, ax = plt.subplots()
+    _fig, ax = pp.subplots()
     wrong = [
         name for name in _MATPLOTLIB_EQUIVALENTS
         if hasattr(ax, name) or hasattr(_fig, name)

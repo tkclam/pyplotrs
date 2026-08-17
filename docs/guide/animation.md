@@ -23,15 +23,15 @@ rasterized and encoded to an animated **GIF** or **APNG**.
 - `repeat` — loop forever (default) or play once.
 
 ```python
-import pyplotrs as plt
+import pyplotrs as pp
 
 def render(i):
-    fig, ax = plt.subplots(figsize=(360, 220))
+    fig, ax = pp.subplots(figsize=(360, 220))
     ax.line(xs, [f(x, i) for x in xs])
     ax.set(ylim=(-1.2, 1.2), title=f"frame {i}")
     return fig
 
-anim = plt.animate(render, frames=60, fps=24)
+anim = pp.animate(render, frames=60, fps=24)
 anim.save("out.gif")     # 256-color, broadly viewable
 anim.save("out.apng")    # full 8-bit color, higher fidelity
 ```
@@ -62,7 +62,7 @@ a mismatch raises `ValueError` naming the frame size that differed.
     rather than from an index:
 
     ```python
-    plt.animate(render, frames=timestamps).save("series.gif")
+    pp.animate(render, frames=timestamps).save("series.gif")
     ```
 
 !!! note "GIF vs APNG"

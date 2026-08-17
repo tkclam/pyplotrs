@@ -1,9 +1,9 @@
 """Layout tools: a mosaic of spanning panels, a twin y-axis, and an inset."""
 import math
 
-import pyplotrs as plt
+import pyplotrs as pp
 
-fig, axd = plt.subplot_mosaic(
+fig, axd = pp.subplot_mosaic(
     """
     AB
     AC

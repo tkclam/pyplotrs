@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import re
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 
 
 def _axes(**kw):
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1], [0, 10])
     ax.set(**kw)
     return fig, ax
@@ -91,7 +91,7 @@ def test_explicit_descending_limits_still_work():
 
 def test_inverted_axis_changes_the_rendering(tmp_path):
     def render(name, **kw):
-        fig, ax = plt.subplots(figsize=(200, 150))
+        fig, ax = pp.subplots(figsize=(200, 150))
         ax.line([0, 1], [0, 10])
         ax.set(**kw)
         out = tmp_path / f"{name}.png"
@@ -106,13 +106,13 @@ def test_inverted_axis_changes_the_rendering(tmp_path):
 def test_linear_axes_have_no_minor_ticks_by_default(tmp_path):
     """Untouched linear output must stay byte-identical, so minor ticks on a
     linear scale are opt-in."""
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.line([0, 1, 2, 3], [0, 5, 3, 9])
     out = tmp_path / "plain.svg"
     fig.save(str(out))
     plain = len(re.findall(r"<path", out.read_text()))
 
-    fig2, ax2 = plt.subplots(figsize=(240, 180))
+    fig2, ax2 = pp.subplots(figsize=(240, 180))
     ax2.line([0, 1, 2, 3], [0, 5, 3, 9])
     ax2.set(minor=4)
     out2 = tmp_path / "minor.svg"
@@ -135,7 +135,7 @@ def test_minor_count_of_one_means_no_subdivision():
 def test_log_scale_keeps_its_own_minor_ticks():
     """A non-linear scale subdivides itself; the linear fallback must not
     override the 2..9 x 10^k decade subdivision."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([1, 1000], [1, 1000])
     ax.set(xscale="log", xminor=4)
     lo, hi = ax.get_xlim()
@@ -146,7 +146,7 @@ def test_log_scale_keeps_its_own_minor_ticks():
 
 def test_tick_direction_changes_the_rendering(tmp_path):
     def render(name, **kw):
-        fig, ax = plt.subplots(figsize=(200, 150))
+        fig, ax = pp.subplots(figsize=(200, 150))
         ax.line([0, 1], [0, 10])
         ax.set(**kw)
         out = tmp_path / f"{name}.svg"
@@ -158,7 +158,7 @@ def test_tick_direction_changes_the_rendering(tmp_path):
 
 def test_tick_length_changes_the_rendering(tmp_path):
     def render(name, **kw):
-        fig, ax = plt.subplots(figsize=(200, 150))
+        fig, ax = pp.subplots(figsize=(200, 150))
         ax.line([0, 1], [0, 10])
         ax.set(**kw)
         out = tmp_path / f"{name}.svg"
@@ -172,7 +172,7 @@ def test_tick_labels_stay_put_when_ticks_turn_inward(tmp_path):
     """The label band is measured against the default tick length, so pointing
     the ticks inward must not drag the labels onto the axis."""
     def label_xs(name, **kw):
-        fig, ax = plt.subplots(figsize=(240, 180))
+        fig, ax = pp.subplots(figsize=(240, 180))
         ax.line([0, 1], [0, 10])
         ax.set(**kw)
         out = tmp_path / f"{name}.svg"
@@ -183,6 +183,6 @@ def test_tick_labels_stay_put_when_ticks_turn_inward(tmp_path):
 
 
 def test_bad_tick_direction_is_rejected():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     with pytest.raises(ValueError, match="tick_direction"):
         ax.set(tick_direction="sideways")

@@ -14,7 +14,7 @@ test dependency) is needed.
 
 from __future__ import annotations
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 
 
@@ -23,7 +23,7 @@ def pdf_bytes(tmp_path):
     """Render a figure exercising body text *and* math, return its PDF bytes."""
 
     def render(**save_kwargs) -> bytes:
-        fig, ax = plt.subplots(figsize=(320, 240))
+        fig, ax = pp.subplots(figsize=(320, 240))
         ax.line([0, 1, 2, 3], [0, 1, 4, 9], label="series one")
         ax.set(title=r"Energy $E = mc^2$", xlabel="time (s)", ylabel="amplitude")
         ax.legend()
@@ -101,7 +101,7 @@ def test_markers_are_emitted_once_as_a_form_xobject(tmp_path):
     This is the invariant that keeps a large scatter export small; losing it
     would silently multiply file size by the point count.
     """
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.scatter(list(range(500)), list(range(500)))
     out = tmp_path / "markers.pdf"
     fig.save(str(out))
@@ -114,7 +114,7 @@ def test_markers_are_emitted_once_as_a_form_xobject(tmp_path):
 
 def test_svg_embeds_the_font_and_keeps_text(tmp_path):
     """The SVG backend's parallel promise: real ``<text>``, self-contained font."""
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.line([0, 1], [0, 1])
     ax.set(title="Selectable")
     out = tmp_path / "t.svg"

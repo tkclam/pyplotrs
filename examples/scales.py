@@ -2,9 +2,9 @@
 import datetime as dt
 import math
 
-import pyplotrs as plt
+import pyplotrs as pp
 
-fig, ((ax_log, ax_symlog), (ax_date, ax_cat)) = plt.subplots(2, 2, figsize=(620, 420))
+fig, ((ax_log, ax_symlog), (ax_date, ax_cat)) = pp.subplots(2, 2, figsize=(620, 420))
 
 xs = [1 + i * 0.5 for i in range(200)]
 ax_log.line(xs, [x ** 2 for x in xs], label="$x^2$")
@@ -22,7 +22,7 @@ day0 = dt.date(2026, 1, 1)
 days = [day0 + dt.timedelta(days=7 * i) for i in range(26)]
 ax_date.line(days, [20 + 8 * math.sin(i / 4) for i in range(26)])
 ax_date.set(title="date axis (automatic)", ylabel="°C",
-            xformatter=plt.ticker.DateFormatter("%b"))
+            xformatter=pp.ticker.DateFormatter("%b"))
 
 # String coordinates switch that axis to a categorical scale.
 ax_cat.bar(["ash", "birch", "cedar", "elm"], [12, 19, 7, 15])

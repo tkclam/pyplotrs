@@ -2,14 +2,14 @@
 import math
 import random
 
-import pyplotrs as plt
+import pyplotrs as pp
 
 random.seed(7)
 groups = [[random.gauss(mu, sd) for _ in range(200)]
           for mu, sd in [(0.0, 1.0), (1.2, 0.6), (0.4, 1.6)]]
 labels = ["control", "drug A", "drug B"]
 
-fig, (ax_box, ax_violin, ax_pie) = plt.subplots(1, 3, figsize=(660, 230))
+fig, (ax_box, ax_violin, ax_pie) = pp.subplots(1, 3, figsize=(660, 230))
 
 ax_box.boxplot(groups)
 ax_box.set(title="boxplot", ylabel="response", xticks=[1, 2, 3], xticklabels=labels)

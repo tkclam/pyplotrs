@@ -1,7 +1,7 @@
 """Histogram of a synthetic distribution."""
 import math
 
-import pyplotrs as plt
+import pyplotrs as pp
 
 
 # Box-Muller normal samples (no numpy dependency).
@@ -16,7 +16,7 @@ def normals(n, seed=1):
         out.append(math.sqrt(-2 * math.log(u1)) * math.cos(2 * math.pi * u2))
     return out
 
-fig, ax = plt.subplots()
+fig, ax = pp.subplots()
 ax.hist(normals(2000), bins=30, color="C4", density=True)
 ax.set(title="Histogram", xlabel="value", ylabel="density")
 fig.save("histogram.png")

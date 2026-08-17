@@ -26,7 +26,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-import pyplotrs as plt
+import pyplotrs as pp
 
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = ROOT / "examples"
@@ -38,10 +38,10 @@ BUNDLED_FONT = "Liberation Sans"
 
 
 def main() -> int:
-    plt.set_font_family(BUNDLED_FONT)
-    if plt.resolved_font_name() != BUNDLED_FONT:
+    pp.set_font_family(BUNDLED_FONT)
+    if pp.resolved_font_name() != BUNDLED_FONT:
         print(f"error: expected {BUNDLED_FONT!r}, resolved "
-              f"{plt.resolved_font_name()!r}", file=sys.stderr)
+              f"{pp.resolved_font_name()!r}", file=sys.stderr)
         return 1
 
     IMAGES.mkdir(parents=True, exist_ok=True)

@@ -26,12 +26,12 @@ with NumPy arrays or pandas/polars columns if you have them.
 ## Verify
 
 ```python
-import pyplotrs as plt
+import pyplotrs as pp
 
-fig, ax = plt.subplots()
+fig, ax = pp.subplots()
 ax.line([0, 1, 2], [0, 1, 4])
 fig.save("test.png")
-print(plt.resolved_font_name())   # the body font resolved on this machine
+print(pp.resolved_font_name())   # the body font resolved on this machine
 ```
 
 ## From source

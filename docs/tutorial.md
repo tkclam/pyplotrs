@@ -16,7 +16,7 @@ error of each measurement:
 
 ```python
 import math
-import pyplotrs as plt
+import pyplotrs as pp
 
 temp   = [280, 300, 320, 340, 360, 380, 400]
 rate_a = [0.112, 0.165, 0.276, 0.402, 0.655, 0.978, 1.551]
@@ -30,7 +30,7 @@ err_b  = [0.008, 0.011, 0.016, 0.026, 0.040, 0.066, 0.105]
 Before styling anything, see the numbers:
 
 ```python
-fig, ax = plt.subplots()
+fig, ax = pp.subplots()
 ax.line(temp, rate_a)
 fig
 ```
@@ -48,7 +48,7 @@ These are measurements with an uncertainty, so they want
 give both a `label`, and ask for a legend:
 
 ```python
-fig, ax = plt.subplots()
+fig, ax = pp.subplots()
 ax.errorbar(temp, rate_a, yerr=err_a, marker="o", label="catalyst A")
 ax.errorbar(temp, rate_b, yerr=err_b, marker="s", label="catalyst B")
 ax.legend()
@@ -86,7 +86,7 @@ fine = [280 + i for i in range(121)]
 curve = [model(t) for t in fine]
 band = [0.08 * y for y in curve]
 
-fig, ax = plt.subplots()
+fig, ax = pp.subplots()
 ax.fill_between(fine, [y - e for y, e in zip(curve, band)],
                 [y + e for y, e in zip(curve, band)],
                 color="C0", alpha=0.2, label="95% CI")
@@ -121,7 +121,7 @@ A residual strip under the main panel is the standard way to show how well the
 fit does. Two rows, sharing x, with the top panel three times as tall:
 
 ```python
-fig, (top, bottom) = plt.subplots(2, 1, figsize=(250, 260), sharex=True,
+fig, (top, bottom) = pp.subplots(2, 1, figsize=(250, 260), sharex=True,
                                   height_ratios=[3, 1])
 
 # ... the same four marks as before, on `top` ...
@@ -199,14 +199,14 @@ Nothing above is tied to one output style. The same figure code takes a
 `theme`, so the manuscript version and the slide version differ by one word:
 
 ```python
-fig, (top, bottom) = plt.subplots(2, 1, figsize=(250, 260), sharex=True,
+fig, (top, bottom) = pp.subplots(2, 1, figsize=(250, 260), sharex=True,
                                   height_ratios=[3, 1], theme="presentation")
 ```
 
 And a journal with a hard column width takes its units directly:
 
 ```python
-plt.subplots(figsize=(89, 120), units="mm")   # one Nature column
+pp.subplots(figsize=(89, 120), units="mm")   # one Nature column
 ```
 
 Because a theme is an argument rather than global state, two figures with

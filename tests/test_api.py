@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import inspect
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 from pyplotrs.axes import Axes, _AxesBase
 from pyplotrs.axes3d import Axes3D
@@ -84,7 +84,7 @@ def test_markersize_is_a_diameter_and_size_is_an_area():
     """matplotlib spells this two ways; pyplotrs settles on diameter but keeps
     accepting `size` as an area so ported code draws the right thing rather
     than 36 pt blobs."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.scatter([0], [0], size=36.0)
     ax.scatter([0], [0], markersize=6.0)
     assert ax._marks[0]["markersize"] == pytest.approx(6.0)
@@ -92,14 +92,14 @@ def test_markersize_is_a_diameter_and_size_is_an_area():
 
 
 def test_markersize_wins_when_both_are_given():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.scatter([0], [0], markersize=3.0, size=400.0)
     assert ax._marks[0]["markersize"] == pytest.approx(3.0)
 
 
 def test_line_and_scatter_agree_on_marker_size():
     """The whole point of the change: the same number means the same size."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1], [0, 1], marker="o", markersize=7.0)
     ax.scatter([0], [0], markersize=7.0)
     assert ax._marks[0]["markersize"] == ax._marks[1]["markersize"]
@@ -133,7 +133,7 @@ def test_alpha_is_accepted(name):
 def test_alpha_reaches_the_marks_colour(name, call):
     """Opacity is folded into the mark's RGBA, so it needs no separate plumbing
     through the draw branches - but it does have to actually be folded in."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     call(ax, 0.4)
     colors = [m["color"] for m in ax._marks if "color" in m]
     assert colors, f"{name} recorded no color"
@@ -141,13 +141,13 @@ def test_alpha_reaches_the_marks_colour(name, call):
 
 
 def test_alpha_of_one_leaves_the_colour_untouched():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1], [0, 1], alpha=1.0)
     assert ax._marks[0]["color"][3] == 255
 
 
 def test_alpha_reaches_the_svg(tmp_path):
-    fig, ax = plt.subplots(figsize=(200, 150))
+    fig, ax = pp.subplots(figsize=(200, 150))
     ax.line([0, 1], [0, 1], alpha=0.4, linewidth=6)
     out = tmp_path / "a.svg"
     fig.save(str(out))
@@ -180,14 +180,14 @@ def test_legend_default_position_is_per_class():
     assert Axes3D._LEGEND_DEFAULT_LOC == "upper right"
     assert PolarAxes._LEGEND_DEFAULT_LOC == "upper right"
 
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1], [0, 1], label="a")
     ax.legend()
     assert ax._legend["loc"] == "best"
 
 
 def test_colour_cycle_advances_once_per_mark():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     for _ in range(3):
         ax.line([0, 1], [0, 1])
     colors = [m["color"] for m in ax._marks]
@@ -195,16 +195,16 @@ def test_colour_cycle_advances_once_per_mark():
 
 
 def test_explicit_colour_does_not_consume_the_cycle():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1], [0, 1], color="red")
     ax.line([0, 1], [0, 1])
-    assert ax._marks[1]["color"] == plt.themes.default.palette[0]
+    assert ax._marks[1]["color"] == pp.themes.default.palette[0]
 
 
 def test_figure_legend_includes_every_projection(tmp_path):
     """The figure legend read `_marks` directly, so 3D panels - which keep their
     marks in `_marks3` - were silently skipped."""
-    fig = plt.figure(figsize=(600, 240))
+    fig = pp.figure(figsize=(600, 240))
     gs = fig.add_gridspec(1, 3)
     fig.add_subplot(gs[0, 0]).line([0, 1], [0, 1], label="2D")
     fig.add_subplot(gs[0, 1], projection="3d").plot([0, 1], [0, 1], [0, 1], label="3D")
@@ -218,7 +218,7 @@ def test_figure_legend_includes_every_projection(tmp_path):
 def test_2d_legend_entries_keep_their_kind():
     """`Axes` must not inherit the 3D/polar normalizer, which flattens every
     mark to a line and would turn bar swatches into rules."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.bar(["a"], [1], label="bars")
     ax.line([0, 1], [0, 1], label="line")
     kinds = [e["kind"] for e in ax._legend_entries()]
@@ -236,7 +236,7 @@ def test_best_picks_a_corner_clear_of_the_data(name, ys, expect_left, expect_top
     """`best` used to be a plain alias for `upper right`, so it happily sat on
     top of a rising line."""
     xs = [i / 20 for i in range(21)]
-    fig, ax = plt.subplots(figsize=(300, 220))
+    fig, ax = pp.subplots(figsize=(300, 220))
     ax.line(xs, ys, label=name)
     ax.legend()
 
@@ -258,7 +258,7 @@ def test_best_picks_a_corner_clear_of_the_data(name, ys, expect_left, expect_top
 def test_best_falls_back_without_a_projection():
     """Callers that have no projection (a figure-level legend) must still get a
     sane answer rather than an error."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1], [0, 1], label="a")
     positions = {"upper right": (9.0, 9.0), "upper left": (0.0, 0.0),
                  "lower right": (9.0, 0.0), "lower left": (0.0, 9.0),
@@ -268,7 +268,7 @@ def test_best_falls_back_without_a_projection():
 
 def test_best_probe_is_bounded_regardless_of_data_size():
     """The search runs at draw time, so it must not become an O(n) pass."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line(list(range(100_000)), list(range(100_000)), label="big")
 
     class _P:
@@ -280,7 +280,7 @@ def test_best_probe_is_bounded_regardless_of_data_size():
 
 
 def test_explicit_loc_is_still_honoured(tmp_path):
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.line([0, 1], [0, 1], label="a")
     ax.legend(loc="lower right")
     assert ax._legend["loc"] == "lower right"
@@ -309,8 +309,8 @@ def test_style_constants_do_not_shadow_the_theme(name):
 
 def test_polar_rim_follows_the_theme(tmp_path):
     """The outer spine circle read a module constant, so it ignored the theme."""
-    theme = plt.themes.default.with_(spine_color=(200, 30, 30, 255), spine_width=3.0)
-    fig, ax = plt.subplots(figsize=(240, 240), projection="polar", theme=theme)
+    theme = pp.themes.default.with_(spine_color=(200, 30, 30, 255), spine_width=3.0)
+    fig, ax = pp.subplots(figsize=(240, 240), projection="polar", theme=theme)
     ax.plot([0, 1, 2, 3], [1, 2, 1, 2])
     out = tmp_path / "p.svg"
     fig.save(str(out))
@@ -320,8 +320,8 @@ def test_polar_rim_follows_the_theme(tmp_path):
 
 def test_colormapped_scatter_placeholder_follows_the_theme():
     """Its per-point colors replace this, but it is still the legend swatch."""
-    theme = plt.themes.default.with_(text_color=(10, 20, 30, 255))
-    fig, ax = plt.subplots(theme=theme)
+    theme = pp.themes.default.with_(text_color=(10, 20, 30, 255))
+    fig, ax = pp.subplots(theme=theme)
     ax.scatter([0, 1], [0, 1], c=[0.0, 1.0])
     assert ax._marks[0]["color"] == (10, 20, 30, 255)
 
@@ -344,14 +344,14 @@ def test_zorder_is_accepted(name):
 def test_default_zorder_preserves_insertion_order():
     """Insertion order is the primary model - it is the one you can read off the
     code - so the sort must be stable and a no-op when nobody sets zorder."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     for i in range(5):
         ax.line([0, 1], [i, i])
     assert ax._ordered_marks() == ax._marks
 
 
 def test_zorder_lifts_a_mark_above_later_ones():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1], [0, 1], zorder=2)          # added first, drawn last
     ax.fill_between([0, 1], [0, 1], 0, zorder=1)
     order = [m["kind"] for m in ax._ordered_marks()]
@@ -359,7 +359,7 @@ def test_zorder_lifts_a_mark_above_later_ones():
 
 
 def test_zorder_ties_keep_insertion_order():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.bar([0], [1], zorder=1)
     ax.line([0, 1], [0, 1], zorder=1)
     ax.scatter([0], [0], zorder=1)
@@ -368,7 +368,7 @@ def test_zorder_ties_keep_insertion_order():
 
 def test_zorder_changes_the_rendered_output(tmp_path):
     def render(name, line_z, fill_z):
-        fig, ax = plt.subplots(figsize=(240, 180))
+        fig, ax = pp.subplots(figsize=(240, 180))
         ax.line([0, 1, 2], [0, 2, 1], linewidth=6, zorder=line_z)
         ax.fill_between([0, 1, 2], [0, 2, 1], 0, alpha=1.0, color="C1", zorder=fill_z)
         out = tmp_path / f"{name}.png"
@@ -391,14 +391,14 @@ def test_polar_marks_take_zorder(name):
 
 
 def test_polar_zorder_lifts_a_mark_above_later_ones():
-    fig, ax = plt.subplots(projection="polar")
+    fig, ax = pp.subplots(projection="polar")
     ax.plot([0, 1], [1, 2], zorder=2)          # added first, drawn last
     ax.scatter([0, 1], [1, 2], zorder=1)
     assert [m["kind"] for m in ax._ordered_marks()] == ["scatter", "line"]
 
 
 def test_polar_default_zorder_preserves_insertion_order():
-    fig, ax = plt.subplots(projection="polar")
+    fig, ax = pp.subplots(projection="polar")
     for i in range(4):
         ax.plot([0, 1], [i, i + 1])
     assert ax._ordered_marks() == ax._marks
@@ -406,7 +406,7 @@ def test_polar_default_zorder_preserves_insertion_order():
 
 def test_polar_zorder_changes_the_rendered_output(tmp_path):
     def render(name, z):
-        fig, ax = plt.subplots(figsize=(220, 170), projection="polar")
+        fig, ax = pp.subplots(figsize=(220, 170), projection="polar")
         ax.plot([0, 1, 2, 3], [1, 2, 3, 4], color="red", linewidth=8, zorder=z)
         ax.plot([0, 1, 2, 3], [4, 3, 2, 1], color="blue", linewidth=8)
         out = tmp_path / f"{name}.png"
@@ -466,7 +466,7 @@ _LABELLED = [
 
 @pytest.mark.parametrize("name,call", _LABELLED)
 def test_a_labelled_mark_produces_a_legend_entry(name, call):
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     call(ax)
     assert len(ax._legend_entries()) == 1, f"{name} label did not reach the legend"
 
@@ -476,14 +476,14 @@ def test_a_labelled_mark_produces_a_legend_entry(name, call):
 def test_a_labelled_mark_renders_its_legend(name, call, ext, tmp_path):
     """The legend glyph drawer has per-kind branches; a kind it does not know
     used to raise mid-render rather than degrade."""
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     call(ax)
     ax.legend()
     fig.save(str(tmp_path / f"{name}.{ext}"))
 
 
 def test_pie_wedges_become_one_legend_entry_each():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.pie([1, 2, 3], labels=["a", "b", "c"])
     assert [e["label"] for e in ax._legend_entries()] == ["a", "b", "c"]
 
@@ -588,7 +588,7 @@ def test_every_public_axes_method_is_classified():
 def test_every_mark_records_a_mark(name):
     """Grounds the classification: a `_MARK_CALLS` entry that draws nothing
     would make every other test in this section vacuous."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     _MARK_CALLS[name](ax)
     assert ax._marks, f"{name} recorded no mark"
 
@@ -603,7 +603,7 @@ def test_alpha_is_applied_not_merely_accepted(name, tmp_path):
     honors it until you actually rasterize both.
     """
     def render(a):
-        fig, ax = plt.subplots(figsize=(180, 140))
+        fig, ax = pp.subplots(figsize=(180, 140))
         _MARK_CALLS[name](ax, alpha=a)
         out = tmp_path / f"{name}_{a}.png"
         fig.save(str(out))
@@ -614,7 +614,7 @@ def test_alpha_is_applied_not_merely_accepted(name, tmp_path):
 
 @pytest.mark.parametrize("name", sorted(set(_MARK_CALLS) - _NO_SINGULAR_LABEL))
 def test_every_mark_label_reaches_the_legend(name):
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     _MARK_CALLS[name](ax, label="L")
     assert "L" in ax.get_legend_handles_labels()[1], (
         f"{name} accepted label= but it never reached the legend"
@@ -625,7 +625,7 @@ def test_every_mark_label_reaches_the_legend(name):
 def test_every_labelled_mark_renders_its_legend(name, tmp_path):
     """`surface(label=...)` + `legend()` raised `KeyError: 'color'` for a whole
     release because no test drew the legend it had just asked for."""
-    fig, ax = plt.subplots(figsize=(180, 140))
+    fig, ax = pp.subplots(figsize=(180, 140))
     _MARK_CALLS[name](ax, label="L")
     ax.legend()
     fig.save(str(tmp_path / f"{name}.png"))
@@ -633,13 +633,13 @@ def test_every_labelled_mark_renders_its_legend(name, tmp_path):
 
 @pytest.mark.parametrize("name", sorted(_MARK_CALLS))
 def test_every_mark_honours_zorder(name):
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     _MARK_CALLS[name](ax, zorder=3)
     assert all(m["zorder"] == 3 for m in ax._marks), f"{name} dropped zorder"
 
 
 def test_stackplot_labels_each_series():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.stackplot([0, 1, 2], [1, 2, 3], [2, 1, 2], labels=["a", "b"])
     assert ax.get_legend_handles_labels()[1] == ["a", "b"]
 
@@ -651,7 +651,7 @@ def test_the_mark_dict_never_stores_a_stroke_under_width():
     mark contract kept both under `"width"` - the same collision, one layer
     down, disambiguated only by `kind`. `width` is now the data-space extent
     everywhere and the stroke is always `linewidth`."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1], [0, 1], linewidth=3.0)
     ax.errorbar([0, 1], [0, 1], yerr=0.1, linewidth=3.0)
     ax.eventplot([[1, 2]], linewidth=3.0)
@@ -662,7 +662,7 @@ def test_the_mark_dict_never_stores_a_stroke_under_width():
 
 
 def test_width_in_the_mark_dict_is_always_a_data_extent():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.bar([0], [1], width=0.5)
     ax.boxplot([[1, 2, 3]], widths=0.4)
     ax.violinplot([[1, 2, 3]], widths=0.4)
@@ -686,7 +686,7 @@ def test_theme_line_width_reaches_every_stroke_mark(name, call):
     """`errorbar`, `eventplot` and `contour` hardcoded their stroke, so a theme
     could not restyle them - the same leak Phase 5 found in the style
     constants, in the marks it did not touch."""
-    fig, ax = plt.subplots(theme=plt.Theme(line_width=6.0))
+    fig, ax = pp.subplots(theme=pp.Theme(line_width=6.0))
     call(ax)
     assert ax._marks[0]["linewidth"] == pytest.approx(6.0), (
         f"{name} ignored theme.line_width"
@@ -710,7 +710,7 @@ def test_every_axes_class_writes_through_set(cls):
 
 
 def test_polar_set_still_covers_everything_the_wrappers_did():
-    fig, ax = plt.subplots(projection="polar")
+    fig, ax = pp.subplots(projection="polar")
     ax.set(title="t", rmin=0.0, rmax=2.0, rticks=[1, 2], thetagrids=[0, 90],
            theta_zero_location="N", theta_direction=-1, rlabel_position=45.0)
     assert ax._rmax == pytest.approx(2.0)

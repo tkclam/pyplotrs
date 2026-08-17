@@ -7,6 +7,10 @@ differences, so you can port a script without guessing.
 If a name exists in both libraries it means the same thing. The differences
 below are the ones worth knowing before you start.
 
+Throughout the documentation pyplotrs is imported as `pp`, and `plt` is left to
+mean `matplotlib.pyplot`. On this page in particular that is what lets the two
+libraries share a code block without a caption saying which is which.
+
 !!! tip "See it rather than read it"
     The [coming-from-matplotlib notebook](notebooks/02_from_matplotlib.ipynb)
     is this page with the pictures: ten plot types rendered by both libraries
@@ -28,8 +32,8 @@ plt.xlabel("x")
 plt.savefig("out.png")
 
 # pyplotrs
-import pyplotrs as plt
-fig, ax = plt.subplots()
+import pyplotrs as pp
+fig, ax = pp.subplots()
 ax.line(xs, ys)
 ax.set(xlabel="x")
 fig.save("out.png")
@@ -80,7 +84,7 @@ fig.save("out.pdf", tagged=True)        # accessible, tagged PDF
 
 | matplotlib | pyplotrs |
 |---|---|
-| `plt.subplots(...)` | `plt.subplots(...)` — same, plus `theme=`, `units=` |
+| `plt.subplots(...)` | `pp.subplots(...)` — same signature, plus `theme=`, `units=` |
 | `ax.plot(x, y)` | `ax.line(x, y)` |
 | `ax.plot(x, y, "o")` | `ax.line(x, y, marker="o", linestyle="none")` or `ax.scatter(x, y)` |
 | `ax.scatter(x, y, s=36)` | `ax.scatter(x, y, markersize=6)` (or `size=36`) |
@@ -98,9 +102,9 @@ fig.save("out.pdf", tagged=True)        # accessible, tagged PDF
 | `fig.suptitle("…")` | `fig.set(suptitle="…")` |
 | `fig.savefig("f.png", dpi=300)` | `fig.save("f.png", dpi=300)` |
 | `fig.tight_layout()` | *not needed* — layout is solved before drawing |
-| `plt.style.use("seaborn")` | `plt.subplots(theme="nature")` or a `Theme` |
-| `rcParams["font.sans-serif"]` | `plt.set_font_family(...)` |
-| `rcParams["axes.unicode_minus"]` | `plt.set_unicode_minus(...)` |
+| `plt.style.use("seaborn")` | `pp.subplots(theme="nature")` or a `Theme` |
+| `rcParams["font.sans-serif"]` | `pp.set_font_family(...)` |
+| `rcParams["axes.unicode_minus"]` | `pp.set_unicode_minus(...)` |
 | `ax.plot_surface(X, Y, Z)` | `ax.surface(X, Y, Z)` |
 | `ax.pcolor` / `pcolormesh` | same names |
 | `plt.show()` | — (a `Figure` displays itself in a notebook) |
@@ -132,8 +136,8 @@ reasoned about against its font scale. The default 250×200 pt is one journal
 column wide. Pass `units="in"` to keep matplotlib's numbers:
 
 ```python
-plt.subplots(figsize=(4, 3), units="in")   # matplotlib's default-ish size
-plt.subplots(figsize=(89, 60), units="mm")
+pp.subplots(figsize=(4, 3), units="in")   # matplotlib's default-ish size
+pp.subplots(figsize=(89, 60), units="mm")
 ```
 
 ## Styling is a theme, not global config
@@ -142,8 +146,8 @@ There is no `rcParams` and no `style.use`. A [`Theme`][pyplotrs.theme.Theme] is
 an immutable object you pass in, and `with_` derives a variant:
 
 ```python
-mine = plt.themes.default.with_(grid=True, line_width=2.0, title_weight="bold")
-fig, ax = plt.subplots(theme=mine)
+mine = pp.themes.default.with_(grid=True, line_width=2.0, title_weight="bold")
+fig, ax = pp.subplots(theme=mine)
 ```
 
 Because it is an argument rather than global state, two figures in one script

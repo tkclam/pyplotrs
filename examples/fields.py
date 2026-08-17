@@ -1,6 +1,6 @@
 """Vector-field and matrix plot types: quiver, streamplot, stackplot, spy."""
 
-import pyplotrs as plt
+import pyplotrs as pp
 
 N = 21
 xc = [-3 + 6 * j / (N - 1) for j in range(N)]
@@ -9,7 +9,7 @@ yc = [-3 + 6 * i / (N - 1) for i in range(N)]
 U = [[-yc[i] for _ in range(N)] for i in range(N)]
 V = [[xc[j] for j in range(N)] for _ in range(N)]
 
-fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(720, 560))
+fig, axes = pp.subplots(nrows=2, ncols=2, figsize=(720, 560))
 (ax_stream, ax_quiver), (ax_stack, ax_spy) = axes
 
 ax_stream.streamplot(xc, yc, U, V, density=1.1)

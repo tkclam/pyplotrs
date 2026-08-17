@@ -4,9 +4,9 @@ Every figure is an explicit object; there is no current-figure state and no
 ``pyplot`` module-level drawing surface, so two figures (or two threads) never
 interfere::
 
-    import pyplotrs as plt
+    import pyplotrs as pp
 
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1, 2, 3], [0, 1, 4, 9], label="y = x^2")
     ax.set(title="Hello", xlabel="x", ylabel="y")
     ax.legend()

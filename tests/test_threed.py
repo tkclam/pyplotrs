@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 from pyplotrs import _pyplotrs_core as _core
 from pyplotrs import threed as _threed
@@ -77,7 +77,7 @@ def test_project3d_handles_an_empty_mark():
 
 def test_line_depthsort_defaults_on():
     import inspect
-    sig = inspect.signature(plt.Axes3D.plot).parameters
+    sig = inspect.signature(pp.Axes3D.plot).parameters
     assert sig["depthsort"].default is True
 
 
@@ -88,7 +88,7 @@ def test_depthsort_off_emits_one_path_per_line(tmp_path):
     hx, hy, hz = _helix(300)
 
     def paths(depthsort):
-        fig, ax = plt.subplots(figsize=(260, 200), projection="3d")
+        fig, ax = pp.subplots(figsize=(260, 200), projection="3d")
         ax.plot(hx, hy, hz, depthsort=depthsort)
         out = tmp_path / f"ds_{depthsort}.svg"
         fig.save(str(out))
@@ -109,7 +109,7 @@ def test_depthsort_changes_occlusion(tmp_path):
     Z = [[0.5] * k for _ in range(k)]
 
     def render(depthsort):
-        fig, ax = plt.subplots(figsize=(240, 200), projection="3d")
+        fig, ax = pp.subplots(figsize=(240, 200), projection="3d")
         ax.surface(X, Y, Z)
         ax.plot(hx, hy, hz, depthsort=depthsort, color="C3")
         out = tmp_path / f"occl_{depthsort}.png"
@@ -122,7 +122,7 @@ def test_depthsort_changes_occlusion(tmp_path):
 @pytest.mark.parametrize("ext", ["png", "svg", "pdf"])
 def test_unsorted_line_renders_everywhere(ext, tmp_path):
     hx, hy, hz = _helix(120)
-    fig, ax = plt.subplots(figsize=(240, 200), projection="3d")
+    fig, ax = pp.subplots(figsize=(240, 200), projection="3d")
     ax.plot(hx, hy, hz, depthsort=False)
     fig.save(str(tmp_path / f"u.{ext}"))
 
@@ -130,7 +130,7 @@ def test_unsorted_line_renders_everywhere(ext, tmp_path):
 def test_line3d_alpha_reaches_the_colour():
     """`Axes3D.plot` took an `alpha` and dropped it: the color came from
     `_next_color`, which does not fold opacity in."""
-    fig, ax = plt.subplots(projection="3d")
+    fig, ax = pp.subplots(projection="3d")
     ax.plot([0, 1], [0, 1], [0, 1], alpha=0.4)
     assert ax._marks3[0]["color"][3] < 255
 
@@ -144,7 +144,7 @@ def test_3d_mark_alpha_reaches_the_colour(kind):
     """`surface`/`bar3d`/`wireframe`/`contour3d`/`quiver3d`/`voxels` all used
     `_next_color`, which drops opacity - the same bug `plot` had, just never
     checked on the marks Phase 7a restored."""
-    fig, ax = plt.subplots(projection="3d")
+    fig, ax = pp.subplots(projection="3d")
     if kind == "bar3d":
         ax.bar3d([0], [0], [0], [1], [1], [1], alpha=0.4)
     elif kind == "wireframe":
@@ -171,7 +171,7 @@ def test_colormapped_3d_mark_label_reaches_the_legend(kind, tmp_path):
     X = [[-1.0 + 2.0 * j / (k - 1) for j in range(k)] for _ in range(k)]
     Y = [[-1.0 + 2.0 * i / (k - 1)] * k for i in range(k)]
     Z = [[X[i][j] + Y[i][j] for j in range(k)] for i in range(k)]
-    fig, ax = plt.subplots(figsize=(240, 200), projection="3d")
+    fig, ax = pp.subplots(figsize=(240, 200), projection="3d")
     if kind == "surface":
         ax.surface(X, Y, Z, label="surf")
     else:
@@ -194,7 +194,7 @@ def test_vertex_heavy_marks_render(kind, tmp_path):
     X = [[-2 + 4 * j / (k - 1) for j in range(k)] for _ in range(k)]
     Y = [[-2 + 4 * i / (k - 1)] * k for i in range(k)]
     Z = [[math.sin(X[i][j]) * math.cos(Y[i][j]) for j in range(k)] for i in range(k)]
-    fig, ax = plt.subplots(figsize=(240, 200), projection="3d")
+    fig, ax = pp.subplots(figsize=(240, 200), projection="3d")
     if kind == "surface":
         ax.surface(X, Y, Z)
     elif kind == "wireframe":

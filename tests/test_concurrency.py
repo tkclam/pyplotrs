@@ -30,7 +30,7 @@ import threading
 import time
 from array import array
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 from pyplotrs import _pyplotrs_core as _core
 
@@ -55,7 +55,7 @@ def test_concurrent_rendering_is_deterministic():
     from concurrent.futures import ThreadPoolExecutor
 
     def one(_i):
-        fig, ax = plt.subplots(figsize=(240, 180))
+        fig, ax = pp.subplots(figsize=(240, 180))
         ax.line([0, 1, 2, 3], [0, 1, 4, 9])
         ax.set(title="determinism", xlabel="x")
         return hashlib.sha256(_save_bytes(fig)).hexdigest()
@@ -74,7 +74,7 @@ def test_many_figures_across_threads_all_render():
 
 
 def _build(seed: int):
-    fig, ax = plt.subplots(figsize=(320, 240))
+    fig, ax = pp.subplots(figsize=(320, 240))
     xs = [i / 50 for i in range(200)]
     ax.line(xs, [math.sin((seed % 5 + 1) * x) for x in xs], label=f"s{seed}")
     ax.set(title=f"panel {seed}")

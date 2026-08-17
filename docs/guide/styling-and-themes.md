@@ -8,9 +8,9 @@ scale, spines, grid, default line weights, legend colors. There is **no global
 every axes.
 
 ```python
-import pyplotrs as plt
+import pyplotrs as pp
 
-fig, ax = plt.subplots(theme="presentation")
+fig, ax = pp.subplots(theme="presentation")
 ax.line(xs, ys)
 ```
 
@@ -40,14 +40,14 @@ Built-in presets (pass the name, or `pyplotrs.themes.<name>`):
 a copy with changes applied:
 
 ```python
-import pyplotrs as plt
+import pyplotrs as pp
 
-mine = plt.themes.default.with_(
+mine = pp.themes.default.with_(
     grid=True,
     line_width=2.0,
     axes_facecolor=(248, 248, 248, 255),
 )
-fig, ax = plt.subplots(theme=mine)
+fig, ax = pp.subplots(theme=mine)
 ```
 
 Because a theme is a value rather than global config, two figures in the same
@@ -105,7 +105,7 @@ The default palette is **Okabe-Ito**, a colorblind-safe categorical set. Swap in
 any of the [built-in palettes](colormaps-and-images.md#categorical-palettes):
 
 ```python
-mine = plt.themes.default.with_(palette=plt.palettes.get("tab10"))
+mine = pp.themes.default.with_(palette=pp.palettes.get("tab10"))
 ```
 
 ## Fonts
@@ -115,12 +115,12 @@ falling back to the bundled **Liberation Sans** (Arial-metric-compatible). It is
 matplotlib's `font.sans-serif` behavior, and configurable:
 
 ```python
-import pyplotrs as plt
+import pyplotrs as pp
 
-plt.set_font_family("Calibri", "Arial")     # try Calibri, then Arial, then fallback
-plt.get_font_family()                       # the current preference list
-plt.resolved_font_name()                    # what it actually resolves to here
-plt.set_font_family()                       # reset to the default
+pp.set_font_family("Calibri", "Arial")     # try Calibri, then Arial, then fallback
+pp.get_font_family()                       # the current preference list
+pp.resolved_font_name()                    # what it actually resolves to here
+pp.set_font_family()                       # reset to the default
 ```
 
 Whichever font is chosen is **embedded into every saved figure** (PDF/SVG/PNG and
@@ -144,8 +144,8 @@ The figure's own chrome is a theme choice, since bold panel titles are a
 document-wide decision rather than a per-call one:
 
 ```python
-journal = plt.themes.nature.with_(title_weight="bold")
-fig, ax = plt.subplots(theme=journal)
+journal = pp.themes.nature.with_(title_weight="bold")
+fig, ax = pp.subplots(theme=journal)
 ```
 
 Each face is embedded as its own subset, so a figure using all four carries four
@@ -158,7 +158,7 @@ face landed on — two selectors reporting the same name means the host has no
 distinct face for one of them:
 
 ```python
-plt.resolved_font_variants()
+pp.resolved_font_variants()
 # [('body', 'ArialMT'), ('body-bold', 'Arial-BoldMT'),
 #  ('body-italic', 'Arial-ItalicMT'), ('body-bolditalic', 'Arial-BoldItalicMT')]
 ```
@@ -177,8 +177,8 @@ also what `$...$` math has always used, so a linear axis and a log axis' `$10^{-
 read the same.
 
 ```python
-plt.set_unicode_minus(False)   # back to ASCII "-"
-plt.get_unicode_minus()        # the current setting
+pp.set_unicode_minus(False)   # back to ASCII "-"
+pp.get_unicode_minus()        # the current setting
 ```
 
 Turn it off if labels must survive being copied out of a saved SVG or PDF and

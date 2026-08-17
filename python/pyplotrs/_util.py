@@ -1138,7 +1138,7 @@ _MATPLOTLIB_EQUIVALENTS = {
     "set_xticklabels": "ax.set(xticklabels=[...])",
     "set_yticklabels": "ax.set(yticklabels=[...])",
     "set_aspect": 'ax.set(aspect="equal")',
-    "set_facecolor": "a Theme: plt.subplots(theme=plt.themes.default.with_(...))",
+    "set_facecolor": "a Theme: pp.subplots(theme=pp.themes.default.with_(...))",
     "grid": "ax.set(grid=True)",
     "tick_params": "ax.set(tick_direction=..., tick_length=...)",
     # figure-level

@@ -16,14 +16,14 @@ from __future__ import annotations
 import re
 import subprocess
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 
 # -- text rotation ------------------------------------------------------------
 
 def test_rotation_changes_the_output(tmp_path):
     def render(name, rot):
-        fig, ax = plt.subplots(figsize=(220, 160))
+        fig, ax = pp.subplots(figsize=(220, 160))
         ax.line([0, 1], [0, 1])
         ax.text(0.5, 0.5, "hello", rotation=rot)
         out = tmp_path / f"{name}.png"
@@ -36,7 +36,7 @@ def test_rotation_changes_the_output(tmp_path):
 def test_unrotated_text_emits_no_transform(tmp_path):
     """Rotation must cost nothing when it is not used: `rotation=0` has to take
     the same path as before, or every existing figure changes."""
-    fig, ax = plt.subplots(figsize=(220, 160))
+    fig, ax = pp.subplots(figsize=(220, 160))
     ax.line([0, 1], [0, 1])
     ax.text(0.5, 0.5, "hello")
     out = tmp_path / "flat.svg"
@@ -47,7 +47,7 @@ def test_unrotated_text_emits_no_transform(tmp_path):
 
 
 def test_rotated_text_is_a_group_transform_in_svg(tmp_path):
-    fig, ax = plt.subplots(figsize=(220, 160))
+    fig, ax = pp.subplots(figsize=(220, 160))
     ax.line([0, 1], [0, 1])
     ax.text(0.5, 0.5, "hello", rotation=90)
     svg = (tmp_path / "r.svg")
@@ -59,7 +59,7 @@ def test_rotated_text_stays_selectable_in_pdf(tmp_path):
     """The point of the group-transform approach rather than outlining."""
     if not subprocess.run(["which", "pdftotext"], capture_output=True).stdout:
         pytest.skip("pdftotext not available")
-    fig, ax = plt.subplots(figsize=(300, 220))
+    fig, ax = pp.subplots(figsize=(300, 220))
     ax.line([0, 1], [0, 1])
     ax.text(0.5, 0.5, "ROTATED", rotation=90)
     out = tmp_path / "r.pdf"
@@ -71,7 +71,7 @@ def test_rotated_text_stays_selectable_in_pdf(tmp_path):
 
 @pytest.mark.parametrize("rot", [0, 30, 90, -45, 180])
 def test_rotation_renders_at_any_angle(rot, tmp_path):
-    fig, ax = plt.subplots(figsize=(220, 160))
+    fig, ax = pp.subplots(figsize=(220, 160))
     ax.line([0, 1], [0, 1])
     ax.text(0.5, 0.5, "x", rotation=rot)
     ax.annotate("a", (0.5, 0.5), xytext=(0.2, 0.8), rotation=rot)
@@ -97,7 +97,7 @@ def test_ncol_makes_the_box_wider_and_shorter():
 
 
 def test_ncol_renders(tmp_path):
-    fig, ax = plt.subplots(figsize=(320, 240))
+    fig, ax = pp.subplots(figsize=(320, 240))
     _multi(ax)
     ax.legend(ncol=3)
     fig.save(str(tmp_path / "ncol.png"))
@@ -115,7 +115,7 @@ def test_legend_title_grows_the_box():
 
 def test_frameon_false_drops_the_box(tmp_path):
     def render(name, frameon):
-        fig, ax = plt.subplots(figsize=(280, 200))
+        fig, ax = pp.subplots(figsize=(280, 200))
         _multi(ax, 3)
         ax.legend(frameon=frameon)
         out = tmp_path / f"{name}.svg"
@@ -138,7 +138,7 @@ def test_legend_fontsize_overrides_the_theme():
 
 
 def test_figure_legend_takes_the_same_options(tmp_path):
-    fig, axes = plt.subplots(ncols=2, figsize=(420, 200))
+    fig, axes = pp.subplots(ncols=2, figsize=(420, 200))
     for ax in axes:
         _multi(ax, 3)
     fig.legend(ncol=2, title="All", frameon=False)
@@ -151,7 +151,7 @@ _GRID = [[i * j for j in range(8)] for i in range(6)]
 
 
 def test_horizontal_colorbar_renders(tmp_path):
-    fig, ax = plt.subplots(figsize=(320, 260))
+    fig, ax = pp.subplots(figsize=(320, 260))
     m = ax.imshow(_GRID)
     fig.colorbar(m, label="v", orientation="horizontal")
     fig.save(str(tmp_path / "h.png"))
@@ -161,7 +161,7 @@ def test_horizontal_colorbar_reserves_a_bottom_band():
     """It gets its own band beneath the x-axis label, so the plot area has to
     shrink vertically rather than horizontally."""
     from pyplotrs import _pyplotrs_core as _core
-    fig, ax = plt.subplots(figsize=(320, 260))
+    fig, ax = pp.subplots(figsize=(320, 260))
     m = ax.imshow(_GRID)
     fig.colorbar(m, orientation="horizontal")
     scene = _core.Scene(320.0, 260.0)
@@ -172,7 +172,7 @@ def test_horizontal_colorbar_reserves_a_bottom_band():
 
 def test_vertical_colorbar_still_reserves_width():
     from pyplotrs import _pyplotrs_core as _core
-    fig, ax = plt.subplots(figsize=(320, 260))
+    fig, ax = pp.subplots(figsize=(320, 260))
     m = ax.imshow(_GRID)
     fig.colorbar(m)
     scene = _core.Scene(320.0, 260.0)
@@ -182,7 +182,7 @@ def test_vertical_colorbar_still_reserves_width():
 
 def test_shrink_changes_the_output(tmp_path):
     def render(name, **kw):
-        fig, ax = plt.subplots(figsize=(300, 240))
+        fig, ax = pp.subplots(figsize=(300, 240))
         m = ax.imshow(_GRID)
         fig.colorbar(m, **kw)
         out = tmp_path / f"{name}.svg"
@@ -207,7 +207,7 @@ def test_colorbar_format_applies():
 
 
 def test_colorbar_rejects_a_bad_orientation():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     m = ax.imshow(_GRID)
     with pytest.raises(ValueError, match="orientation"):
         fig.colorbar(m, orientation="diagonal")

@@ -156,7 +156,7 @@ not the ASCII hyphen (`-2`), so a column of negative tick labels stays aligned
 and matches what `$...$` math has always drawn. Formatters that hand back a
 string you supplied — `FixedFormatter`, `FuncFormatter`, `StrMethodFormatter`,
 `DateFormatter` — pass it through untouched, so `"%Y-%m-%d"` keeps its hyphens.
-Turn the substitution off globally with `plt.set_unicode_minus(False)`; see
+Turn the substitution off globally with `pp.set_unicode_minus(False)`; see
 [styling & themes](styling-and-themes.md#the-minus-sign).
 
 ## Grids
@@ -165,7 +165,7 @@ The grid is a theme choice, overridable per axes:
 
 ```python
 ax.set(grid=True)
-mine = plt.themes.default.with_(grid=True, grid_color=(220, 220, 220, 255))
+mine = pp.themes.default.with_(grid=True, grid_color=(220, 220, 220, 255))
 ```
 
 ## Color scales: norms

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 from pyplotrs.theme import parse_color
 
@@ -22,7 +22,7 @@ def test_float_rgb_is_not_truncated_to_black():
     color silently collapsed to black with no error - the worst kind of bug for
     someone porting a script over.
     """
-    palette = plt.themes.default.palette
+    palette = pp.themes.default.palette
     assert parse_color((0.2, 0.4, 0.6), palette) == (51, 102, 153, 255)
     assert parse_color((1.0, 0.0, 0.0), palette) == (255, 0, 0, 255)
     assert parse_color((0.5, 0.5, 0.5), palette) == (128, 128, 128, 255)
@@ -31,14 +31,14 @@ def test_float_rgb_is_not_truncated_to_black():
 
 def test_byte_rgb_still_works():
     """Byte tuples must keep their meaning; the two conventions have to coexist."""
-    palette = plt.themes.default.palette
+    palette = pp.themes.default.palette
     assert parse_color((255, 0, 0), palette) == (255, 0, 0, 255)
     assert parse_color((0, 114, 178, 255), palette) == (0, 114, 178, 255)
     assert parse_color((12, 34, 56), palette) == (12, 34, 56, 255)
 
 
 def test_hex_and_named_colors_are_accepted():
-    palette = plt.themes.default.palette
+    palette = pp.themes.default.palette
     assert parse_color("#ff0000", palette) == (255, 0, 0, 255)
     assert parse_color("#f00", palette) == (255, 0, 0, 255)
     assert parse_color("#0072b280", palette) == (0, 114, 178, 128)
@@ -47,13 +47,13 @@ def test_hex_and_named_colors_are_accepted():
 
 
 def test_palette_indices_still_resolve_against_the_theme():
-    assert parse_color("C0", plt.themes.default.palette) == (0, 114, 178, 255)
-    assert parse_color("C0", plt.themes.grayscale.palette) == (0, 0, 0, 255)
+    assert parse_color("C0", pp.themes.default.palette) == (0, 114, 178, 255)
+    assert parse_color("C0", pp.themes.grayscale.palette) == (0, 0, 0, 255)
 
 
 def test_unknown_color_string_still_raises():
     with pytest.raises(ValueError):
-        parse_color("not-a-color", plt.themes.default.palette)
+        parse_color("not-a-color", pp.themes.default.palette)
 
 
 # -- legend ------------------------------------------------------------------
@@ -64,7 +64,7 @@ def test_barh_with_label_and_legend(tmp_path):
     The legend glyph dispatcher fell through to its line branch, which reads a
     key the barh mark never sets.
     """
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.barh([0, 1, 2], [3, 5, 2], label="values")
     ax.legend()
     fig.save(str(tmp_path / "barh.png"))
@@ -75,7 +75,7 @@ def test_legend_swatch_matches_the_theme_type_size(theme, tmp_path):
     """The legend box was *measured* at ``theme.legend_size`` but its swatches
     were *drawn* at a hardcoded 9.0 pt, so any theme with a different legend
     size mismatched."""
-    fig, ax = plt.subplots(figsize=(240, 180), theme=theme)
+    fig, ax = pp.subplots(figsize=(240, 180), theme=theme)
     ax.line([0, 1], [0, 1], label="a")
     ax.legend()
     fig.save(str(tmp_path / f"{theme}.png"))
@@ -93,7 +93,7 @@ def test_errorbar_draws_line_and_markers_on_a_log_axis(tmp_path):
     equivalent ``line`` call, which always worked.
     """
     def count_marks(scale):
-        fig, ax = plt.subplots(figsize=(240, 180))
+        fig, ax = pp.subplots(figsize=(240, 180))
         ax.errorbar([1, 10, 100], [10, 100, 1000], yerr=[1, 10, 100])
         ax.set(yscale=scale, xscale=scale)
         out = tmp_path / f"err_{scale}.svg"
@@ -116,7 +116,7 @@ def test_errorbar_respects_log_positions(tmp_path):
     """The connecting line must be drawn through log-transformed positions, not
     linear ones. On a log axis with decade-spaced data the polyline is straight,
     so its midpoint sits at the vertical center of the plot area."""
-    fig, ax = plt.subplots(figsize=(300, 300))
+    fig, ax = pp.subplots(figsize=(300, 300))
     ax.errorbar([1, 10, 100], [1, 10, 100], yerr=[0.1, 1, 10])
     ax.set(xscale="log", yscale="log")
     out = tmp_path / "logpos.svg"
@@ -129,8 +129,8 @@ def test_errorbar_respects_log_positions(tmp_path):
 def test_hist_bar_edges_follow_the_theme(tmp_path):
     """``hist`` hardcoded white bar separators, which disappear against any
     theme with a light plot background of its own - and look wrong on dark."""
-    dark = plt.themes.default.with_(axes_facecolor=(30, 30, 30, 255))
-    fig, ax = plt.subplots(figsize=(240, 180), theme=dark)
+    dark = pp.themes.default.with_(axes_facecolor=(30, 30, 30, 255))
+    fig, ax = pp.subplots(figsize=(240, 180), theme=dark)
     ax.hist([1, 2, 2, 3, 3, 3, 4], bins=4)
     out = tmp_path / "hist_dark.svg"
     fig.save(str(out))
@@ -147,7 +147,7 @@ def test_3d_methods_that_referenced_undefined_helpers(method, tmp_path):
     """``bar3d`` and ``voxels`` called ``_darker``; ``contour3d`` called
     ``_bilinear_grid``. Neither helper was ever defined in any commit, so all
     three raised ``NameError`` on every call since they were written."""
-    fig, ax = plt.subplots(figsize=(240, 180), projection="3d")
+    fig, ax = pp.subplots(figsize=(240, 180), projection="3d")
     xs = [-1.0, 0.0, 1.0]
     if method == "bar3d":
         ax.bar3d([0, 1], [0, 1], [0, 0], 0.5, 0.5, [1, 2])
@@ -179,7 +179,7 @@ def test_degenerate_figure_size_raises_valueerror(figsize):
     argument was actually passed, and covers NaN and infinity too.
     """
     with pytest.raises(ValueError, match="positive, finite"):
-        plt.subplots(figsize=figsize)
+        pp.subplots(figsize=figsize)
 
 
 def test_absurd_raster_size_raises_instead_of_aborting(tmp_path):
@@ -189,7 +189,7 @@ def test_absurd_raster_size_raises_instead_of_aborting(tmp_path):
     size has to be rejected before allocation - ``Pixmap::new`` returning
     ``None`` is not a defense that can be relied on.
     """
-    fig, ax = plt.subplots(figsize=(4000, 3000), units="in")
+    fig, ax = pp.subplots(figsize=(4000, 3000), units="in")
     ax.line([0, 1], [0, 1])
     with pytest.raises(ValueError, match="reduce the figure size"):
         fig.save(str(tmp_path / "huge.png"), dpi=2400)
@@ -199,7 +199,7 @@ def test_empty_animation_raises():
     """Caught in Python before it reaches Rust; the Rust-side empty-frames check
     is defense in depth for any other caller of the encoder."""
     with pytest.raises(ValueError, match="positive int"):
-        plt.animate(lambda i: plt.subplots()[0], 0)
+        pp.animate(lambda i: pp.subplots()[0], 0)
 
 
 def _marker_xy(fig, tmp_path, name):
@@ -219,7 +219,7 @@ def test_equal_aspect_does_not_mirror_an_inverted_axis(tmp_path):
     Checked through the real draw path: the aspect adjustment lives in `_draw`,
     not in `_proj_for`, so it only shows up in rendered geometry.
     """
-    fig, ax = plt.subplots(figsize=(240, 240))
+    fig, ax = pp.subplots(figsize=(240, 240))
     ax.scatter([0, 3], [1, 1], marker="s")
     ax.set(xlim=(-0.5, 3.5), ylim=(3.5, -0.5), aspect="equal")
     left, right = _marker_xy(fig, tmp_path, "aspect")[:2]
@@ -231,7 +231,7 @@ def test_equal_aspect_does_not_mirror_an_inverted_axis(tmp_path):
 def test_equal_aspect_still_squares_the_cells(tmp_path):
     """The fix must not cost the property aspect="equal" exists for: one data
     unit spans the same device length on both axes."""
-    fig, ax = plt.subplots(figsize=(300, 300))
+    fig, ax = pp.subplots(figsize=(300, 300))
     ax.scatter([0, 2, 0], [0, 0, 2], marker="s")
     ax.set(xlim=(-0.5, 2.5), ylim=(2.5, -0.5), aspect="equal")
     pts = _marker_xy(fig, tmp_path, "square")
@@ -241,7 +241,7 @@ def test_equal_aspect_still_squares_the_cells(tmp_path):
 
 def test_spy_orientation_is_matrix_order(tmp_path):
     """Row 0 at the top, column 0 at the left."""
-    fig, ax = plt.subplots(figsize=(240, 240))
+    fig, ax = pp.subplots(figsize=(240, 240))
     ax.spy([[1, 0], [0, 1]])
     (x0, x1), (y0, y1) = ax._ranges()
     assert x0 < x1, "columns must run left to right"
@@ -256,7 +256,7 @@ def test_fill_between_matches_its_bounds(tmp_path):
     affine path (`add_band_xform`), the same one `line`/`scatter` already used.
     A 50k band went 24.7 ms -> 6.6 ms; this pins that it still draws the right
     polygon."""
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.fill_between([0, 1, 2], [1, 3, 2], 0.0)
     (x0, x1), (y0, y1) = ax._ranges()
     assert x0 <= 0.0 and x1 >= 2.0
@@ -265,7 +265,7 @@ def test_fill_between_matches_its_bounds(tmp_path):
 
 
 def test_fill_betweenx_is_the_transpose(tmp_path):
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.fill_betweenx([0, 1, 2], [1, 3, 2], 0.0)
     (x0, x1), (y0, y1) = ax._ranges()
     assert y0 <= 0.0 and y1 >= 2.0
@@ -276,20 +276,20 @@ def test_fill_betweenx_is_the_transpose(tmp_path):
 def test_fill_between_on_a_log_axis(tmp_path):
     """The scale transform runs inside the Rust band builder, so a non-linear
     axis must stay on the fast path rather than silently mis-mapping."""
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.fill_between([1, 10, 100], [1, 10, 100], 1.0)
     ax.set(xscale="log", yscale="log")
     fig.save(str(tmp_path / "logband.png"))
 
 
 def test_fill_between_survives_non_finite_points(tmp_path):
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.fill_between([0, 1, 2, 3], [1, float("nan"), 2, 1], 0.0)
     fig.save(str(tmp_path / "nanband.png"))
 
 
 def test_degenerate_band_draws_nothing(tmp_path):
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.fill_between([0.0], [1.0], 0.0)
     fig.save(str(tmp_path / "tiny.png"))
 
@@ -310,11 +310,11 @@ def test_hexbin_output_is_reproducible(tmp_path):
 
     script = textwrap.dedent("""
         import hashlib, random, sys
-        import pyplotrs as plt
+        import pyplotrs as pp
         random.seed(7)
         xs = [random.uniform(0, 10) for _ in range(2000)]
         ys = [random.uniform(0, 10) for _ in range(2000)]
-        fig, ax = plt.subplots(figsize=(240, 180))
+        fig, ax = pp.subplots(figsize=(240, 180))
         ax.hexbin(xs, ys, gridsize=14)
         out = sys.argv[1]
         fig.save(out)
@@ -371,7 +371,7 @@ def test_bar_leaves_a_gap_between_category_slots():
     """The default above, checked where it is visible rather than in a
     signature: three categories one unit apart, so a bar spans half the gap
     between neighbors and half the slot stays empty."""
-    fig, ax = plt.subplots(figsize=(300, 200))
+    fig, ax = pp.subplots(figsize=(300, 200))
     ax.bar(["a", "b", "c"], [1.0, 2.0, 3.0])
     mark = ax._marks[0]
     assert mark["width"] == 0.5
@@ -418,7 +418,7 @@ def test_secondary_axis_ticks_stay_on_the_canvas(method, loc, tmp_path):
     from pyplotrs._draw import _tw
 
     w, h = 400.0, 300.0
-    fig, ax = plt.subplots(figsize=(w, h))
+    fig, ax = pp.subplots(figsize=(w, h))
     ax.line([0, 1, 2, 3], [0, 1, 4, 9])
     getattr(ax, method)(loc, functions=_SEC_FN)
 
@@ -448,7 +448,7 @@ def test_secondary_axis_label_is_drawn(method, loc, tmp_path):
     `_draw_secondary` - so it rendered nothing at all, on any of the four
     locations. The same class as `Axes3D.plot(alpha=)`: a kwarg taken and
     dropped, which a signature check cannot see."""
-    fig, ax = plt.subplots(figsize=(400, 300))
+    fig, ax = pp.subplots(figsize=(400, 300))
     ax.line([0, 1, 2, 3], [0, 1, 4, 9])
     getattr(ax, method)(loc, functions=_SEC_FN, label="SENTINEL")
 
@@ -472,7 +472,7 @@ def test_secondary_axis_reserves_a_band(method, loc, tmp_path):
     band_index = {"top": 0, "bottom": 3, "left": 4, "right": 5}[loc]
 
     def band(with_secondary):
-        fig, ax = plt.subplots(figsize=(400, 300))
+        fig, ax = pp.subplots(figsize=(400, 300))
         ax.line([0, 1, 2, 3], [0, 1, 4, 9])
         if with_secondary:
             getattr(ax, method)(loc, functions=_SEC_FN, label="lbl")
@@ -490,7 +490,7 @@ def test_secondary_axis_rejects_a_location_for_the_wrong_axis():
     """`secondary_xaxis("left")` used to be accepted and then silently drawn as
     if it said "bottom" - `_draw_secondary` only ever tested for the one
     location and treated everything else as the other."""
-    fig, ax = plt.subplots(figsize=(200, 150))
+    fig, ax = pp.subplots(figsize=(200, 150))
     with pytest.raises(ValueError, match="top.*bottom"):
         ax.secondary_xaxis("left")
     with pytest.raises(ValueError, match="left.*right"):
@@ -501,7 +501,7 @@ def test_two_secondary_axes_on_one_side_stack(tmp_path):
     """Each secondary is placed outside everything already reserved on its
     side, so a second one on the same side sits beyond the first rather than
     drawing over it."""
-    fig, ax = plt.subplots(figsize=(400, 300))
+    fig, ax = pp.subplots(figsize=(400, 300))
     ax.line([0, 1, 2, 3], [0, 1, 4, 9])
     ax.secondary_yaxis("right", functions=_SEC_FN)
     ax.secondary_yaxis("right", functions=(lambda v: v * 3.0, lambda v: v / 3.0))
@@ -517,7 +517,7 @@ def test_secondary_y_does_not_displace_a_colorbar_label(tmp_path):
     secondary's own label - so the colorbar now measures against its own share
     of the band instead of the whole of it.
     """
-    fig, ax = plt.subplots(figsize=(320, 240))
+    fig, ax = pp.subplots(figsize=(320, 240))
     m = ax.scatter([0, 1, 2, 3], [0, 1, 4, 9], c=[1, 2, 3, 4], cmap="viridis")
     fig.colorbar(m, label="c")
     ax.secondary_yaxis("right", functions=_SEC_FN, label="percent")
@@ -574,7 +574,7 @@ def test_hexbin_hexagons_tile_without_seams(tmp_path):
 
         # One flat color for every hexagon: with the count range swamped, any
         # pixel inside the patch that is *not* that color is a gap or a seam.
-        fig, ax = plt.subplots(figsize=(240, 180))
+        fig, ax = pp.subplots(figsize=(240, 180))
         ax.hexbin(xs, ys, gridsize=18, vmin=-1e6, vmax=1e6)
         out = tmp_path / f"hex_{name}.png"
         fig.save(str(out), dpi=100)
@@ -630,7 +630,7 @@ def test_hexbin_draws_the_cells_nothing_landed_in(tmp_path):
             ys.append(cy + rng.uniform(-0.05, 0.05))
 
     gridsize = 12
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.hexbin(xs, ys, gridsize=gridsize)
 
     # Both interleaved lattices in full: (nx+1)x(ny+1) grid points, plus the
@@ -688,7 +688,7 @@ def test_hexbin_cell_matches_the_binning_lattice():
         xs = [rng.uniform(0.0, 1.0) for _ in range(4000)]
         ys = [yscale * rng.uniform(0.0, 1.0) for _ in range(4000)]
 
-        fig, ax = plt.subplots(figsize=(240, 180))
+        fig, ax = pp.subplots(figsize=(240, 180))
         ax.hexbin(xs, ys, gridsize=16)
         mark = ax._marks[-1]
 
@@ -726,7 +726,7 @@ def test_contour_emits_one_path_per_line_not_one_per_cell():
     Z = [[-math.hypot(c - mid, r - mid) for c in range(n)] for r in range(n)]
     rings = [-2.0, -4.0, -6.0, -8.0]
 
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.contour(Z, levels=rings)
     lines = ax._marks[0]["lines"]
 
@@ -751,7 +751,7 @@ def test_stitched_contour_never_joins_points_from_different_cells():
 
     n = 24
     Z = [[math.sin(c / 3.0) * math.cos(r / 3.0) for c in range(n)] for r in range(n)]
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.contour(Z, levels=6)
 
     for li, closed, pts in ax._marks[0]["lines"]:
@@ -777,7 +777,7 @@ def test_contour_levels_land_on_round_numbers():
     Z = [[math.exp(-(x * x + y * y) / 4) * math.sin(1.5 * x) * math.cos(1.2 * y)
           for x in gx] for y in gy]
 
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.contour(gx, gy, Z, levels=10)
     # matplotlib draws exactly these for this field and this `levels` hint.
     assert ax._marks[0]["levels"] == pytest.approx(
@@ -787,7 +787,7 @@ def test_contour_levels_land_on_round_numbers():
 def test_contour_levels_stay_inside_the_data_range():
     """A level at (or past) an extreme draws nothing, or a single degenerate
     point, but still consumed a color and a legend slot."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.contour([[0.0, 1.0], [1.0, 2.0]], levels=5)
     assert all(0.0 < lv < 2.0 for lv in ax._marks[0]["levels"])
 
@@ -799,7 +799,7 @@ def test_contour_levels_survive_a_field_of_tiny_magnitude():
     range, and was dropped. A whole class of fields drew no contour at all.
     """
     Z = [[1e-6 * (c + r) / 20.0 for c in range(11)] for r in range(11)]
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.contour(Z, levels=7)
     lvls = ax._marks[0]["levels"]
     assert len(lvls) > 3, f"a 1e-6-wide field drew {len(lvls)} contour lines"
@@ -837,7 +837,7 @@ def test_contourf_fills_the_column_through_the_extreme():
     assert by_hand[-1] < hi, "float arithmetic changed; pick another field"
 
     for levels in (12, by_hand, [lo, 0.0, hi]):
-        fig, ax = plt.subplots()
+        fig, ax = pp.subplots()
         ax.contourf(gx, gy, Z, levels=levels)
         w, h, rows = _contourf_pixels(ax._marks[0])
         clear = [(x, y) for y in range(h) for x in range(w) if rows[y][x][3] == 0]
@@ -861,7 +861,7 @@ def test_contourf_bands_end_where_contour_lines_run():
     Z = [[math.exp(-(x * x + y * y) / 4) * math.sin(1.5 * x) * math.cos(1.2 * y)
           for x in gx] for y in gy]
 
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     mappable = ax.contourf(gx, gy, Z, levels=12)
     ax.contour(gx, gy, Z, levels=12)
     edges = [-0.9, -0.75, -0.6, -0.45, -0.3, -0.15, 0.0,
@@ -882,7 +882,7 @@ def test_contourf_and_contour_default_to_the_same_levels():
     import math
 
     Z = [[math.sin(c / 4.0) * math.cos(r / 4.0) for c in range(25)] for r in range(25)]
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     mappable = ax.contourf(Z)
     ax.contour(Z)
 
@@ -928,7 +928,7 @@ def test_pie_slice_labels_are_not_clipped(tmp_path):
     outside the clip, and the pie takes the shrink instead.
     """
     w, h = 250.0, 200.0
-    fig, ax = plt.subplots(figsize=(w, h))
+    fig, ax = pp.subplots(figsize=(w, h))
     ax.pie([35, 25, 22, 18], labels=["alpha", "beta", "gamma", "delta"])
 
     out = tmp_path / "pie_labels.svg"
@@ -973,7 +973,7 @@ def test_pie_grows_until_a_label_reaches_the_cell_edge(tmp_path):
     names = ["alpha", "beta", "gamma", "delta"]
 
     def draw(labels, name):
-        fig, ax = plt.subplots(figsize=(w, h))
+        fig, ax = pp.subplots(figsize=(w, h))
         ax.pie([35, 25, 22, 18], labels=labels)
         out = tmp_path / f"{name}.svg"
         fig.save(str(out))
@@ -1026,7 +1026,7 @@ def test_frame_off_reserves_no_tick_band(tmp_path):
     the pie must come out centered on the canvas.
     """
     w, h = 400.0, 300.0
-    fig, ax = plt.subplots(figsize=(w, h))
+    fig, ax = pp.subplots(figsize=(w, h))
     ax.pie([35, 25, 22, 18])
     ax.set(title="Pie")
     out = tmp_path / "pie_off.svg"
@@ -1050,7 +1050,7 @@ def test_indented_mosaic_string_has_no_phantom_panel():
     with a wide empty axes on the left and the real panels squeezed into what
     was left.
     """
-    fig, axd = plt.subplot_mosaic(
+    fig, axd = pp.subplot_mosaic(
         """
         AB
         AC
@@ -1066,7 +1066,7 @@ def test_indented_mosaic_string_has_no_phantom_panel():
 def test_mosaic_space_marks_an_empty_cell():
     """A space reads as an empty cell, like `"."`. Both spellings appear in the
     wild, and the alternative is a panel whose label is a space."""
-    fig, axd = plt.subplot_mosaic(["AB", "A "])
+    fig, axd = pp.subplot_mosaic(["AB", "A "])
 
     assert set(axd) == {"A", "B"}
     assert fig._spans == [(0, 0, 2, 1), (0, 1, 1, 1)]
@@ -1081,7 +1081,7 @@ def test_pinned_ticks_outside_the_view_are_dropped():
     as ticks are pinned to round numbers on data that turns out to be smaller
     than expected - a residual panel, say.
     """
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.scatter([0, 1, 2], [0.01, -0.02, 0.015])
     ax.set(yticks=[-0.05, 0.0, 0.05])
 
@@ -1128,7 +1128,7 @@ def _spines(lines, vertical):
 
 
 def _junction_figure(theme, ylim=(0, 8)):
-    fig, ax = plt.subplots(figsize=(200, 150), theme=theme)
+    fig, ax = pp.subplots(figsize=(200, 150), theme=theme)
     ax.line([0, 1, 2, 3], [0, 2, 5, 8])
     ax.set(xlim=(0, 3), ylim=ylim)
     return fig, ax
@@ -1144,8 +1144,8 @@ def test_spine_end_reaches_the_outer_edge_of_the_tick_that_sits_on_it(tmp_path):
     - the corner of the frame. Running the spine half a width past that end
     covers exactly what a miter join between the two would have.
     """
-    sw = plt.themes.default.spine_width
-    fig, _ax = _junction_figure(plt.themes.default)
+    sw = pp.themes.default.spine_width
+    fig, _ax = _junction_figure(pp.themes.default)
     lines = _chrome_lines(fig, tmp_path, "join_tick", sw)
 
     spine = _spines(lines, vertical=True)[0]
@@ -1168,7 +1168,7 @@ def test_spine_corner_is_closed_with_no_tick_to_hide_it(tmp_path):
     this long because the default theme is despined and its one corner usually
     *does* carry limit ticks, which cover the hole by accident.
     """
-    framed = plt.themes.default.with_(spines=("left", "right", "top", "bottom"))
+    framed = pp.themes.default.with_(spines=("left", "right", "top", "bottom"))
     sw = framed.spine_width
     fig, _ax = _junction_figure(framed, ylim=(-0.3, 8.3))
     lines = _chrome_lines(fig, tmp_path, "join_corner", sw)
@@ -1184,7 +1184,7 @@ def test_spine_corner_is_closed_with_no_tick_to_hide_it(tmp_path):
 def test_spine_join_butt_keeps_the_spine_on_the_plot_rect(tmp_path):
     """The escape hatch, for anyone who wants the ends bare: `spine_join="butt"`
     puts every spine back on exactly the plot rect it bounds."""
-    framed = plt.themes.default.with_(spines=("left", "right", "top", "bottom"),
+    framed = pp.themes.default.with_(spines=("left", "right", "top", "bottom"),
                                       spine_join="butt")
     fig, _ax = _junction_figure(framed, ylim=(-0.3, 8.3))
     lines = _chrome_lines(fig, tmp_path, "join_butt", framed.spine_width)
@@ -1206,10 +1206,10 @@ def test_spine_join_square_extends_an_end_nothing_meets(tmp_path):
     an unclosed spine end is a statement about where the axis stops, and half a
     stroke of overhang is not always wanted there.
     """
-    sw = plt.themes.default.spine_width
+    sw = pp.themes.default.spine_width
     tops = {}
     for join in ("miter", "square"):
-        theme = plt.themes.default.with_(spine_join=join)
+        theme = pp.themes.default.with_(spine_join=join)
         fig, _ax = _junction_figure(theme, ylim=(0, 9))  # ticks 0..8, none at 9
         lines = _chrome_lines(fig, tmp_path, f"join_{join}", sw)
         spine = _spines(lines, vertical=True)[0]
@@ -1223,7 +1223,7 @@ def test_spine_join_square_extends_an_end_nothing_meets(tmp_path):
 def test_spine_join_rejects_an_unknown_value():
     """A typo has to fail at the theme, not silently draw a different join."""
     with pytest.raises(ValueError, match="spine_join"):
-        plt.themes.default.with_(spine_join="mitre")
+        pp.themes.default.with_(spine_join="mitre")
 
 
 # -- image resampling -------------------------------------------------------
@@ -1245,7 +1245,7 @@ def _gray_block(path, y_from=0.3, y_to=0.7, x_from=0.3, x_to=0.85):
 
 
 def _imshow_png(tmp_path, name, data, dpi=100):
-    fig, ax = plt.subplots(figsize=(300, 220))
+    fig, ax = pp.subplots(figsize=(300, 220))
     ax.imshow(data, cmap="gray", vmin=0.0, vmax=1.0)
     path = tmp_path / f"{name}.png"
     fig.save(str(path), dpi=dpi)
@@ -1295,7 +1295,7 @@ def test_vector_output_is_as_sharp_as_the_raster(tmp_path):
     import struct
 
     cols = [[float(c % 2) for c in range(4)] for _ in range(1000)]
-    fig, ax = plt.subplots(figsize=(300, 220))
+    fig, ax = pp.subplots(figsize=(300, 220))
     ax.imshow(cols, cmap="gray", vmin=0.0, vmax=1.0)
     svg_path = tmp_path / "cols.svg"
     fig.save(str(svg_path))
@@ -1321,7 +1321,7 @@ def test_a_dense_image_is_left_alone_in_vector_output(tmp_path):
     import struct
 
     field = [[(x * 7 + y * 13) % 97 / 97.0 for x in range(500)] for y in range(500)]
-    fig, ax = plt.subplots(figsize=(400, 300))
+    fig, ax = pp.subplots(figsize=(400, 300))
     ax.imshow(field)
     svg_path = tmp_path / "dense.svg"
     fig.save(str(svg_path))

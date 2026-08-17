@@ -119,5 +119,5 @@ An [animation](animation.md) is saved through its own object, not `Figure.save`,
 and writes `.gif` or `.apng`:
 
 ```python
-plt.animate(render, frames=60).save("wave.gif")
+pp.animate(render, frames=60).save("wave.gif")
 ```

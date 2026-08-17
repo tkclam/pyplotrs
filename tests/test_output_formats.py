@@ -24,12 +24,12 @@ import struct
 import xml.etree.ElementTree as ET
 import zlib
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 
 
 def _figure(with_math: bool = False):
-    fig, ax = plt.subplots(figsize=(320, 240))
+    fig, ax = pp.subplots(figsize=(320, 240))
     xs = [i / 20 for i in range(60)]
     ax.line(xs, [math.sin(x) for x in xs], label="signal")
     title = r"Decay $\alpha e^{-t/\tau}$" if with_math else "Decay"
@@ -103,7 +103,7 @@ def test_plain_html_does_not_carry_the_mathjax_bundle(tmp_path):
 
 
 def test_3d_html_is_the_interactive_viewer(tmp_path):
-    fig, ax = plt.subplots(projection="3d", figsize=(320, 240))
+    fig, ax = pp.subplots(projection="3d", figsize=(320, 240))
     ax.scatter([0, 1, 2], [0, 1, 4], [0, 1, 8])
     ax.set(title="cloud")
     out = tmp_path / "v.html"
@@ -125,7 +125,7 @@ def test_html_svg_body_parses_as_xml(tmp_path):
 # -- animation ---------------------------------------------------------------
 
 def _wave(i: int):
-    fig, ax = plt.subplots(figsize=(200, 140))
+    fig, ax = pp.subplots(figsize=(200, 140))
     xs = [j / 10 for j in range(40)]
     ax.line(xs, [math.sin(x - i * 0.4) for x in xs])
     ax.set(ylim=(-1.2, 1.2))
@@ -136,7 +136,7 @@ def test_gif_output_is_a_gif_with_the_frames_asked_for(tmp_path):
     """The only animation test in the suite called `animate` and checked the
     file was non-empty, which a text file would also satisfy."""
     out = tmp_path / "a.gif"
-    plt.animate(_wave, frames=5, fps=10).save(str(out))
+    pp.animate(_wave, frames=5, fps=10).save(str(out))
     data = out.read_bytes()
 
     assert data[:6] in (b"GIF87a", b"GIF89a"), f"not a GIF: {data[:6]!r}"
@@ -152,7 +152,7 @@ def test_gif_output_is_a_gif_with_the_frames_asked_for(tmp_path):
 
 def test_apng_output_is_an_animated_png(tmp_path):
     out = tmp_path / "a.png"
-    plt.animate(_wave, frames=4, fps=10).save(str(out))
+    pp.animate(_wave, frames=4, fps=10).save(str(out))
     data = out.read_bytes()
 
     assert data[:8] == b"\x89PNG\r\n\x1a\n", "not a PNG"

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 from pyplotrs.axes import Axes
 from pyplotrs.axes3d import Axes3D
@@ -28,27 +28,27 @@ from pyplotrs.polar import PolarAxes
 
 
 def test_getters_report_autoscaled_limits_not_none():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1, 2], [0, 10, 20])
     lo, hi = ax.get_ylim()
     assert lo < 0 and hi > 20, "should report the padded autoscaled range"
 
 
 def test_getters_report_explicit_limits():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1, 2], [0, 10, 20])
     ax.set(ylim=(-5, 25))
     assert ax.get_ylim() == (-5.0, 25.0)
 
 
 def test_title_and_labels_round_trip():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.set(title="T", xlabel="X", ylabel="Y")
     assert (ax.get_title(), ax.get_xlabel(), ax.get_ylabel()) == ("T", "X", "Y")
 
 
 def test_scale_and_aspect_round_trip():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([1, 10], [1, 10])
     ax.set(xscale="log", aspect="equal")
     assert ax.get_xscale() == "log"
@@ -57,19 +57,19 @@ def test_scale_and_aspect_round_trip():
 
 
 def test_aspect_defaults_to_auto():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     assert ax.get_aspect() == "auto"
 
 
 def test_ticks_are_the_located_ones_not_only_manual_ones():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1, 2], [0, 1, 2])
     assert ax.get_xticks(), "an axes with no manual ticks still draws ticks"
     assert len(ax.get_xticks()) == len(ax.get_xticklabels())
 
 
 def test_manual_ticks_and_labels_come_back():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1, 2], [0, 1, 2])
     ax.set(xticks=[0, 1, 2], xticklabels=["a", "b", "c"])
     assert ax.get_xticks() == [0.0, 1.0, 2.0]
@@ -79,7 +79,7 @@ def test_manual_ticks_and_labels_come_back():
 def test_get_xticklabels_matches_the_rendered_svg(tmp_path):
     """The getter and the renderer must resolve ticks through the same path;
     two locators that drift apart would make the getter quietly wrong."""
-    fig, ax = plt.subplots(figsize=(320, 240))
+    fig, ax = pp.subplots(figsize=(320, 240))
     ax.line([0, 1, 2, 3], [0, 5, 3, 9])
     out = tmp_path / "ticks.svg"
     fig.save(str(out))
@@ -91,7 +91,7 @@ def test_get_xticklabels_matches_the_rendered_svg(tmp_path):
 def test_shared_axes_report_the_unified_range():
     """`sharex`/`sharey` unify ranges inside `_build_scene`, so an axes asked
     in isolation would otherwise report a range it will never be drawn with."""
-    fig, (a, b) = plt.subplots(ncols=2, sharey=True)
+    fig, (a, b) = pp.subplots(ncols=2, sharey=True)
     a.line([0, 1], [0, 1])
     b.line([0, 1], [0, 100])
     assert a.get_ylim() == b.get_ylim()
@@ -99,14 +99,14 @@ def test_shared_axes_report_the_unified_range():
 
 
 def test_unshared_axes_keep_their_own_range():
-    fig, (a, b) = plt.subplots(ncols=2)
+    fig, (a, b) = pp.subplots(ncols=2)
     a.line([0, 1], [0, 1])
     b.line([0, 1], [0, 100])
     assert a.get_ylim() != b.get_ylim()
 
 
 def test_legend_handles_and_labels():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1], [0, 1], label="one")
     ax.scatter([0], [0], label="two")
     ax.line([0, 1], [1, 0])  # unlabeled, must not appear
@@ -116,7 +116,7 @@ def test_legend_handles_and_labels():
 
 
 def test_legend_handles_expand_pie_wedges():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.pie([1, 2], labels=["a", "b"])
     assert ax.get_legend_handles_labels()[1] == ["a", "b"]
 
@@ -139,7 +139,7 @@ def test_no_getter_has_a_setter_partner(cls):
 
 
 def test_3d_getters():
-    fig, ax = plt.subplots(projection="3d")
+    fig, ax = pp.subplots(projection="3d")
     ax.scatter([0, 1], [0, 2], [0, 3])
     ax.set(title="T", zlabel="z", elev=20, azim=40)
     assert ax.get_title() == "T"
@@ -149,7 +149,7 @@ def test_3d_getters():
 
 
 def test_polar_getters():
-    fig, ax = plt.subplots(projection="polar")
+    fig, ax = pp.subplots(projection="polar")
     ax.plot([0, 1, 2], [1, 2, 3])
     ax.set(title="P", rmax=5, rticks=[1, 2], thetagrids=[0, 90], theta_direction=-1)
     assert ax.get_title() == "P"

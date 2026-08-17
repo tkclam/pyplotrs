@@ -10,12 +10,12 @@ always hold explicit `fig` and `ax` references.
 The ergonomic entry point is [`subplots`][pyplotrs.subplots]:
 
 ```python
-import pyplotrs as plt
+import pyplotrs as pp
 
-fig, ax = plt.subplots()                    # a single axes
-fig, axs = plt.subplots(1, 3)               # a row → flat list of 3
-fig, axs = plt.subplots(3, 1)               # a column → flat list of 3
-fig, grid = plt.subplots(2, 3)              # a full grid → list of rows
+fig, ax = pp.subplots()                    # a single axes
+fig, axs = pp.subplots(1, 3)               # a row → flat list of 3
+fig, axs = pp.subplots(3, 1)               # a column → flat list of 3
+fig, grid = pp.subplots(2, 3)              # a full grid → list of rows
 ```
 
 The return shape mirrors the grid:
@@ -28,7 +28,7 @@ The return shape mirrors the grid:
 
 `projection="polar"` or `projection="3d"` makes every panel a
 [`PolarAxes`](polar.md) or an [`Axes3D`](3d.md) instead.
-[`plt.figure()`][pyplotrs.figure] creates a figure with **no** axes, for when
+[`pp.figure()`][pyplotrs.figure] creates a figure with **no** axes, for when
 every panel is placed by hand — see [layout](layout.md). Either way, `fig.axes`
 is the flat, row-major list of what a figure holds.
 
@@ -41,10 +41,10 @@ journal column wide (~3.5 in), so a figure comes out at publication size rather
 than needing to be scaled down to one. Other units are available via `units`:
 
 ```python
-plt.subplots(figsize=(250, 200))               # points (the default)
-plt.subplots(figsize=(4, 3), units="in")       # inches
-plt.subplots(figsize=(89, 60), units="mm")     # a Nature single column
-plt.subplots(figsize=(12, 8), units="cm")
+pp.subplots(figsize=(250, 200))               # points (the default)
+pp.subplots(figsize=(4, 3), units="in")       # inches
+pp.subplots(figsize=(89, 60), units="mm")     # a Nature single column
+pp.subplots(figsize=(12, 8), units="cm")
 ```
 
 ## Drawing & the `set` method
@@ -96,7 +96,7 @@ calling code; "what will I get" is not.
 are directly comparable:
 
 ```python
-fig, axs = plt.subplots(1, 3, sharey=True)
+fig, axs = pp.subplots(1, 3, sharey=True)
 for k, ax in enumerate(axs):
     ax.line(xs, [f(x, k) for x in xs])
 ```

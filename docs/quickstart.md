@@ -12,9 +12,9 @@ Everything starts with [`subplots`][pyplotrs.subplots], which returns a
 `Figure` and one or more `Axes`:
 
 ```python
-import pyplotrs as plt
+import pyplotrs as pp
 
-fig, ax = plt.subplots()
+fig, ax = pp.subplots()
 ax.line([0, 1, 2, 3, 4], [0, 1, 4, 9, 16])
 fig.save("first.png")
 ```
@@ -34,11 +34,11 @@ cycles automatically, so each series gets a distinct, colorblind-safe color:
 
 ```python
 import math
-import pyplotrs as plt
+import pyplotrs as pp
 
 xs = [i * 0.1 for i in range(80)]
 
-fig, ax = plt.subplots()
+fig, ax = pp.subplots()
 ax.line(xs, [math.sin(x) for x in xs], label="sin")
 ax.line(xs, [math.cos(x) for x in xs], label="cos", linestyle="dashed")
 ax.scatter([1, 3, 5], [0.8, -0.1, -0.96], label="samples")
@@ -86,7 +86,7 @@ Pass a grid shape to `subplots`. With one row or column you get a flat list of
 axes; with a full grid you get a list of rows:
 
 ```python
-fig, axs = plt.subplots(1, 2, figsize=(500, 200), sharey=True)
+fig, axs = pp.subplots(1, 2, figsize=(500, 200), sharey=True)
 axs[0].line(xs, [math.sin(x) for x in xs])
 axs[1].line(xs, [math.cos(x) for x in xs])
 axs[0].set(ylabel="y")
@@ -105,8 +105,8 @@ default is 250×200 pt — a single journal column wide, i.e. publication size o
 of the box. Pass `units="in"`, `"cm"` or `"mm"` for another unit:
 
 ```python
-plt.subplots(figsize=(89, 60), units="mm")   # a single Nature column
-plt.subplots(figsize=(4, 3), units="in")
+pp.subplots(figsize=(89, 60), units="mm")   # a single Nature column
+pp.subplots(figsize=(4, 3), units="in")
 ```
 
 ## Data pyplotrs accepts
@@ -129,7 +129,7 @@ into a gap rather than distorting the plot. More in
 === "Themes"
 
     ```python
-    fig, ax = plt.subplots(theme="presentation")
+    fig, ax = pp.subplots(theme="presentation")
     ax.line(xs, [math.sin(x) for x in xs])
     fig.save("slide.png")
     ```
@@ -157,7 +157,7 @@ into a gap rather than distorting the plot. More in
 === "Polar"
 
     ```python
-    fig, ax = plt.subplots(projection="polar")
+    fig, ax = pp.subplots(projection="polar")
     ax.plot(theta, r, label="response")
     ```
 
@@ -166,7 +166,7 @@ into a gap rather than distorting the plot. More in
 === "3D"
 
     ```python
-    fig, ax = plt.subplots(projection="3d")
+    fig, ax = pp.subplots(projection="3d")
     ax.surface(X, Y, Z, cmap="viridis")
     fig.save("surface.pdf")
     ```

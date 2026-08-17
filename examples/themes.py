@@ -5,12 +5,12 @@ A theme is passed to ``subplots`` and flows to its axes (there is no global
 """
 import math
 
-import pyplotrs as plt
+import pyplotrs as pp
 
 xs = [i * 0.2 for i in range(40)]
 ys = [math.sin(x) for x in xs]
 for name in ["default", "nature", "grayscale", "presentation"]:
-    fig, ax = plt.subplots(figsize=(300, 200), theme=name)
+    fig, ax = pp.subplots(figsize=(300, 200), theme=name)
     ax.line(xs, ys, label="sin")
     ax.line(xs, [y * 0.6 for y in ys], label="0.6·sin", linestyle="dashed")
     ax.set(title=f"theme = {name}", xlabel="t", ylabel="y")

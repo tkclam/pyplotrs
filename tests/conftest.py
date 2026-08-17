@@ -19,7 +19,7 @@ import struct
 import zlib
 from pathlib import Path
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
@@ -31,13 +31,13 @@ def pin_font():
 
     ``autouse`` so no test can accidentally depend on the host's font set.
     """
-    plt.set_font_family("Liberation Sans")
-    assert plt.resolved_font_name() == "Liberation Sans", (
+    pp.set_font_family("Liberation Sans")
+    assert pp.resolved_font_name() == "Liberation Sans", (
         "the bundled Liberation Sans should always resolve; got "
-        f"{plt.resolved_font_name()!r}"
+        f"{pp.resolved_font_name()!r}"
     )
     yield
-    plt.set_font_family()  # restore the default preference order
+    pp.set_font_family()  # restore the default preference order
 
 
 @pytest.fixture
@@ -46,7 +46,7 @@ def figure_factory():
 
     def make(nrows: int = 1, ncols: int = 1, **kwargs):
         kwargs.setdefault("figsize", (240, 180))
-        return plt.subplots(nrows, ncols, **kwargs)
+        return pp.subplots(nrows, ncols, **kwargs)
 
     return make
 

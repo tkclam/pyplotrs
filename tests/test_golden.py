@@ -19,7 +19,7 @@ from __future__ import annotations
 import math
 import random
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 from conftest import assert_matches_golden, read_png
 
@@ -27,7 +27,7 @@ from conftest import assert_matches_golden, read_png
 def _core_figure():
     """A figure exercising the main 2D vocabulary, layout and text at once."""
     random.seed(0)
-    fig, axs = plt.subplots(2, 2, figsize=(560, 420))
+    fig, axs = pp.subplots(2, 2, figsize=(560, 420))
 
     xs = [i / 40 for i in range(120)]
     a = axs[0][0]
@@ -57,7 +57,7 @@ CASES = {
 
 def _theme_case(name):
     def build():
-        fig, ax = plt.subplots(figsize=(300, 220), theme=name)
+        fig, ax = pp.subplots(figsize=(300, 220), theme=name)
         ax.line([0, 1, 2, 3], [0, 1, 4, 9], label="squares")
         ax.scatter([0, 1, 2, 3], [9, 4, 1, 0], label="reversed")
         ax.set(title=f"theme: {name}", xlabel="x", ylabel="y")
@@ -71,7 +71,7 @@ for _name in ("default", "nature", "grayscale", "presentation"):
 
 
 def _math_case():
-    fig, ax = plt.subplots(figsize=(360, 240))
+    fig, ax = pp.subplots(figsize=(360, 240))
     ax.line([0, 1], [0, 1], label=r"$\sum_{j=1}^{n}\beta_j$")
     ax.set(title=r"$\int_0^\infty e^{-x^2}\,dx = \frac{\sqrt{\pi}}{2}$",
            xlabel=r"$\alpha_i^2$", ylabel=r"$\mathbb{R}^3$")
@@ -83,7 +83,7 @@ CASES["math"] = _math_case
 
 
 def _log_case():
-    fig, ax = plt.subplots(figsize=(300, 220))
+    fig, ax = pp.subplots(figsize=(300, 220))
     ax.line([1, 10, 100, 1000], [1, 10, 100, 1000], marker="o")
     ax.errorbar([1, 10, 100], [2, 20, 200], yerr=[0.5, 5, 50])
     ax.set(xscale="log", yscale="log", title="log-log")
@@ -96,8 +96,8 @@ CASES["log"] = _log_case
 def _emphasis_case():
     """Bold chrome plus bold/italic free text - the Phase 4 font work. Pins that
     emphasis renders *and* that the layout reserves the right bands for it."""
-    theme = plt.themes.default.with_(title_weight="bold", axis_label_weight="bold")
-    fig, ax = plt.subplots(figsize=(360, 260), theme=theme)
+    theme = pp.themes.default.with_(title_weight="bold", axis_label_weight="bold")
+    fig, ax = pp.subplots(figsize=(360, 260), theme=theme)
     ax.line([0, 1, 2], [0, 1, 4], label="series")
     ax.set(title="Bold title", xlabel="bold x label", ylabel="bold y label")
     ax.text(0.1, 3.2, "bold", weight="bold")
@@ -133,7 +133,7 @@ def test_render_is_deterministic(tmp_path):
 
 
 def test_png_dpi_scales_pixel_dimensions(tmp_path):
-    fig, ax = plt.subplots(figsize=(200, 100))
+    fig, ax = pp.subplots(figsize=(200, 100))
     ax.line([0, 1], [0, 1])
     low, high = tmp_path / "low.png", tmp_path / "high.png"
     fig.save(str(low), dpi=100)

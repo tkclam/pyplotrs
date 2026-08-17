@@ -27,9 +27,9 @@ body:
         the `fig.save(...)` call.
       render: python
       placeholder: |
-        import pyplotrs as plt
+        import pyplotrs as pp
 
-        fig, ax = plt.subplots()
+        fig, ax = pp.subplots()
         ax.line([0, 1, 2], [0, 1, 4])
         fig.save("out.pdf")
     validations:

@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 import random
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 
 FORMATS = ["pdf", "svg", "png", "html"]
@@ -233,7 +233,7 @@ MARKS_3D = {
 
 @pytest.mark.parametrize("name", sorted(MARKS_3D))
 def test_3d_mark_renders(name, tmp_path):
-    fig, ax = plt.subplots(figsize=(240, 180), projection="3d")
+    fig, ax = pp.subplots(figsize=(240, 180), projection="3d")
     MARKS_3D[name](ax)
     ax.set(title=name)
     _save_all(fig, tmp_path, f"3d_{name}")
@@ -243,7 +243,7 @@ def test_3d_mark_renders(name, tmp_path):
 
 @pytest.mark.parametrize("name", ["plot", "scatter"])
 def test_polar_renders(name, tmp_path):
-    fig, ax = plt.subplots(figsize=(240, 220), projection="polar")
+    fig, ax = pp.subplots(figsize=(240, 220), projection="polar")
     theta = [i * math.pi / 8 for i in range(17)]
     r = [1 + 0.5 * math.sin(3 * t) for t in theta]
     getattr(ax, name)(theta, r, label=name)
@@ -254,7 +254,7 @@ def test_polar_renders(name, tmp_path):
 # -- figure-level composition ------------------------------------------------
 
 def test_subplots_grid_renders(tmp_path):
-    fig, axs = plt.subplots(2, 3, figsize=(600, 400))
+    fig, axs = pp.subplots(2, 3, figsize=(600, 400))
     for row in axs:
         for ax in row:
             ax.line([0, 1, 2], [0, 1, 4])
@@ -263,14 +263,14 @@ def test_subplots_grid_renders(tmp_path):
 
 
 def test_gridspec_and_mosaic_render(tmp_path):
-    fig = plt.figure(figsize=(400, 300))
+    fig = pp.figure(figsize=(400, 300))
     gs = fig.add_gridspec(2, 2)
     fig.add_subplot(gs[0, :]).line([0, 1], [0, 1])
     fig.add_subplot(gs[1, 0]).scatter([0, 1], [1, 0])
     fig.add_subplot(gs[1, 1]).bar(["a"], [1])
     _save_all(fig, tmp_path, "gridspec")
 
-    fig2, axd = plt.subplot_mosaic("AB\nCC", figsize=(400, 300))
+    fig2, axd = pp.subplot_mosaic("AB\nCC", figsize=(400, 300))
     for ax in axd.values():
         ax.line([0, 1], [0, 1])
     _save_all(fig2, tmp_path, "mosaic")
@@ -295,7 +295,7 @@ def test_twin_inset_secondary_render(tmp_path, figure_factory):
 
 @pytest.mark.parametrize("theme", ["default", "nature", "grayscale", "presentation"])
 def test_themes_render(theme, tmp_path):
-    fig, ax = plt.subplots(figsize=(240, 180), theme=theme)
+    fig, ax = pp.subplots(figsize=(240, 180), theme=theme)
     ax.line([0, 1, 2], [0, 1, 4], label="a")
     ax.scatter([0, 1, 2], [1, 0, 2], label="b")
     ax.legend()
@@ -305,11 +305,11 @@ def test_themes_render(theme, tmp_path):
 
 def test_animation_renders(tmp_path):
     def render(i):
-        fig, ax = plt.subplots(figsize=(160, 120))
+        fig, ax = pp.subplots(figsize=(160, 120))
         ax.line([0, 1, 2], [0, i, 2 * i])
         return fig
 
-    anim = plt.animate(render, 4, fps=8)
+    anim = pp.animate(render, 4, fps=8)
     assert len(anim) == 4
     for ext in ("gif", "apng"):
         out = tmp_path / f"anim.{ext}"

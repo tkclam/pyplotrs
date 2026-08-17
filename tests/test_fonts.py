@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 from pyplotrs import _pyplotrs_core as _core
 from pyplotrs._draw import _font
@@ -64,9 +64,9 @@ def test_every_face_falls_back_to_a_bundled_one():
     This is the property that makes emphasis portable: a container with no fonts
     installed still gets real bold and italic rather than four copies of regular.
     """
-    original = plt.get_font_family()
+    original = pp.get_font_family()
     try:
-        plt.set_font_family("No Such Family Exists")
+        pp.set_font_family("No Such Family Exists")
         assert set(dict(_core.resolved_font_variants()).values()) == {
             "LiberationSans-Regular",
             "LiberationSans-Bold",
@@ -74,24 +74,24 @@ def test_every_face_falls_back_to_a_bundled_one():
             "LiberationSans-BoldItalic",
         }
     finally:
-        plt.set_font_family(*original)
+        pp.set_font_family(*original)
 
 
 def test_changing_the_family_invalidates_every_cached_face():
     """The cache is keyed per face, so `set_font_family` has to clear all of it,
     not just the regular entry - otherwise bold keeps serving the old family."""
-    original = plt.get_font_family()
+    original = pp.get_font_family()
     try:
-        plt.set_font_family("DejaVu Sans")
+        pp.set_font_family("DejaVu Sans")
         before = dict(_core.resolved_font_variants())
-        plt.set_font_family("No Such Family Exists")
+        pp.set_font_family("No Such Family Exists")
         after = dict(_core.resolved_font_variants())
         if before == after:
             pytest.skip("host lacks DejaVu Sans, so there is no change to observe")
         for key in before:
             assert before[key] != after[key], f"{key} was served from a stale cache"
     finally:
-        plt.set_font_family(*original)
+        pp.set_font_family(*original)
 
 
 # -- measuring ---------------------------------------------------------------
@@ -108,8 +108,8 @@ def test_bold_measures_wider_than_regular():
 def test_bold_title_reserves_more_height_than_it_needs_none(tmp_path):
     """End-to-end: a bold title must not overlap the plot area."""
     for weight in ("normal", "bold"):
-        theme = plt.themes.default.with_(title_weight=weight)
-        fig, ax = plt.subplots(figsize=(240, 180), theme=theme)
+        theme = pp.themes.default.with_(title_weight=weight)
+        fig, ax = pp.subplots(figsize=(240, 180), theme=theme)
         ax.line([0, 1], [0, 1])
         ax.set(title="Handgloves", xlabel="x", ylabel="y")
         fig.save(str(tmp_path / f"{weight}.png"))
@@ -121,7 +121,7 @@ def test_weight_and_style_reach_the_output(tmp_path):
     """Distinct faces must produce distinct text extents in the SVG, which is
     the cheapest observable proof the right font was used."""
     def widths(**kw):
-        fig, ax = plt.subplots(figsize=(300, 200))
+        fig, ax = pp.subplots(figsize=(300, 200))
         ax.line([0, 1], [0, 1])
         ax.text(0.1, 0.8, "Handgloves", **kw)
         out = tmp_path / "t.svg"
@@ -141,8 +141,8 @@ def test_weight_and_style_reach_the_output(tmp_path):
 def test_pdf_embeds_a_separate_subset_per_face(tmp_path):
     """Four faces should mean four embedded subsets, each still CID TrueType and
     never Type 3 - the emphasis must not cost the library its headline property."""
-    theme = plt.themes.default.with_(title_weight="bold")
-    fig, ax = plt.subplots(figsize=(320, 240), theme=theme)
+    theme = pp.themes.default.with_(title_weight="bold")
+    fig, ax = pp.subplots(figsize=(320, 240), theme=theme)
     ax.line([0, 1], [0, 1])
     ax.set(title="Bold title", xlabel="x")
     ax.text(0.2, 0.8, "italic", style="italic")
@@ -159,7 +159,7 @@ def test_pdf_embeds_a_separate_subset_per_face(tmp_path):
 
 
 def test_annotations_accept_weight_and_style(tmp_path):
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.line([0, 1], [0, 1])
     ax.annotate("look", (0.5, 0.5), xytext=(0.7, 0.2), weight="bold", style="italic")
     fig.save(str(tmp_path / "ann.png"))
@@ -167,7 +167,7 @@ def test_annotations_accept_weight_and_style(tmp_path):
 
 def test_default_theme_is_still_all_normal_weight():
     """Emphasis is opt-in: adding the feature must not restyle existing figures."""
-    t = plt.themes.default
+    t = pp.themes.default
     assert (t.title_weight, t.suptitle_weight, t.axis_label_weight) == (
         "normal", "normal", "normal"
     )

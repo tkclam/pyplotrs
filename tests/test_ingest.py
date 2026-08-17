@@ -16,7 +16,7 @@ from __future__ import annotations
 import math
 from array import array
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 from pyplotrs import _pyplotrs_core as _core
 from pyplotrs._util import _RangeAcc, _to_f64, _to_f64_grid
@@ -163,7 +163,7 @@ def test_range_acc_padding_expands_a_degenerate_span():
 # -- end to end: input form must not change the output -----------------------
 
 def _render(xs, ys, tmp_path, name):
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.line(xs, ys, marker="o")
     ax.set(title="ingest", xlabel="x", ylabel="y")
     out = tmp_path / f"{name}.png"
@@ -211,7 +211,7 @@ _DTYPES = ["float64", "float32", "float16", "int8", "uint8", "int16", "uint16",
 @pytest.mark.parametrize("method", ["imshow", "matshow"])
 def test_2d_grid_accepts_every_numeric_dtype(tmp_path, dtype, method):
     grid = np.arange(12).reshape(3, 4).astype(dtype)
-    fig, ax = plt.subplots(figsize=(160, 120))
+    fig, ax = pp.subplots(figsize=(160, 120))
     getattr(ax, method)(grid)
     fig.save(str(tmp_path / f"{method}-{dtype}.png"))
 
@@ -263,7 +263,7 @@ def test_string_arrays_reach_the_categorical_axis():
     """A NumPy ``<U*`` array *is* buffer-backed, so a fast path testing only
     ndim/contiguity took it and died on "unsupported format 1w" instead of
     letting it become a categorical axis the way a list of strings does."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.bar(np.array(["alpha", "beta", "gamma"]), np.array([3, 4, 2], dtype="int32"))
     assert ax.get_xscale() == "categorical"
     assert ax.get_xticklabels() == ["alpha", "beta", "gamma"]
@@ -271,7 +271,7 @@ def test_string_arrays_reach_the_categorical_axis():
 
 @requires_numpy
 def test_datetime64_arrays_reach_the_date_axis():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line(np.arange("2020-01", "2020-06", dtype="datetime64[M]"), [1, 2, 3, 4, 5])
     assert ax.get_xscale() == "date"
     assert ax.get_xticklabels()[0].endswith("2020")
@@ -287,7 +287,7 @@ def test_nan_still_breaks_the_line_into_a_gap(tmp_path):
     that reached autoscaling instead would collapse the axis."""
     import re
 
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.line([0, 1, 2, 3, 4], [0, 1, float("nan"), 3, 4])
     out = tmp_path / "gap.svg"
     fig.save(str(out))
@@ -308,7 +308,7 @@ def test_nan_still_breaks_the_line_into_a_gap(tmp_path):
 def test_bar_autoscale_stays_one_sided(tmp_path):
     """A bar from 0 to 5 must not pull the axis down to -5. Caught by the golden
     suite when the shared offset reduction was first wired up two-sided."""
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.bar(["a", "b"], [3.0, 5.0])
     _, (ylo, yhi) = ax._ranges()
     assert ylo == 0.0, f"bar baseline moved to {ylo}"
@@ -316,7 +316,7 @@ def test_bar_autoscale_stays_one_sided(tmp_path):
 
 
 def test_errorbar_autoscale_stays_two_sided():
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.errorbar([0, 1], [10.0, 10.0], yerr=[2.0, 2.0])
     _, (ylo, yhi) = ax._ranges()
     assert ylo <= 8.0 and yhi >= 12.0, "whiskers were not included in the y range"
@@ -392,7 +392,7 @@ def test_exotic_norms_still_colour_correctly(tmp_path):
     values = array("d", [-1.0, 0.0, 3.0])
     assert _rgba_values(values, cm, nrm) == [cm(nrm(v)) for v in values]
 
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.scatter([0, 1, 2], [0, 1, 2], c=[-1.0, 0.0, 3.0], norm=nrm, cmap="coolwarm")
     fig.save(str(tmp_path / "twoslope.png"))
 
@@ -405,7 +405,7 @@ def test_colormapped_scatter_renders_identically_at_both_sizes(tmp_path):
 
     def render(n, name):
         xs = [i / n for i in range(n)]
-        fig, ax = plt.subplots(figsize=(240, 180))
+        fig, ax = pp.subplots(figsize=(240, 180))
         ax.scatter(xs, xs, c=xs, cmap="viridis")
         ax.set(xlim=(0, 1), ylim=(0, 1))
         out = tmp_path / f"{name}.png"

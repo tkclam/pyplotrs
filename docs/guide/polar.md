@@ -4,8 +4,8 @@ A polar axes draws `(theta, r)` on a circular frame. Ask for one with
 `projection="polar"`, on `subplots` or on a single `add_subplot` cell:
 
 ```python
-fig, ax = plt.subplots(projection="polar")
-fig, ax = plt.subplots(1, 2, projection="polar")   # every panel polar
+fig, ax = pp.subplots(projection="polar")
+fig, ax = pp.subplots(1, 2, projection="polar")   # every panel polar
 ax = fig.add_subplot(gs[1, 1], projection="polar") # one polar panel in a grid
 ```
 

@@ -209,9 +209,9 @@ def test_the_mathjax_version_is_recorded_where_it_is_claimed():
 def test_generated_html_carries_the_mathjax_attribution():
     """Inlining the bundle makes each `.html` figure its own redistribution,
     so the notice has to be in the file itself, not only in the wheel."""
-    import pyplotrs as plt
+    import pyplotrs as pp
 
-    fig, ax = plt.subplots(figsize=(200, 150))
+    fig, ax = pp.subplots(figsize=(200, 150))
     ax.set(title=r"$\alpha + \beta$")
     page = fig.to_html() if hasattr(fig, "to_html") else None
     if page is None:

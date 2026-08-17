@@ -20,11 +20,11 @@ from __future__ import annotations
 import math
 import os
 
-import pyplotrs as plt
+import pyplotrs as pp
 
 #: Must match `tests/conftest.py` and `tools/build_gallery_images.py`.
-plt.set_font_family("Liberation Sans")
-assert plt.resolved_font_name() == "Liberation Sans"
+pp.set_font_family("Liberation Sans")
+assert pp.resolved_font_name() == "Liberation Sans"
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "docs", "images")
 
@@ -59,22 +59,22 @@ def model(t: float) -> float:
 fine = [280 + i for i in range(121)]
 
 
-def step1() -> plt.Figure:
-    fig, ax = plt.subplots()
+def step1() -> pp.Figure:
+    fig, ax = pp.subplots()
     ax.line(temp, rate_a)
     return fig
 
 
-def step2() -> plt.Figure:
-    fig, ax = plt.subplots()
+def step2() -> pp.Figure:
+    fig, ax = pp.subplots()
     ax.errorbar(temp, rate_a, yerr=err_a, marker="o", label="catalyst A")
     ax.errorbar(temp, rate_b, yerr=err_b, marker="s", label="catalyst B")
     ax.legend()
     return fig
 
 
-def step3() -> plt.Figure:
-    fig, ax = plt.subplots()
+def step3() -> pp.Figure:
+    fig, ax = pp.subplots()
     fit = [model(t) for t in fine]
     band = [0.08 * y for y in fit]
     ax.fill_between(fine, [y - e for y, e in zip(fit, band)],
@@ -92,8 +92,8 @@ def step3() -> plt.Figure:
     return fig
 
 
-def step4() -> plt.Figure:
-    fig, axs = plt.subplots(2, 1, figsize=(250, 260), sharex=True,
+def step4() -> pp.Figure:
+    fig, axs = pp.subplots(2, 1, figsize=(250, 260), sharex=True,
                             height_ratios=[3, 1])
     top, bottom = axs
 
@@ -120,7 +120,7 @@ def step4() -> plt.Figure:
     return fig
 
 
-def step5() -> plt.Figure:
+def step5() -> pp.Figure:
     fig = step4()
     ax = fig.axes[0]
     ax.annotate("B lags by ~25%", (380, 0.741), xytext=(332, 0.06))

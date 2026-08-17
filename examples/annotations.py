@@ -1,12 +1,12 @@
 """Text and callout-arrow annotations in data coordinates."""
 import math
 
-import pyplotrs as plt
+import pyplotrs as pp
 
 xs = [i * 0.1 for i in range(80)]
 ys = [math.sin(x) for x in xs]
 peak = max(range(len(xs)), key=lambda i: ys[i])
-fig, ax = plt.subplots()
+fig, ax = pp.subplots()
 ax.line(xs, ys, color="C0")
 ax.annotate("first maximum", (xs[peak], ys[peak]),
             xytext=(xs[peak] + 1.5, ys[peak] + 0.05))

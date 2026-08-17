@@ -22,9 +22,9 @@ selectable, and editable in Illustrator** (genuine embedded/subset fonts, never
 outlines).
 
 ```python
-import pyplotrs as plt
+import pyplotrs as pp
 
-fig, ax = plt.subplots()
+fig, ax = pp.subplots()
 ax.line([0, 1, 2, 3], [0, 1, 4, 9], label="y = x²")
 ax.scatter([0, 1, 2, 3], [0, 1, 4, 9])
 ax.set(title="Hello, pyplotrs", xlabel="x", ylabel="y")

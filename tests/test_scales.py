@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime as dt
 import math
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 from pyplotrs import _pyplotrs_core as _core
 from pyplotrs import norms, scales, ticker
@@ -82,7 +82,7 @@ def test_ticks_lie_within_the_view():
 
 
 def test_categorical_scale_assigns_positions_in_first_seen_order():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.bar(["beta", "alpha", "beta", "gamma"], [1, 2, 3, 4])
     scale = ax._xscale
     assert isinstance(scale, scales.CategoricalScale)
@@ -90,7 +90,7 @@ def test_categorical_scale_assigns_positions_in_first_seen_order():
 
 
 def test_datetime_axis_switches_scale_and_orders_correctly():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     days = [dt.date(2026, 1, 1), dt.date(2026, 6, 1), dt.date(2026, 12, 1)]
     ax.line(days, [1, 2, 3])
     assert isinstance(ax._xscale, scales.DateScale)
@@ -130,9 +130,9 @@ def unicode_minus():
     """Set the display flag per test and always put it back - it is process
     global, so a leak would flip labels in unrelated tests."""
     def apply(on: bool):
-        plt.set_unicode_minus(on)
+        pp.set_unicode_minus(on)
     yield apply
-    plt.set_unicode_minus(True)
+    pp.set_unicode_minus(True)
 
 
 def test_negative_labels_use_a_real_minus_not_a_hyphen():
@@ -189,7 +189,7 @@ def test_math_labels_are_left_for_the_math_engine():
 
 def test_unicode_minus_can_be_turned_off(unicode_minus):
     unicode_minus(False)
-    assert plt.get_unicode_minus() is False
+    assert pp.get_unicode_minus() is False
     assert [lab for _, lab in scales.nice_ticks(-2.0, 2.0, 5)][0] == "-2"
     assert ticker.ScalarFormatter()(-1.5) == "-1.5"
     unicode_minus(True)
@@ -202,7 +202,7 @@ def test_minus_widens_the_reserved_tick_band(unicode_minus):
     the labels would overrun the space reserved for them."""
     def y_tick_band(on: bool) -> float:
         unicode_minus(on)
-        fig, ax = plt.subplots(figsize=(300, 200))
+        fig, ax = pp.subplots(figsize=(300, 200))
         ax.line([0, 1], [-100, -50])
         scene = _core.Scene(300, 200)
         bands, _xt, yt = ax._bands(scene, *ax._ranges())
@@ -237,7 +237,7 @@ def test_twoslopenorm_pins_the_center():
 
 @pytest.mark.parametrize("scale", ["log", "symlog", "logit"])
 def test_nonlinear_scales_render_all_backends(scale, tmp_path):
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     if scale == "logit":
         xs, ys = [0.1, 0.5, 0.9], [0.2, 0.5, 0.8]
     else:
@@ -251,7 +251,7 @@ def test_nonlinear_scales_render_all_backends(scale, tmp_path):
 
 
 def test_manual_ticks_and_labels_are_honoured(tmp_path):
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     ax.line([0, 1, 2], [0, 1, 2])
     ax.set(xticks=[0, 1, 2], xticklabels=["zero", "one", "two"])
     out = tmp_path / "ticks.svg"

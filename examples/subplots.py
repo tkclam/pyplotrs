@@ -1,10 +1,10 @@
 """A multi-panel figure with a shared y-axis and a figure-level legend."""
 import math
 
-import pyplotrs as plt
+import pyplotrs as pp
 
 xs = [i * 0.15 for i in range(60)]
-fig, axs = plt.subplots(1, 3, figsize=(640, 240), sharey=True)
+fig, axs = pp.subplots(1, 3, figsize=(640, 240), sharey=True)
 for k, ax in enumerate(axs):
     ax.line(xs, [math.sin(x + k) for x in xs], label="sin")
     ax.line(xs, [math.cos(x + k) for x in xs], label="cos", linestyle="dashed")

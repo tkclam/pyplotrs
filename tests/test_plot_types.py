@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 import random
 
-import pyplotrs as plt
+import pyplotrs as pp
 import pytest
 from pyplotrs import _pyplotrs_core as _core
 
@@ -62,7 +62,7 @@ CASES = {
 @pytest.mark.parametrize("name", sorted(CASES))
 def test_renders_to_every_backend(name, tmp_path):
     build, _ = CASES[name]
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     build(ax)
     ax.set(title=name, xlabel="x", ylabel="y")
     for fmt in FORMATS:
@@ -74,7 +74,7 @@ def test_renders_to_every_backend(name, tmp_path):
 @pytest.mark.parametrize("name", sorted(n for n, (_, lab) in CASES.items() if lab))
 def test_labelled_types_survive_a_legend(name, tmp_path):
     build, _ = CASES[name]
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     build(ax)
     ax.legend()
     fig.save(str(tmp_path / f"{name}.png"))
@@ -84,7 +84,7 @@ def test_labelled_types_survive_a_legend(name, tmp_path):
 
 def test_hlines_and_vlines_autoscale_to_data():
     """Unlike axhline/axvline, which are axes-fraction guides, these are data."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.hlines([1.0, 3.0], 0.0, 5.0)
     (xlo, xhi), (ylo, yhi) = ax._ranges()
     assert xlo <= 0.0 and xhi >= 5.0
@@ -101,7 +101,7 @@ def test_axhline_autoscales_in_its_own_direction_only():
     positioned at (and only that one: the axes-fraction span it covers is not
     data) keeps it visible, and matches matplotlib.
     """
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1], [0, 1])
     ax.axhline(500.0)
     (xlo, xhi), (ylo, yhi) = ax._ranges()
@@ -111,7 +111,7 @@ def test_axhline_autoscales_in_its_own_direction_only():
 
 
 def test_axvspan_contributes_its_band_but_not_its_span():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.line([0, 1], [0, 1])
     ax.axvspan(3.0, 4.0)
     (xlo, xhi), (_, yhi) = ax._ranges()
@@ -122,11 +122,11 @@ def test_axvspan_contributes_its_band_but_not_its_span():
 def test_fill_betweenx_is_the_transpose_of_fill_between():
     """Swapping the roles of x and y must swap the ranges, not produce the same
     figure - the two share a mark kind and are told apart by an orientation."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.fill_between([0.0, 1.0, 2.0], [10.0, 20.0, 30.0])
     (bx, by) = ax._ranges()
 
-    fig2, ax2 = plt.subplots()
+    fig2, ax2 = pp.subplots()
     ax2.fill_betweenx([0.0, 1.0, 2.0], [10.0, 20.0, 30.0])
     (bx2, by2) = ax2._ranges()
 
@@ -136,7 +136,7 @@ def test_fill_betweenx_is_the_transpose_of_fill_between():
 
 def test_broadcasting_scalars():
     """A scalar position or bound broadcasts against the other arguments."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.hlines(1.0, 0.0, 5.0)
     ax.vlines([1.0, 2.0, 3.0], 0.0, 4.0)
     (xlo, xhi), (ylo, yhi) = ax._ranges()
@@ -148,7 +148,7 @@ def test_broadcasting_scalars():
 def test_pcolormesh_regular_grid_uses_the_image_path(tmp_path):
     """A uniform grid should route to the Rust image path, which produces one
     image node rather than one quad per cell."""
-    fig, ax = plt.subplots(figsize=(200, 160))
+    fig, ax = pp.subplots(figsize=(200, 160))
     ax.pcolormesh(_grid())
     kinds = [m["kind"] for m in ax._marks]
     assert kinds == ["image"], f"expected the image fast path, got {kinds}"
@@ -158,13 +158,13 @@ def test_pcolormesh_irregular_grid_falls_back_to_quads():
     xc = [0.0, 1.0, 4.0]           # deliberately non-uniform
     yc = [0.0, 1.0, 2.0]
     Z = [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]]
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.pcolormesh(xc, yc, Z)
     assert [m["kind"] for m in ax._marks] == ["quadmesh"]
 
 
 def test_contour_levels_are_honoured():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.contour(_grid(), levels=[-0.5, 0.0, 0.5])
     mark = ax._marks[0]
     assert mark["kind"] == "contour"
@@ -172,14 +172,14 @@ def test_contour_levels_are_honoured():
 
 
 def test_hist2d_returns_a_mappable_for_the_colorbar(tmp_path):
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     mappable = ax.hist2d(*_cloud(), bins=10)
     fig.colorbar(mappable, label="count")
     fig.save(str(tmp_path / "cb.png"))
 
 
 def test_hexbin_returns_a_mappable_for_the_colorbar(tmp_path):
-    fig, ax = plt.subplots(figsize=(240, 180))
+    fig, ax = pp.subplots(figsize=(240, 180))
     mappable = ax.hexbin(*_cloud(), gridsize=8)
     fig.colorbar(mappable, label="count")
     fig.save(str(tmp_path / "cb.png"))
@@ -189,7 +189,7 @@ def test_step_where_variants_differ():
     """`pre`/`post`/`mid` must actually produce different geometry."""
     seen = set()
     for where in ("pre", "post", "mid"):
-        fig, ax = plt.subplots()
+        fig, ax = pp.subplots()
         ax.step([0.0, 1.0, 2.0], [0.0, 1.0, 0.0], where=where)
         seen.add(tuple(ax._marks[0]["ys"]))
     assert len(seen) == 3, "step `where` variants produced identical geometry"
@@ -257,7 +257,7 @@ def test_malformed_ratios_fall_back_to_equal(bad):
 def test_ratios_reach_the_rendered_figure(tmp_path):
     """End to end: the same figure with and without ratios must differ."""
     def render(name, **kw):
-        fig, axs = plt.subplots(1, 2, figsize=(600, 200), **kw)
+        fig, axs = pp.subplots(1, 2, figsize=(600, 200), **kw)
         for ax in axs:
             ax.line([0, 1], [0, 1])
         out = tmp_path / f"{name}.png"
@@ -268,7 +268,7 @@ def test_ratios_reach_the_rendered_figure(tmp_path):
 
 
 def test_gridspec_accepts_ratios(tmp_path):
-    fig = plt.figure(figsize=(400, 300))
+    fig = pp.figure(figsize=(400, 300))
     gs = fig.add_gridspec(2, 2, width_ratios=[2, 1])
     fig.add_subplot(gs[0, :]).line([0, 1], [0, 1])
     fig.add_subplot(gs[1, 0]).line([0, 1], [1, 0])
@@ -318,14 +318,14 @@ RESTORED = {
 @pytest.mark.parametrize("name", sorted(RESTORED))
 @pytest.mark.parametrize("ext", FORMATS)
 def test_restored_type_renders(name, ext, tmp_path):
-    fig, ax = plt.subplots(figsize=(260, 200))
+    fig, ax = pp.subplots(figsize=(260, 200))
     RESTORED[name](ax)
     fig.save(str(tmp_path / f"{name}.{ext}"))
 
 
 @pytest.mark.parametrize("name", sorted(RESTORED))
 def test_restored_type_survives_a_legend(name, tmp_path):
-    fig, ax = plt.subplots(figsize=(260, 200))
+    fig, ax = pp.subplots(figsize=(260, 200))
     RESTORED[name](ax)
     ax.legend()
     fig.save(str(tmp_path / f"{name}_legend.png"))
@@ -334,7 +334,7 @@ def test_restored_type_survives_a_legend(name, tmp_path):
 def test_quiver_autoscales_to_the_arrow_tips():
     """`quiver`'s `_ranges` branch extends the view to `x + u*scale`; it stayed
     in the tree the whole time with no method able to reach it."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.quiver([0.0], [0.0], [2.0], [0.0], scale=1.0)
     (x0, x1), _ = ax._ranges()
     assert x1 >= 2.0, f"arrow tip at x=2 fell outside the view {(x0, x1)}"
@@ -344,7 +344,7 @@ def test_streamplot_of_a_rotation_traces_circles():
     """The field is solid-body rotation, so every streamline vertex must sit at
     a near-constant radius from the origin - the cheapest end-to-end check that
     the RK4 integrator is integrating the field and not drifting."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.streamplot(*_rotation(21), density=0.8, arrows=False)
     lines = [m for m in ax._marks if m["kind"] == "line"]
     assert lines, "streamplot produced no streamlines"
@@ -360,7 +360,7 @@ def test_streamplot_of_a_rotation_traces_circles():
 
 
 def test_streamplot_arrows_are_one_mark_not_one_per_line():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.streamplot(*_rotation(), density=0.8)
     quivers = [m for m in ax._marks if m["kind"] == "quiver"]
     assert len(quivers) == 1
@@ -368,19 +368,19 @@ def test_streamplot_arrows_are_one_mark_not_one_per_line():
 
 
 def test_streamplot_arrows_can_be_turned_off():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.streamplot(*_rotation(), density=0.8, arrows=False)
     assert not [m for m in ax._marks if m["kind"] == "quiver"]
 
 
 def test_quiver_rejects_ragged_input():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     with pytest.raises(ValueError, match="equal length"):
         ax.quiver([0, 1], [0, 1], [1], [1])
 
 
 def test_streamplot_rejects_a_degenerate_grid():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     with pytest.raises(ValueError, match="2x2"):
         ax.streamplot([0.0], [0.0], [[1.0]], [[1.0]])
 
@@ -388,26 +388,26 @@ def test_streamplot_rejects_a_degenerate_grid():
 def test_stackplot_stacks_rather_than_overlaying():
     """Each band starts where the previous one ended; the top of the last band
     is the column total."""
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.stackplot([0, 1], [1, 1], [2, 2], [3, 3])
     tops = [list(m["y1"]) for m in ax._marks]
     assert tops == [[1.0, 1.0], [3.0, 3.0], [6.0, 6.0]]
 
 
 def test_stackplot_accepts_one_sequence_of_series():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.stackplot([0, 1], [[1, 1], [2, 2]])
     assert len(ax._marks) == 2
 
 
 def test_spy_puts_row_zero_at_the_top():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.spy([[1, 0], [0, 1]])
     assert ax._ylim[0] > ax._ylim[1], "spy should invert y so row 0 is on top"
 
 
 def test_matshow_is_imshow_with_matrix_conventions():
-    fig, ax = plt.subplots()
+    fig, ax = pp.subplots()
     ax.matshow([[1, 2], [3, 4]])
     m = ax._marks[0]
     assert m["kind"] == "image" and m["origin"] == "upper"
@@ -415,8 +415,8 @@ def test_matshow_is_imshow_with_matrix_conventions():
 
 
 def test_pcolor_is_pcolormesh():
-    fa, axa = plt.subplots()
-    fb, axb = plt.subplots()
+    fa, axa = pp.subplots()
+    fb, axb = pp.subplots()
     axa.pcolor(_grid())
     axb.pcolormesh(_grid())
     assert axa._marks[0]["kind"] == axb._marks[0]["kind"]

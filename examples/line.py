@@ -1,10 +1,10 @@
 """Line plot: multiple series with a legend."""
 import math
 
-import pyplotrs as plt
+import pyplotrs as pp
 
 xs = [i * 0.1 for i in range(80)]
-fig, ax = plt.subplots()
+fig, ax = pp.subplots()
 ax.line(xs, [math.sin(x) for x in xs], label="sin")
 ax.line(xs, [math.sin(x) * math.exp(-0.1 * x) for x in xs],
         label="damped", linestyle="dashed")
