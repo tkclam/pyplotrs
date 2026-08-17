@@ -100,12 +100,12 @@ jobs:
         run: python benchmarks/benchmark.py --check
 
       - name: Documentation notebooks execute
-        # The six notebooks under docs/notebooks/ are committed with their
-        # output and rendered into the site from it (mkdocs-jupyter runs with
+        # The notebooks under docs/notebooks/ are committed with their output
+        # and rendered into the site from it (mkdocs-jupyter runs with
         # `execute: false`), so nothing else would ever run their code again.
         # This runs every cell against a real kernel and fails on the first
         # exception, without writing the results back - a rename in `Axes`
-        # otherwise leaves six documents showing code that raises, next to
+        # otherwise leaves every one of them showing code that raises, next to
         # images proving it once worked.
         run: |
           python -m pip install ".[dev]"

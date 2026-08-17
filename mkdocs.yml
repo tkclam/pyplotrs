@@ -48,8 +48,10 @@ nav:
       - 2 · Coming from matplotlib: notebooks/02_from_matplotlib.ipynb
       - 3 · Plot types: notebooks/03_plot_types.ipynb
       - 4 · Layout and composition: notebooks/04_layout_and_composition.ipynb
-      - 5 · Styling, color and text: notebooks/05_styling_color_and_text.ipynb
-      - 6 · Output and performance: notebooks/06_output_and_performance.ipynb
+      - 5 · Styling and color: notebooks/05_styling_and_color.ipynb
+      - 6 · Text and math: notebooks/06_text_and_math.ipynb
+      - 7 · Animation: notebooks/07_animation.ipynb
+      - 8 · Output and performance: notebooks/08_output_and_performance.ipynb
   - User guide:
       - Figures & axes: guide/figure-and-axes.md
       - Layout: guide/layout.md

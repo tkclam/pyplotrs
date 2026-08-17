@@ -1,8 +1,9 @@
 """The documentation notebooks have to run, and to stay wired into the docs.
 
-`docs/notebooks/*.ipynb` is the tutorial material: six documents committed *with
-their output*, rendered into the site by mkdocs-jupyter with `execute: false`
-and read on GitHub the same way. That combination is exactly the one that rots
+`docs/notebooks/*.ipynb` is the tutorial material: eight documents committed
+*with their output*, rendered into the site by mkdocs-jupyter with `execute:
+false` and read on GitHub the same way. That combination is exactly the one that
+rots
 quietly — the site and the repository both show images that were true once, and
 nothing re-runs the code that made them.
 
@@ -21,8 +22,8 @@ So this module asserts three things:
 
 Notebooks that need an optional dependency (matplotlib, NumPy, IPython) are
 skipped rather than failed when it is missing: the test environment is
-deliberately close to stdlib-only, and those two notebooks are *about*
-comparing against matplotlib.
+deliberately close to stdlib-only, and the two notebooks that reach for one are
+*about* comparing against matplotlib.
 """
 
 from __future__ import annotations
@@ -76,8 +77,8 @@ def imported_modules(source: str) -> set[str]:
 
 def test_the_notebook_set_is_present():
     """Guard the guard: an empty glob would make every check below vacuous."""
-    assert len(NOTEBOOKS) == 6, (
-        f"expected the six documentation notebooks, found "
+    assert len(NOTEBOOKS) == 8, (
+        f"expected the eight documentation notebooks, found "
         f"{[p.name for p in NOTEBOOKS]}"
     )
 

@@ -257,15 +257,17 @@ All notable changes to pyplotrs are documented here. The format is based on
 
 ### Documentation
 
-- **Six runnable notebooks** under `docs/notebooks/`, rendered into the site and
-  on GitHub from their committed output: a
+- **Eight runnable notebooks** under `docs/notebooks/`, rendered into the site
+  and on GitHub from their committed output: a
   [quickstart](../notebooks/01_quickstart.ipynb), a
   [coming-from-matplotlib](../notebooks/02_from_matplotlib.ipynb) walkthrough
   that renders the same data in both libraries side by side, the full
   [plot-type](../notebooks/03_plot_types.ipynb) vocabulary,
   [layout and composition](../notebooks/04_layout_and_composition.ipynb),
-  [styling, color and text](../notebooks/05_styling_color_and_text.ipynb), and
-  [output formats and performance](../notebooks/06_output_and_performance.ipynb)
+  [styling and color](../notebooks/05_styling_and_color.ipynb),
+  [text and math](../notebooks/06_text_and_math.ipynb) — fonts, rich text and
+  `$…$` — [animation](../notebooks/07_animation.ipynb), and
+  [output formats and performance](../notebooks/08_output_and_performance.ipynb)
   with a live benchmark against matplotlib.
 - `tools/build_notebooks.py` re-executes them reproducibly (pinned font, no
   timing metadata, normalized kernel metadata); `tests/test_notebooks.py` and a

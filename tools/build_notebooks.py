@@ -15,19 +15,22 @@ git, so they need a build tool that produces the *same* artifact twice - hence
 this script rather than "whatever the last person's Run All left behind", which
 is how the notebook this replaced grew to 4.5 MB of stale renders.
 
-Three things here exist purely to keep the committed diff honest:
+Two things here exist purely to keep the committed diff honest:
 
-* **The font is pinned inside each notebook** (``set_font_family("Liberation
-  Sans")``), not here, so a reader running the notebook gets the images that are
-  committed next to it. Liberation Sans is compiled into the extension, so it
-  resolves identically everywhere; left to itself pyplotrs would pick up the
-  host's Arial or Helvetica and every glyph advance would move.
 * **Timing metadata is off** (``record_timing=False``). nbclient otherwise
   stamps every cell with wall-clock start/end times, so a rebuild that changed
   nothing still rewrote every cell.
 * **Kernel metadata is normalized** after the run: the interpreter's exact patch
   version is not a property of the notebook, and letting it through means the
   file diffs on any machine with a different Python.
+
+What is deliberately *not* controlled here is the font. The notebooks take the
+default preference order, so they show a reader what `pp.subplots()` does on
+their own machine; the committed images came from a host where Arial resolved,
+and a rebuild elsewhere will move every glyph advance. The gallery and tutorial
+images are the pinned ones - `tools/build_gallery_images.py` and
+`tests/conftest.py` must agree on Liberation Sans, because those images are
+byte-compared by the suite. These are not.
 
 ``--check`` executes without writing, which is what CI runs: it proves every
 cell still runs against the current API without asking a workflow to commit.
