@@ -58,6 +58,8 @@ that it is current.
 |---|---|---|
 | Liberation Sans (body text) | SIL OFL 1.1 | [`assets/fonts/LiberationSans-OFL.txt`](assets/fonts/LiberationSans-OFL.txt) |
 | STIX Two Math (`$...$` math) | SIL OFL 1.1 | [`assets/fonts/STIXTwoMath-OFL.txt`](assets/fonts/STIXTwoMath-OFL.txt) |
+| DejaVu Sans, math symbol subset (`$...$` math) | Bitstream Vera | [`assets/fonts/DejaVuSans-LICENSE.txt`](assets/fonts/DejaVuSans-LICENSE.txt) |
+| Fira Math (sans `$...$` math) | SIL OFL 1.1 | [`assets/fonts/FiraMath-OFL.txt`](assets/fonts/FiraMath-OFL.txt) |
 | Colormap and palette tables | CC0-1.0, CC-BY-4.0, MIT, BSD-3-Clause | [`THIRD_PARTY_COLORMAPS.md`](THIRD_PARTY_COLORMAPS.md) |
 | MathJax 3.2.2 (HTML math export) | Apache-2.0 | [`python/pyplotrs/_vendor/MATHJAX-NOTICE.md`](python/pyplotrs/_vendor/MATHJAX-NOTICE.md) |
 | krilla (PDF backend, vendored fork) | MIT OR Apache-2.0 | [`vendor/krilla-0.8.2/PYPLOTRS_PATCH.md`](vendor/krilla-0.8.2/PYPLOTRS_PATCH.md) |

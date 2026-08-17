@@ -31,7 +31,7 @@ from __future__ import annotations
 def measure(scene, s: str, size: float, font: str = "body") -> tuple[float, float, float]:
     """Return ``(width, ascent, depth)`` of ``s`` (math-aware), in points.
 
-    ``font`` selects the upright body face - ``"body"``, ``"body-bold"``,
+    ``font`` selects the *ambient* body face - ``"body"``, ``"body-bold"``,
     ``"body-italic"``, ``"body-bolditalic"``. It must match what ``draw``
     will use, since the layout engine sizes its bands from this measurement.
     """
@@ -42,7 +42,10 @@ def draw(scene, x: float, baseline: float, s: str, size: float, color,
          font: str = "body") -> None:
     """Render ``s`` with its left edge at ``x`` and baseline at ``baseline``.
 
-    ``font`` selects the upright body face (see ``measure``). Math spans are
-    unaffected: their italics come from the math font's own alphanumeric blocks.
+    ``font`` selects the *ambient* body face (see ``measure``): what the span's
+    digits, upright roman and common operators are set in, and whose italic
+    companion draws its variables and Greek - so a bold label's math comes out
+    bold throughout. Only what a text face cannot draw is left to the math
+    font; see ``pyplotrs.set_mathtext_fontset``.
     """
     scene.add_math(x, baseline, s, size, color, font)

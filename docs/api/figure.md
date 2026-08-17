@@ -140,7 +140,8 @@ The core 2D/3D plotting API.
 
 ## Fonts
 
-These module-level helpers configure body-font resolution.
+These module-level helpers configure body-font resolution, and which family
+`$...$` math is drawn in.
 
 ::: pyplotrs.set_font_family
 
@@ -149,6 +150,10 @@ These module-level helpers configure body-font resolution.
 ::: pyplotrs.resolved_font_name
 
 ::: pyplotrs.resolved_font_variants
+
+::: pyplotrs.set_mathtext_fontset
+
+::: pyplotrs.get_mathtext_fontset
 
 ## Number formatting
 

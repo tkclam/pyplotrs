@@ -123,6 +123,34 @@ def get_unicode_minus() -> bool:
     return ticker._UNICODE_MINUS
 
 
+def set_mathtext_fontset(name: str = "sans") -> None:
+    """Which family ``$...$`` math is drawn in - pyplotrs' analog of
+    matplotlib's ``rcParams["mathtext.fontset"]``.
+
+    ``"sans"`` (the default) sets math in your own body family wherever it has
+    the glyphs - variables in its italic, Greek, digits and the common
+    operators - and leaves the bundled STIX Two Math only what a text face
+    cannot draw: big operators, radicals, stretchy fences, the blackboard /
+    script / Fraktur alphabets, and any symbol your family is missing. Math
+    then matches the labels around it, which is what matplotlib does by
+    default.
+
+    ``"stix"`` sets *every* atom in STIX Two Math, so a span is uniformly
+    serif. Pair it with a serif body family or the math will not match the text
+    beside it::
+
+        pyplotrs.set_mathtext_fontset("stix")
+        pyplotrs.set_font_family("STIX Two Text", "Times New Roman")
+    """
+    _core.set_mathtext_fontset(str(name))
+
+
+def get_mathtext_fontset() -> str:
+    """The active math font set, ``"sans"`` or ``"stix"`` (see
+    ``set_mathtext_fontset``). Defaults to ``"sans"``."""
+    return _core.get_mathtext_fontset()
+
+
 def resolved_font_name() -> str:
     """The family name body text actually resolves to on this host right now
     (e.g. ``"Arial"`` if installed, otherwise ``"Liberation Sans"``)."""
@@ -154,4 +182,5 @@ __all__ = [
     "set_font_family", "get_font_family", "resolved_font_name",
     "resolved_font_variants",
     "set_unicode_minus", "get_unicode_minus",
+    "set_mathtext_fontset", "get_mathtext_fontset",
 ]

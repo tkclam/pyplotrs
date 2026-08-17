@@ -25,10 +25,24 @@ compiled into the extension module.
   compatible fallback for body text.
   Source: <https://github.com/liberationfonts>.
   License text: [`assets/fonts/LiberationSans-OFL.txt`](https://github.com/tkclam/pyplotrs/blob/main/assets/fonts/LiberationSans-OFL.txt).
+- **Fira Math** — © 2018–2023 Xiangdong Zeng. SIL Open Font License 1.1. The
+  **sans** OpenType math font: radicals, big operators, stretchy fences, and the
+  MATH table that positions every atom of a `$...$` span.
+  Source: <https://github.com/firamath/firamath>.
+  License text: [`assets/fonts/FiraMath-OFL.txt`](https://github.com/tkclam/pyplotrs/blob/main/assets/fonts/FiraMath-OFL.txt).
 - **STIX Two Math** — © 2001–2021 The STIX Fonts Project Authors. SIL Open Font
-  License 1.1. Used for `$...$` math.
+  License 1.1. Draws a whole span under `set_mathtext_fontset("stix")`, and is
+  the last resort under the default `sans` set — the Script and Fraktur
+  alphabets and double-struck digits, which no sans math font here carries.
   Source: <https://github.com/stipub/stixfonts>.
   License text: [`assets/fonts/STIXTwoMath-OFL.txt`](https://github.com/tkclam/pyplotrs/blob/main/assets/fonts/STIXTwoMath-OFL.txt).
+- **DejaVu Sans** — © 2003 Bitstream, Inc.; DejaVu changes in the public domain.
+  Bitstream Vera license. Bundled as a 95 KB **subset** of the math symbol
+  blocks, which supplies sans shapes for the symbols a text family lacks (`∇`,
+  `⇒`, `∪`, `ℏ`) so a symbol family is not split between a sans and a serif. No
+  glyph outline is altered and the MATH table is dropped.
+  Source: <https://dejavu-fonts.github.io/>.
+  License text: [`assets/fonts/DejaVuSans-LICENSE.txt`](https://github.com/tkclam/pyplotrs/blob/main/assets/fonts/DejaVuSans-LICENSE.txt).
 
 Arial and Helvetica are **not** bundled (they are proprietary). pyplotrs prefers
 host Arial/Helvetica for body text when installed, else the bundled Liberation

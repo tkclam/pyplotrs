@@ -93,7 +93,19 @@ without relying on system fonts):
 
 - **Liberation Sans** — the permissive, Arial-metric-compatible fallback for
   body text, labels, ticks and legends.
-- **STIX Two Math** — used for `$...$` math spans.
+- **Fira Math** (175 KB) — the **sans** math font, and what a text face cannot
+  draw in a `$...$` span: radicals, big operators and stretchy delimiters, all
+  of which have to grow with their content. It carries the OpenType MATH table
+  that positions every atom.
+- **DejaVu Sans**, subset to the math symbol blocks (95 KB) — sans shapes for
+  symbols neither the body family nor Fira Math carries (`⊥`, `⊢`, `⋃`, `∖`).
+- **STIX Two Math** — the whole span under `set_mathtext_fontset("stix")`, and
+  otherwise the last resort: the Script and Fraktur alphabets and double-struck
+  digits, which no sans math font here has.
+
+Letters, Greek, digits and the common operators come from the body face itself,
+so `$10^{-3}$` matches the plain ticks beside it and `$E = mc^2$` is one
+typeface throughout.
 
 Both are under the SIL Open Font License 1.1. For body text pyplotrs prefers the
 host's Arial, then Helvetica, before falling back to Liberation Sans — and

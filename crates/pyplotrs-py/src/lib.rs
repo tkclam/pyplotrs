@@ -24,6 +24,7 @@ use pyplotrs_core::{
     MarkerNode, Node, PathNode, Scene as CoreScene, Stroke as CoreStroke, TextNode,
 };
 use pyplotrs_layout::solve::{AxesBands, FigureSpec};
+use pyplotrs_math::{FontSet, MathFonts};
 
 /// The bundled body fallback (Liberation Sans Regular, SIL OFL): metrically
 /// compatible with Arial/Helvetica, so figures laid out against it line-break
@@ -180,6 +181,17 @@ impl FaceStyle {
     }
 }
 
+/// The math crate names the same four faces; converting keeps the two crates
+/// from having to share a type.
+impl From<FaceStyle> for pyplotrs_math::FaceStyle {
+    fn from(f: FaceStyle) -> Self {
+        pyplotrs_math::FaceStyle {
+            bold: f.bold,
+            italic: f.italic,
+        }
+    }
+}
+
 /// Memoized resolution of each body face: the resolved family name plus its
 /// bytes, keyed by [`FaceStyle`]. Cleared whenever the preferred families change.
 static BODY_CACHE: Mutex<Option<HashMap<FaceStyle, ResolvedFace>>> = Mutex::new(None);
@@ -250,19 +262,153 @@ fn resolve_body(face: FaceStyle) -> ResolvedFace {
     resolved
 }
 
+/// All four body faces at once, in the order [`pyplotrs_math::MathFonts::new`]
+/// wants them: regular, bold, italic, bold-italic.
+///
+/// Every math span needs all four - a variable is set in the italic, the digits
+/// beside it in the ambient one - so they are taken together under a single
+/// lock, and only the font bytes are cloned (an `Arc` bump) rather than the
+/// whole [`ResolvedFace`] with its two names. `measure_math` runs once per label
+/// per layout pass, which is often enough for the difference to show.
+fn body_faces() -> [FontData; 4] {
+    const FACES: [FaceStyle; 4] = [
+        FaceStyle {
+            bold: false,
+            italic: false,
+        },
+        FaceStyle {
+            bold: true,
+            italic: false,
+        },
+        FaceStyle {
+            bold: false,
+            italic: true,
+        },
+        FaceStyle {
+            bold: true,
+            italic: true,
+        },
+    ];
+    let mut guard = BODY_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let cache = guard.get_or_insert_with(HashMap::new);
+    if FACES.iter().any(|f| !cache.contains_key(f)) {
+        let families = SANS_SERIF
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(default_sans_serif);
+        for face in FACES {
+            cache
+                .entry(face)
+                .or_insert_with(|| resolve_from_host(&families, face));
+        }
+    }
+    FACES.map(|f| cache[&f].data.clone())
+}
+
+/// The math font set (`"sans"` / `"stix"`), matplotlib's
+/// `rcParams["mathtext.fontset"]` analog.
+static MATH_FONTSET: Mutex<FontSet> = Mutex::new(FontSet::Sans);
+
+fn math_fontset() -> FontSet {
+    *MATH_FONTSET.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Assemble the faces a `$...$` span may draw from. `kind` is the selector the
+/// Python layer sends (`"body"`, `"body-bold"`, ...) and names the *ambient*
+/// face: what upright atoms and `\text` runs use, and whose italic companion
+/// draws the variables.
+fn math_fonts<'a>(math: &'a FontData, body: &'a [FontData; 4], kind: &str) -> MathFonts<'a> {
+    let set = math_fontset();
+    let fonts = MathFonts::new(math, &body[0], &body[1], &body[2], &body[3])
+        .with_symbols(math_symbol_font())
+        .with_ambient(FaceStyle::from_selector(kind).into())
+        .with_fontset(set);
+    // Under `sans` the primary math font is the sans one and STIX backs it for
+    // the alphabets and symbols it lacks. Under `stix` there is no fallback:
+    // that font set promises one face for the whole span.
+    match set {
+        FontSet::Sans => fonts.with_math_fallback(stix_math_font()),
+        FontSet::Stix => fonts,
+    }
+}
+
 /// The resolved regular body font (see [`resolve_body`]).
 fn body_font() -> FontData {
     resolve_body(FaceStyle::default()).data
 }
 
-/// The bundled math font (STIX Two Math, SIL OFL): full coverage of Greek,
-/// operators, radicals and the Mathematical Alphanumeric Symbols block, used
-/// for `$...$` spans by the `mathtext` layer. Always bundled (it has no common
+/// STIX Two Math (SIL OFL): full coverage of Greek, operators, radicals and the
+/// Mathematical Alphanumeric Symbols block. Always bundled (it has no common
 /// system equivalent) so math typesetting is identical everywhere.
-fn math_font() -> &'static FontData {
+///
+/// It is a *serif*. Under [`FontSet::Stix`] it draws a span outright; under the
+/// default [`FontSet::Sans`] it is the last resort behind the body family, the
+/// sans symbol face and [`fira_math_font`] — reached only for the Script and
+/// Fraktur alphabets, double-struck digits, and a handful of symbols no sans
+/// face here carries.
+fn stix_math_font() -> &'static FontData {
     static FONT: OnceLock<FontData> = OnceLock::new();
     FONT.get_or_init(|| {
         let bytes: &[u8] = include_bytes!("../../../assets/fonts/STIXTwoMath-Regular.ttf");
+        FontData::from_bytes(bytes.to_vec(), 0)
+    })
+}
+
+/// Fira Math (SIL OFL), 175 KB: a **sans** OpenType math font, and the primary
+/// one under [`FontSet::Sans`].
+///
+/// It is what makes `√`, `∑`, `∫` and auto-sized fences sans rather than
+/// Times-shaped. Those cannot come from a text face: growing them needs the
+/// MATH table's variant and assembly chains, and no text font has those — DejaVu
+/// Sans, the obvious candidate, has no vertical construction for `√` at all and
+/// leaves ten of its twenty-four MATH constants unset. Fira Math leaves none
+/// unset, gives `√` sixteen designed variants plus an assembly, and carries 244
+/// italic corrections.
+///
+/// Designed sizes rather than a scaled-up base glyph is the point: scaling — the
+/// approach matplotlib takes, which needs no MATH table — thickens the strokes
+/// as the glyph grows, so a tall delimiter comes out heavier than the text it
+/// wraps.
+///
+/// It is not complete: no Script or Fraktur alphabet, no double-struck digits,
+/// and 37 of the symbols in `tables::symbol` are missing. Those fall through to
+/// the sans symbol subset and then to [`stix_math_font`].
+fn fira_math_font() -> &'static FontData {
+    static FONT: OnceLock<FontData> = OnceLock::new();
+    FONT.get_or_init(|| {
+        let bytes: &[u8] = include_bytes!("../../../assets/fonts/FiraMath-Regular.otf");
+        FontData::from_bytes(bytes.to_vec(), 0)
+    })
+}
+
+/// The primary math font for the active font set: the sans one by default, STIX
+/// when the `stix` set is asked for.
+fn math_font() -> &'static FontData {
+    match math_fontset() {
+        FontSet::Sans => fira_math_font(),
+        FontSet::Stix => stix_math_font(),
+    }
+}
+
+/// The bundled sans **symbol** face: DejaVu Sans subset to the math symbol
+/// blocks (see `tools/build_math_symbol_font.py`), 95 KB rather than 742.
+///
+/// It sits between the body family and the math font. A text family's coverage
+/// of the symbol blocks is ragged — Arial and Liberation Sans have `→ ← ↔` but
+/// not `⇒ ↦`, `∩` but not `∪`, `±` but not `∓` — so falling straight from the
+/// body face to a serif math font splits symbol families down the middle. This
+/// closes the gap in the same idiom: 108 of the 111 symbols the body family
+/// lacks, the remaining three being big operators, which come from the math
+/// font regardless.
+///
+/// It supplies shapes only. Its MATH table is dropped at subset time, so
+/// nothing positional can come from it even by mistake: the math font still
+/// places every atom and still draws everything that has to stretch.
+fn math_symbol_font() -> &'static FontData {
+    static FONT: OnceLock<FontData> = OnceLock::new();
+    FONT.get_or_init(|| {
+        let bytes: &[u8] = include_bytes!("../../../assets/fonts/DejaVuSans-MathSymbols.ttf");
         FontData::from_bytes(bytes.to_vec(), 0)
     })
 }
@@ -1469,13 +1615,12 @@ impl Scene {
         color: (u8, u8, u8, u8),
         font: &str,
     ) {
-        // `font` selects the *upright body* face used for non-math runs and for
-        // \text{...} spans. Math italics come from the math font's alphanumeric
-        // blocks and are unaffected by it.
-        let body = font_for_kind(font);
+        // `font` names the *ambient* body face: what non-math runs, `\text{...}`
+        // spans, digits and operators are set in, and whose italic companion
+        // draws the variables.
+        let body = body_faces();
         let (nodes, _m) = pyplotrs_math::render(
-            math_font(),
-            &body,
+            &math_fonts(math_font(), &body, font),
             text,
             size as f32,
             x as f32,
@@ -1490,10 +1635,11 @@ impl Scene {
     /// Measure a math/text string: `(width, ascent, depth)` in points.
     #[pyo3(signature = (text, size, font="body"))]
     fn measure_math(&self, text: &str, size: f64, font: &str) -> (f64, f64, f64) {
-        // Must use the same face `add_math` will draw with, or the layout
+        // Must use the same faces `add_math` will draw with, or the layout
         // solver reserves the wrong band and bold labels clip or float.
-        let body = font_for_kind(font);
-        let (w, a, d) = pyplotrs_math::measure(math_font(), &body, text, size as f32);
+        let body = body_faces();
+        let (w, a, d) =
+            pyplotrs_math::measure(&math_fonts(math_font(), &body, font), text, size as f32);
         (w as f64, a as f64, d as f64)
     }
 
@@ -1905,6 +2051,34 @@ fn set_sans_serif(families: Vec<String>) {
         Some(families)
     };
     *BODY_CACHE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+}
+
+/// Set which family `$...$` math is drawn from (matplotlib's
+/// `rcParams["mathtext.fontset"]`): `"sans"` (the default) sets math in the
+/// body family wherever it has the glyphs, `"stix"` sets every atom in STIX Two
+/// Math. Unknown names raise.
+#[pyfunction]
+fn set_mathtext_fontset(name: &str) -> PyResult<()> {
+    let set = match name {
+        "sans" => FontSet::Sans,
+        "stix" => FontSet::Stix,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown mathtext fontset {other:?}; expected 'sans' or 'stix'"
+            )))
+        }
+    };
+    *MATH_FONTSET.lock().unwrap_or_else(|e| e.into_inner()) = set;
+    Ok(())
+}
+
+/// The active math font set, `"sans"` or `"stix"`.
+#[pyfunction]
+fn get_mathtext_fontset() -> &'static str {
+    match math_fontset() {
+        FontSet::Sans => "sans",
+        FontSet::Stix => "stix",
+    }
 }
 
 /// The currently configured preferred sans-serif families, in order. When
@@ -2582,6 +2756,8 @@ fn _pyplotrs_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(scenes_to_apng, m)?)?;
     m.add_function(wrap_pyfunction!(set_sans_serif, m)?)?;
     m.add_function(wrap_pyfunction!(get_sans_serif, m)?)?;
+    m.add_function(wrap_pyfunction!(set_mathtext_fontset, m)?)?;
+    m.add_function(wrap_pyfunction!(get_mathtext_fontset, m)?)?;
     m.add_function(wrap_pyfunction!(resolved_font_name, m)?)?;
     m.add_function(wrap_pyfunction!(resolved_font_variants, m)?)?;
     m.add_function(wrap_pyfunction!(body_font_bytes, m)?)?;

@@ -7,22 +7,85 @@
 //! OpenType MATH constants exposed by [`crate::font::MathFont`].
 
 use pyplotrs_core::kurbo::{BezPath, PathEl, Point};
-use pyplotrs_core::{FontData, GlyphRun, PositionedGlyph};
+use pyplotrs_core::{Color, FontData, GlyphRun, PositionedGlyph};
 
 use crate::font::MathFont;
 use crate::tables::{self, Class, Style};
+use crate::MathFonts;
 
 const MIN_SIZE: f32 = 4.0;
 
-/// One drawing primitive in layout space.
-pub enum Draw {
+/// A one-glyph text run — the draw primitive behind every math atom that is a
+/// plain glyph rather than a grown or assembled one.
+fn single_glyph_run(font: &FontData, gid: u16, advance: f32, size: f32, ch: char) -> GlyphRun {
+    GlyphRun {
+        font: font.clone(),
+        size,
+        glyphs: vec![PositionedGlyph {
+            glyph_id: gid,
+            x: 0.0,
+            y: 0.0,
+            advance,
+            cluster: 0,
+        }],
+        source_text: ch.to_string(),
+    }
+}
+
+/// What a [`Draw`] puts on the page, in layout space.
+pub enum DrawKind {
     /// An editable text run (one or more shaped glyphs) at baseline `(x, y)`.
     Text { x: f32, y: f32, run: GlyphRun },
     /// A filled vector path (fraction bars, radical rule, stretchy glyph
-    /// outlines, accent dots), filled with the current text color.
+    /// outlines, accent dots).
     Fill { path: BezPath },
-    /// A stroked vector path (accent marks), stroked with the text color.
+    /// A stroked vector path (accent marks).
     Stroke { path: BezPath, width: f32 },
+}
+
+/// One drawing primitive in layout space, plus the color to draw it in.
+///
+/// `color` is almost always `None`, meaning *inherit* - take whatever color the
+/// label as a whole is being drawn in, which [`crate::render`] supplies. Only
+/// `\textcolor`/`\colorbox` fill it in, and [`recolor`] only ever writes into a
+/// `None`, so the innermost `\textcolor` around a draw is the one that wins.
+pub struct Draw {
+    pub kind: DrawKind,
+    pub color: Option<Color>,
+}
+
+impl Draw {
+    /// A draw that inherits the label's color - what every primitive the
+    /// typesetter emits starts out as.
+    fn inherit(kind: DrawKind) -> Self {
+        Draw { kind, color: None }
+    }
+
+    fn text(x: f32, y: f32, run: GlyphRun) -> Self {
+        Draw::inherit(DrawKind::Text { x, y, run })
+    }
+
+    fn fill(path: BezPath) -> Self {
+        Draw::inherit(DrawKind::Fill { path })
+    }
+
+    fn stroke(path: BezPath, width: f32) -> Self {
+        Draw::inherit(DrawKind::Stroke { path, width })
+    }
+}
+
+/// Paint `color` onto every draw in `draws` that has not already been colored.
+///
+/// The `is_none` guard is what makes nesting behave: by the time an outer
+/// `\textcolor` runs, an inner one has already claimed its own draws, and they
+/// must survive. It also means an uncolored span stays `None` all the way out
+/// to [`crate::render`], so a plain label still takes its color from the call.
+pub(crate) fn recolor(draws: &mut [Draw], color: Color) {
+    for d in draws {
+        if d.color.is_none() {
+            d.color = Some(color);
+        }
+    }
 }
 
 /// A laid-out box.
@@ -64,20 +127,25 @@ pub(crate) fn translate_path(p: &BezPath, dx: f64, dy: f64) -> BezPath {
 /// Append `src`'s draws into `dst`, shifted by `(dx, dy)` in layout space.
 fn place(dst: &mut Vec<Draw>, src: Vec<Draw>, dx: f32, dy: f32) {
     for d in src {
-        match d {
-            Draw::Text { x, y, run } => dst.push(Draw::Text {
+        // Whatever color the draw already carries rides along untouched: a
+        // `\textcolor` inside a fraction must survive being placed into the
+        // fraction, and then into whatever encloses that.
+        let color = d.color;
+        let kind = match d.kind {
+            DrawKind::Text { x, y, run } => DrawKind::Text {
                 x: x + dx,
                 y: y + dy,
                 run,
-            }),
-            Draw::Fill { path } => dst.push(Draw::Fill {
+            },
+            DrawKind::Fill { path } => DrawKind::Fill {
                 path: translate_path(&path, dx as f64, dy as f64),
-            }),
-            Draw::Stroke { path, width } => dst.push(Draw::Stroke {
+            },
+            DrawKind::Stroke { path, width } => DrawKind::Stroke {
                 path: translate_path(&path, dx as f64, dy as f64),
                 width,
-            }),
-        }
+            },
+        };
+        dst.push(Draw { kind, color });
     }
 }
 
@@ -137,15 +205,53 @@ impl Hbuild {
     }
 }
 
-/// A filled rectangle in layout space `[x0,x1] × [y0,y1]` (y-down).
-fn fill_rect(x0: f32, y0: f32, x1: f32, y1: f32) -> Draw {
+/// A closed rectangle in layout space `[x0,x1] × [y0,y1]` (y-down).
+fn rect_path(x0: f32, y0: f32, x1: f32, y1: f32) -> BezPath {
     let mut p = BezPath::new();
     p.move_to((x0 as f64, y0 as f64));
     p.line_to((x1 as f64, y0 as f64));
     p.line_to((x1 as f64, y1 as f64));
     p.line_to((x0 as f64, y1 as f64));
     p.close_path();
-    Draw::Fill { path: p }
+    p
+}
+
+/// A filled rectangle in layout space `[x0,x1] × [y0,y1]` (y-down).
+fn fill_rect(x0: f32, y0: f32, x1: f32, y1: f32) -> Draw {
+    Draw::fill(rect_path(x0, y0, x1, y1))
+}
+
+/// Parse `#rgb` / `#rgba` / `#rrggbb` / `#rrggbbaa` into a [`Color`].
+///
+/// Deliberately the *only* spelling the typesetter understands - see the
+/// `\textcolor` branch for why names and palette indices are resolved upstream
+/// instead. The leading `#` is optional so a caller that strips it still works.
+fn parse_hex_color(spec: &str) -> Option<Color> {
+    let h = spec.trim().strip_prefix('#').unwrap_or(spec.trim());
+    if !h.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let nyb = |i: usize| u8::from_str_radix(&h[i..i + 1], 16).ok();
+    let byte = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok();
+    match h.len() {
+        // Short form doubles each nibble, so `#f00` is `#ff0000`, not `#0f0000`.
+        3 | 4 => {
+            let c = |i: usize| nyb(i).map(|v| v << 4 | v);
+            Some(Color::rgba(
+                c(0)?,
+                c(1)?,
+                c(2)?,
+                if h.len() == 4 { c(3)? } else { 255 },
+            ))
+        }
+        6 | 8 => Some(Color::rgba(
+            byte(0)?,
+            byte(2)?,
+            byte(4)?,
+            if h.len() == 8 { byte(6)? } else { 255 },
+        )),
+        _ => None,
+    }
 }
 
 fn stroke_poly(pts: &[(f32, f32)], width: f32, closed: bool) -> Draw {
@@ -159,7 +265,7 @@ fn stroke_poly(pts: &[(f32, f32)], width: f32, closed: bool) -> Draw {
             p.close_path();
         }
     }
-    Draw::Stroke { path: p, width }
+    Draw::stroke(p, width)
 }
 
 // -- inter-atom spacing (the TeXbook table; negative = display/text only) ----
@@ -212,27 +318,71 @@ struct Item {
     limits: Option<bool>,
 }
 
+/// One body face, wrapped the same way the math font is so that an atom routed
+/// to it is measured from its own outlines. It carries no MATH table, which
+/// costs nothing: the only values read through it are the glyph id, advance and
+/// ink box. `None` if the face fails to parse, which sends its atoms back to
+/// the math font.
+struct BodyFace<'a> {
+    data: &'a FontData,
+    face: Option<MathFont<'a>>,
+}
+
 /// Parsing + layout state.
 pub struct Engine<'a> {
     mf: &'a MathFont<'a>,
-    math_font: &'a FontData,
-    body_font: &'a FontData,
+    fonts: &'a MathFonts<'a>,
+    /// The four body faces, indexed by [`FaceStyle::index`].
+    body: [BodyFace<'a>; 4],
+    /// The sans symbol face, tried between the body faces and the math font.
+    symbols: Option<BodyFace<'a>>,
+    /// A second math font for glyphs the primary one does not have.
+    fallback: Option<(&'a MathFont<'a>, &'a FontData)>,
     chars: Vec<char>,
 }
 
 impl<'a> Engine<'a> {
     pub fn new(
         mf: &'a MathFont<'a>,
-        math_font: &'a FontData,
-        body_font: &'a FontData,
+        fallback: Option<&'a (MathFont<'a>, &'a FontData)>,
+        fonts: &'a MathFonts<'a>,
         src: &str,
     ) -> Self {
+        let wrap = |data: &'a FontData| BodyFace {
+            data,
+            face: MathFont::new(&data.data[..], data.index),
+        };
         Engine {
             mf,
-            math_font,
-            body_font,
+            fonts,
+            body: std::array::from_fn(|i| wrap(fonts.face_at(i))),
+            symbols: fonts.symbol_font().map(wrap),
+            fallback: fallback.map(|(f, d)| (f, *d)),
             chars: src.chars().collect(),
         }
+    }
+
+    /// The math face that will draw `ch`: the primary math font when it has the
+    /// glyph, else the fallback.
+    ///
+    /// Only *glyphs* are sourced this way. Every positioning constant still
+    /// comes from `self.mf`, so a span is laid out to one font's metrics even
+    /// when two supply its marks — which is what keeps a fallback `\bigcup`
+    /// sitting on the same axis as the `\sum` beside it.
+    fn math_face(&self, ch: char) -> (&MathFont<'a>, &'a FontData) {
+        let primary = (self.mf, self.fonts.math_font());
+        if self.mf.glyph(ch).is_some_and(|g| g != 0) {
+            return primary;
+        }
+        match self.fallback {
+            Some((face, data)) if face.glyph(ch).is_some_and(|g| g != 0) => (face, data),
+            _ => primary,
+        }
+    }
+
+    /// The ambient body face — what upright atoms and `\text` runs are set in.
+    fn ambient(&self) -> &BodyFace<'a> {
+        &self.body[self.fonts.ambient().index()]
     }
 
     /// Lay out the whole (math) source at `size`.
@@ -243,83 +393,135 @@ impl<'a> Engine<'a> {
 
     // ---- glyph boxes ---------------------------------------------------
 
-    fn glyph_box(&self, ch: char, size: f32, math: bool) -> Layout {
-        let font = if math { self.math_font } else { self.body_font };
-        let gid = self.mf.glyph(ch).unwrap_or(0);
-        let (adv, ink, italic) = if math {
-            (
-                self.mf.advance(gid, size),
-                self.mf.ink(gid, size),
-                self.mf.italic(gid, size),
-            )
-        } else {
-            // body font: shape one char for a correct advance
-            let run = pyplotrs_text::shape_text(font, &ch.to_string(), size);
-            let w = pyplotrs_text::run_width(&run);
-            let vm = pyplotrs_text::font_vmetrics(font, size);
-            return Layout {
-                width: w,
-                ascent: vm.ascent,
-                depth: vm.descent,
-                draws: vec![Draw::Text {
-                    x: 0.0,
-                    y: 0.0,
-                    run,
-                }],
-                ..Default::default()
-            };
-        };
-        let run = GlyphRun {
-            font: font.clone(),
-            size,
-            glyphs: vec![PositionedGlyph {
-                glyph_id: gid,
-                x: 0.0,
-                y: 0.0,
-                advance: adv,
-                cluster: 0,
-            }],
-            source_text: ch.to_string(),
-        };
+    /// The box for `ch` under alphabet `style`.
+    ///
+    /// [`tables::place_char`] names the codepoint and the preferred face
+    /// together; this walks the fallback chain from there, checking coverage at
+    /// each step so that a family missing a glyph moves on rather than drawing
+    /// `.notdef`:
+    ///
+    /// 1. the **body face** the style calls for — letters, Greek, digits, and
+    ///    the operators a text family reliably carries;
+    /// 2. the **sans symbol face**, for a standalone mark the body family
+    ///    happens not to have (`∇`, `⇒`, `∪`), so symbol families do not split
+    ///    down the middle;
+    /// 3. the **math font**, which has everything and is the only face whose
+    ///    MATH table can position and grow it.
+    fn styled_glyph_box(&self, ch: char, style: Style, size: f32) -> Layout {
+        match tables::place_char(ch, style, self.fonts.ambient(), self.fonts.fontset()) {
+            tables::Placement::Body {
+                ch: body_ch,
+                face: body_face,
+            } => self
+                .plain_glyph_box(
+                    &self.body[body_face.index()],
+                    body_ch,
+                    body_face.italic,
+                    size,
+                )
+                .or_else(|| self.symbol_glyph_box(body_ch, size))
+                .unwrap_or_else(|| self.math_glyph_box(tables::styled_char(ch, style), size)),
+            tables::Placement::Math { ch, symbol } => symbol
+                .then(|| self.symbol_glyph_box(ch, size))
+                .flatten()
+                .unwrap_or_else(|| self.math_glyph_box(ch, size)),
+        }
+    }
+
+    /// `ch` from the sans symbol face, if there is one and it has the glyph.
+    fn symbol_glyph_box(&self, ch: char, size: f32) -> Option<Layout> {
+        self.plain_glyph_box(self.symbols.as_ref()?, ch, false, size)
+    }
+
+    /// A glyph drawn from the math font, with its MATH-table metrics.
+    fn math_glyph_box(&self, ch: char, size: f32) -> Layout {
+        let (face, data) = self.math_face(ch);
+        let primary = std::ptr::eq(data, self.fonts.math_font());
+        let gid = face.glyph(ch).unwrap_or(0);
+        let adv = face.advance(gid, size);
+        let ink = face.ink(gid, size);
         Layout {
             width: adv,
             ascent: ink.height(),
             depth: ink.depth(),
-            italic,
-            lead: Some((gid, size)),
-            trail: Some((gid, size)),
-            draws: vec![Draw::Text {
-                x: 0.0,
-                y: 0.0,
-                run,
-            }],
+            italic: face.italic(gid, size),
+            // `lead`/`trail` name a glyph for the *primary* font's MATH cut-in
+            // kern lookup, so a fallback glyph reports neither: its id would
+            // point at some unrelated glyph in that table.
+            lead: primary.then_some((gid, size)),
+            trail: primary.then_some((gid, size)),
+            draws: vec![Draw::text(
+                0.0,
+                0.0,
+                single_glyph_run(data, gid, adv, size, ch),
+            )],
         }
     }
 
-    /// A run of upright math-font glyphs (function names, `\operatorname`,
-    /// unknown commands), no inter-letter spacing.
+    /// A glyph drawn from a face with no MATH table — a body face or the sans
+    /// symbol face. `None` when that face has no glyph for `ch`, which is how
+    /// the caller walks to the next tier. `slanted` says whether the face leans,
+    /// and so whether an italic correction has to be measured.
+    fn plain_glyph_box(
+        &self,
+        face: &BodyFace<'a>,
+        ch: char,
+        slanted: bool,
+        size: f32,
+    ) -> Option<Layout> {
+        let bmf = face.face.as_ref()?;
+        let gid = bmf.glyph(ch).filter(|&g| g != 0)?;
+        let adv = bmf.advance(gid, size);
+        let ink = bmf.ink(gid, size);
+        // The MATH table's per-glyph italic corrections and cut-in kerns are
+        // keyed by *math-font* glyph ids, so a body glyph can report neither -
+        // `lead`/`trail` stay `None` and its scripts attach on the plain ink
+        // box. What it can report is its own ink: an italic letter's outline
+        // leans out past its advance, and that overhang is exactly the quantity
+        // TeX calls the italic correction - what a following superscript has to
+        // clear. Measuring it beats dropping it, which set the 2 of an italic
+        // `f^2` on top of the f's ascender.
+        let italic = if slanted {
+            (ink.x1 - adv).max(0.0)
+        } else {
+            0.0
+        };
+        Some(Layout {
+            width: adv,
+            ascent: ink.height(),
+            depth: ink.depth(),
+            italic,
+            lead: None,
+            trail: None,
+            draws: vec![Draw::text(
+                0.0,
+                0.0,
+                single_glyph_run(face.data, gid, adv, size, ch),
+            )],
+        })
+    }
+
+    /// A run of upright glyphs (function names, `\operatorname`, unknown
+    /// commands), no inter-letter spacing.
     fn upright_run(&self, s: &str, size: f32) -> Layout {
         let mut hb = Hbuild::new();
         for c in s.chars() {
-            hb.add(self.glyph_box(c, size, true), 0.0);
+            hb.add(self.styled_glyph_box(c, Style::Rm, size), 0.0);
         }
         hb.finish()
     }
 
     /// `\text{...}`: shaped body-font run, upright, kerned.
     fn text_run(&self, s: &str, size: f32) -> Layout {
-        let run = pyplotrs_text::shape_text(self.body_font, s, size);
+        let font = self.ambient().data;
+        let run = pyplotrs_text::shape_text(font, s, size);
         let w = pyplotrs_text::run_width(&run);
-        let vm = pyplotrs_text::font_vmetrics(self.body_font, size);
+        let vm = pyplotrs_text::font_vmetrics(font, size);
         Layout {
             width: w,
             ascent: vm.ascent,
             depth: vm.descent,
-            draws: vec![Draw::Text {
-                x: 0.0,
-                y: 0.0,
-                run,
-            }],
+            draws: vec![Draw::text(0.0, 0.0, run)],
             ..Default::default()
         }
     }
@@ -472,12 +674,11 @@ impl<'a> Engine<'a> {
             return self.parse_command(i, hi, size, style, level, disp);
         }
         // literal character
-        let displayed = tables::styled_char_for_literal(c, style);
         let class = tables::char_class(c);
         (
             Some(Item {
                 class,
-                layout: self.glyph_box(displayed, size, true),
+                layout: self.styled_glyph_box(tables::literal_char(c), style, size),
                 space: false,
                 limits: None,
             }),
@@ -608,6 +809,61 @@ impl<'a> Engine<'a> {
                     jn,
                 );
             }
+            // `\textcolor{#rrggbb}{...}` paints one sub-expression; the
+            // enclosing label keeps its own color. `\colorbox{...}{...}` puts
+            // that color *behind* the sub-expression instead, for highlighting
+            // one term of a formula.
+            //
+            // The spec is hex only: color names, `"C0"` palette indices and
+            // 0-1 float tuples are a theme-dependent question, and the answer
+            // lives in `theme.parse_color` - so the Python layer resolves the
+            // spec before the string ever reaches here. See
+            // `pyplotrs.text._resolve_math_colors`.
+            "textcolor" | "colorbox" => {
+                let (c_lo, c_hi, j1) = self.read_arg(j, hi);
+                let (a_lo, a_hi, j2) = self.read_arg(j1, hi);
+                let spec: String = self.chars[c_lo..c_hi].iter().collect();
+                let mut inner = self.assemble(
+                    self.parse_items(a_lo, a_hi, size, style, level, disp),
+                    size,
+                    level,
+                );
+                // An unparseable spec draws the content in the ambient color
+                // rather than dropping it - losing a term of an equation to a
+                // typo in a color is far worse than getting its color wrong.
+                if let Some(c) = parse_hex_color(&spec) {
+                    if name == "colorbox" {
+                        // Prepended, so the panel cannot cover glyphs that were
+                        // already placed, and pre-colored so the `recolor` an
+                        // enclosing `\textcolor` might run leaves it alone.
+                        let pad = size * 0.1;
+                        let mut draws = vec![Draw {
+                            kind: DrawKind::Fill {
+                                path: rect_path(
+                                    -pad,
+                                    -inner.ascent - pad,
+                                    inner.width + pad,
+                                    inner.depth + pad,
+                                ),
+                            },
+                            color: Some(c),
+                        }];
+                        draws.append(&mut inner.draws);
+                        inner.draws = draws;
+                    } else {
+                        recolor(&mut inner.draws, c);
+                    }
+                }
+                return (
+                    Some(Item {
+                        class: Class::Ord,
+                        layout: inner,
+                        space: false,
+                        limits: None,
+                    }),
+                    j2,
+                );
+            }
             _ => {}
         }
         // accents
@@ -684,12 +940,13 @@ impl<'a> Engine<'a> {
         }
         // named symbols
         if let Some((ch, class)) = tables::symbol(&name) {
-            // Big operators (∑ ∫ ∏ …) are centered on the math axis and enlarged
-            // in display style; everything else is an ordinary glyph.
+            // Big operators (∑ ∫ ∏ …) are centered on the math axis, enlarged in
+            // display style, and always drawn from the math font — a text face
+            // has no variant chain to grow them with.
             let layout = if class == Class::Op {
                 self.op_glyph(ch, size, disp)
             } else {
-                self.glyph_box(tables::math_italic(ch), size, true)
+                self.styled_glyph_box(ch, style, size)
             };
             // Integrals default to side limits (\nolimits) even in display
             // style, per LaTeX convention; \limits can still override.
@@ -900,31 +1157,32 @@ impl<'a> Engine<'a> {
     /// style — grown to `displayOperatorMinHeight` via a vertical variant.
     fn op_glyph(&self, ch: char, size: f32, disp: bool) -> Layout {
         let axis = self.mf.axis_height(size);
-        let gid = self.mf.glyph(ch).unwrap_or(0);
+        // The operator's own face grows it — a variant id means nothing outside
+        // the font that declared it — while the target height and the axis stay
+        // the primary font's, so operators from either land on the same axis.
+        let (face, data) = self.math_face(ch);
+        let gid = face.glyph(ch).unwrap_or(0);
         let vgid = if disp {
-            self.mf
-                .vertical_variant(gid, size, self.mf.display_operator_min_height(size))
+            face.vertical_variant(gid, size, self.mf.display_operator_min_height(size))
                 .0
         } else {
             gid
         };
-        let vink = self.mf.ink(vgid, size);
-        let adv = self.mf.advance(vgid, size);
-        let italic = self.mf.italic(vgid, size);
+        let vink = face.ink(vgid, size);
+        let adv = face.advance(vgid, size);
+        let italic = face.italic(vgid, size);
         let s = (vink.y0 + vink.y1) / 2.0 - axis; // center the glyph on the axis
         let ascent = (vink.y1 - s).max(0.0);
         let depth = (s - vink.y0).max(0.0);
         let (draws, lead, trail) = if vgid != gid {
             (
-                vec![Draw::Fill {
-                    path: self.mf.outline(vgid, size, 0.0, s),
-                }],
+                vec![Draw::fill(face.outline(vgid, size, 0.0, s))],
                 None,
                 None,
             )
         } else {
             let run = GlyphRun {
-                font: self.math_font.clone(),
+                font: data.clone(),
                 size,
                 glyphs: vec![PositionedGlyph {
                     glyph_id: gid,
@@ -936,7 +1194,7 @@ impl<'a> Engine<'a> {
                 source_text: ch.to_string(),
             };
             (
-                vec![Draw::Text { x: 0.0, y: s, run }],
+                vec![Draw::text(0.0, s, run)],
                 Some((gid, size)),
                 Some((gid, size)),
             )
@@ -1169,10 +1427,11 @@ impl<'a> Engine<'a> {
         let hc = content.ascent;
         let dc = content.depth;
         let target = hc + dc + gap + t;
-        let surd_gid = self.mf.glyph('√').unwrap_or(0);
-        let (vgid, _vh) = self.mf.vertical_variant(surd_gid, size, target);
-        let vink = self.mf.ink(vgid, size);
-        let va = self.mf.advance(vgid, size);
+        let (surd_face, _) = self.math_face('√');
+        let surd_gid = surd_face.glyph('√').unwrap_or(0);
+        let (vgid, _vh) = surd_face.vertical_variant(surd_gid, size, target);
+        let vink = surd_face.ink(vgid, size);
+        let va = surd_face.advance(vgid, size);
         let glyph_h = vink.y1 - vink.y0;
         // place surd so its ink top sits at the rule top: -(hc + gap + t)
         let s = vink.y1 - (hc + gap + t);
@@ -1185,9 +1444,7 @@ impl<'a> Engine<'a> {
             None => 0.0,
         };
         let mut draws = Vec::new();
-        draws.push(Draw::Fill {
-            path: self.mf.outline(vgid, size, lead, s),
-        });
+        draws.push(Draw::fill(surd_face.outline(vgid, size, lead, s)));
         // overbar rule, connecting at the surd's advance width
         let rx0 = lead + va;
         draws.push(fill_rect(
@@ -1242,20 +1499,19 @@ impl<'a> Engine<'a> {
     /// `axis`. A genuine size variant is emitted as a filled outline (no plain
     /// codepoint); the base glyph stays editable text.
     fn stretchy_delim(&self, ch: char, size: f32, target: f32, axis: f32) -> Layout {
-        let gid = self.mf.glyph(ch).unwrap_or(0);
-        let (vgid, _vh) = self.mf.vertical_variant(gid, size, target);
-        let vink = self.mf.ink(vgid, size);
-        let adv = self.mf.advance(vgid, size);
+        let (face, data) = self.math_face(ch);
+        let gid = face.glyph(ch).unwrap_or(0);
+        let (vgid, _vh) = face.vertical_variant(gid, size, target);
+        let vink = face.ink(vgid, size);
+        let adv = face.advance(vgid, size);
         let s = (vink.y0 + vink.y1) / 2.0 - axis;
         let ascent = (vink.y1 - s).max(0.0);
         let depth = (s - vink.y0).max(0.0);
         let draws = if vgid != gid {
-            vec![Draw::Fill {
-                path: self.mf.outline(vgid, size, 0.0, s),
-            }]
+            vec![Draw::fill(face.outline(vgid, size, 0.0, s))]
         } else {
             let run = GlyphRun {
-                font: self.math_font.clone(),
+                font: data.clone(),
                 size,
                 glyphs: vec![PositionedGlyph {
                     glyph_id: gid,
@@ -1266,7 +1522,7 @@ impl<'a> Engine<'a> {
                 }],
                 source_text: ch.to_string(),
             };
-            vec![Draw::Text { x: 0.0, y: s, run }]
+            vec![Draw::text(0.0, s, run)]
         };
         Layout {
             width: adv,
@@ -1566,11 +1822,7 @@ pub(crate) fn shaped_text_layout(font: &FontData, s: &str, size: f32) -> Layout 
         width: w,
         ascent: vm.ascent,
         depth: vm.descent,
-        draws: vec![Draw::Text {
-            x: 0.0,
-            y: 0.0,
-            run,
-        }],
+        draws: vec![Draw::text(0.0, 0.0, run)],
         ..Default::default()
     }
 }

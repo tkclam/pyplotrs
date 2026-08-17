@@ -11,6 +11,66 @@ All notable changes to pyplotrs are documented here. The format is based on
 
 ## Unreleased
 
+### Added
+
+- **`set_mathtext_fontset()` / `get_mathtext_fontset()`** — which family `$...$`
+  math is drawn in, pyplotrs' analog of matplotlib's
+  `rcParams["mathtext.fontset"]`. `"sans"` is the new default (see **Changed**);
+  `"stix"` sets every atom in STIX Two Math, for figures whose body text is a
+  serif too.
+
+### Changed
+
+- **`$...$` math is now set in your own body family**, not split between it and
+  a serif math font. Variables and Greek come from the body italic, digits and
+  operators from the face the label is in, and STIX Two Math draws only what a
+  text face cannot: big operators, radicals, stretchy fences, the
+  blackboard/script/Fraktur alphabets, and any symbol the family is missing
+  (checked glyph by glyph). Before this, one expression could hold two
+  typefaces — `$E = mc^2$` set a serif `E m c` beside a sans `=` and `2` —
+  because the rule that kept a `$10^{-3}$` tick matching its neighbors covered
+  only the upright, text-like atoms.
+  matplotlib's default `dejavusans` set draws the same line. Three consequences:
+  a **bold** label's math is now bold throughout rather than half-bold; math
+  follows `set_font_family`, so Helvetica body text gets Helvetica Italic
+  variables; and most figures no longer embed the math font at all, which is
+  around 2 MB off an SVG. `set_mathtext_fontset("stix")` restores uniformly
+  serif math. Every figure with math renders differently — the gallery,
+  tutorial and notebook images are regenerated.
+
+    A **95 KB subset of DejaVu Sans** is bundled alongside, supplying sans
+    shapes for the symbols a text family does not carry. Coverage of the symbol
+    blocks is ragged in every text family — Arial and Liberation Sans have
+    `→ ← ↔` but not `⇒ ⇐ ↦`, `∩` but not `∪`, `≤ ≥ ≠ ≈` but not `≪ ≫ ∝ ∼`, `±`
+    but not `∓` — so falling straight from the body face to a serif math font
+    split symbol families down the middle: a sans `$A \cap B$` beside a serif
+    `$A \cup B$`. It closes 108 of the 111 gaps; the three it misses are big
+    operators, which come from the math font regardless. It supplies shapes
+    only — its MATH table is dropped at subset time, and DejaVu's would be
+    unusable anyway, with ten of twenty-four constants unset and no vertical
+    construction for `√`. `tools/build_math_symbol_font.py` regenerates it.
+
+    **Fira Math** (SIL OFL, 175 KB) is bundled as the sans math font, so `√`,
+    `∑`, `∫` and auto-sized `\left...\right` fences are monoline marks matching
+    the label rather than high-contrast Times shapes. These are the parts that
+    have to *grow* with their content, which needs the variant and assembly
+    chains of an OpenType MATH table — no text font has one. DejaVu Sans, the
+    obvious candidate, cannot serve: it leaves ten of twenty-four MATH constants
+    unset and has no vertical construction for `√` at all. (matplotlib uses it
+    only because it hardcodes a `DejaVuSansFontConstants` class instead of
+    reading the table; pyplotrs reads the table.) Nor would scaling one base
+    glyph up do — that thickens the strokes as the glyph grows, so a tall
+    delimiter comes out heavier than the text it wraps. Fira Math leaves no
+    constant unset, gives `√` sixteen designed variants plus an assembly, and
+    carries 244 italic corrections. It is OpenType/CFF, so it embeds in PDF as a
+    subset `CIDFontType0`/`FontFile3` beside the body family's `CIDFontType2` —
+    still real, selectable text, never outlines.
+
+    STIX Two Math stays bundled: it draws a whole span under
+    `set_mathtext_fontset("stix")`, and under `sans` it is the last resort for
+    the Script and Fraktur alphabets and double-struck digits, which no sans
+    math font here carries.
+
 ### Fixed
 
 - **`imshow` filters each axis on its own terms.** A tall or wide image is

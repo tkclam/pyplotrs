@@ -79,11 +79,26 @@ def test_pdf_subsets_rather_than_embedding_whole_fonts(pdf_bytes):
     )
 
 
-def test_math_uses_the_math_font(pdf_bytes):
-    """``$E = mc^2$`` should pull in STIX Two Math as a second embedded face."""
-    data = pdf_bytes()
-    assert b"STIXTwoMath" in data, "math font not embedded"
-    assert data.count(b"/FontFile2") >= 2, "expected both body and math faces embedded"
+def test_math_embeds_the_math_font_as_real_text(tmp_path):
+    """A glyph only a math font can supply pulls one in as a further embedded
+    face — still subset, still CID-keyed, still real text, never outlines.
+
+    Fira Math is OpenType/**CFF**, so it embeds as ``CIDFontType0`` with a
+    ``/FontFile3`` beside the body family's ``CIDFontType2``/``/FontFile2``.
+    That mixture is the thing worth pinning: a CFF math font must not push the
+    writer onto a Type 3 or outline-conversion path.
+    """
+    fig, ax = pp.subplots(figsize=(320, 240))
+    ax.line([0, 1, 2], [0, 1, 4])
+    ax.set(title=r"Total $\sqrt{\sum_i x_i}$")
+    out = tmp_path / "math.pdf"
+    fig.save(str(out))
+    data = out.read_bytes()
+    assert b"FiraMath" in data, "the sans math font was not embedded"
+    assert b"/Type3" not in data and b"/CharProcs" not in data
+    assert b"CIDFontType0" in data, "the CFF math font is not CID-keyed"
+    assert b"/FontFile3" in data, "the CFF math font is not embedded"
+    assert b"/FontFile2" in data, "the body font is not embedded"
 
 
 def test_tagged_pdf_adds_structure(pdf_bytes):

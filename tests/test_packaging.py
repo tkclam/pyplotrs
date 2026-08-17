@@ -27,7 +27,7 @@ Two tests, deliberately at different costs:
 
 ## The licenses
 
-The wheels redistribute two font families, ~150 colormap tables, a 2.2 MB
+The wheels redistribute four font families, ~150 colormap tables, a 2.2 MB
 MathJax bundle and ~110 statically linked Rust crates. Several of those
 licenses require the notice to travel with the binary. Listing a file in
 ``[project] license-files`` is what puts it in ``dist-info/licenses/``, and
@@ -180,6 +180,10 @@ def test_every_declared_license_file_exists():
      "assets/fonts/LiberationSans-OFL.txt"),
     ("assets/fonts/STIXTwoMath-Regular.ttf",
      "assets/fonts/STIXTwoMath-OFL.txt"),
+    ("assets/fonts/DejaVuSans-MathSymbols.ttf",
+     "assets/fonts/DejaVuSans-LICENSE.txt"),
+    ("assets/fonts/FiraMath-Regular.otf",
+     "assets/fonts/FiraMath-OFL.txt"),
 ])
 def test_every_redistributed_asset_ships_its_license(asset, notice):
     """If the asset is here, so is its license, and the license is declared."""

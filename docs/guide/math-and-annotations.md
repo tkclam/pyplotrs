@@ -38,6 +38,68 @@ right-click → *Show Math As* to copy the LaTeX/MathML — fully offline.
 Math in a **tick label** works too, which is how a log axis writes its decades
 as `$10^{k}$` — see [`LogFormatter`][pyplotrs.ticker.LogFormatter].
 
+### Which face draws what
+
+Math is set in **your own body family**, wherever that family has the glyphs.
+Variables and Greek come from its italic, digits and upright roman from the
+face the label itself is in, and the common operators (`+ − × · ÷ / = < > ≤ ≥ ≠
+≈ ( ) [ ] ∂ ∞ → …`) from the same place. So `$\sin\omega t$` is Arial
+throughout, and a **bold** title's math is bold throughout — variables
+included.
+
+What your family cannot supply are the parts that have to **grow**: a radical
+sized to its content, a `\left(...\right)` fence sized to what it wraps, a
+`\sum` enlarged in display style. Growing a glyph needs the variant and assembly
+chains of an OpenType MATH table, and no text font has one. Those come from
+**Fira Math**, a bundled *sans* math font (175 KB) — so `√`, `∑` and `∫` are
+monoline marks that match Arial, not the high-contrast Times shapes a serif math
+font draws.
+
+Between the two sit two more fallbacks, each reached only when the one before it
+has no glyph:
+
+- a **DejaVu Sans subset** (95 KB) for symbols neither your family nor Fira Math
+  carries. Text families cover the symbol blocks raggedly — Arial has `→ ← ↔` but
+  not `⇒ ⇐ ↦`, `∩` but not `∪`, `≤ ≥ ≠ ≈` but not `≪ ≫ ∝ ∼` — so without it a
+  single expression could set `$A \cap B$` sans and `$A \cup B$` serif;
+- **STIX Two Math** last, for the Script and Fraktur alphabets (`\mathcal`,
+  `\mathfrak`) and double-struck digits, which no sans math font here has. Those
+  are calligraphic letterforms by definition, so a serif source is the right one.
+
+Positioning constants always come from the primary math font, whichever face
+ends up drawing a given mark, so a span is laid out to one font's metrics.
+
+This is the same line matplotlib's default `dejavusans` set draws, for the same
+reason: a label is read against its neighbors. Drawing math wholly from a serif
+math font made a log axis label `10³` Times while the y ticks beside it read
+`50` and `100` in Arial — and, less obviously, made `$E = mc^2$` mix a serif
+`E m c` with a sans `=` and `2`.
+
+Two consequences worth knowing:
+
+- Most figures embed no math font at all — the math fonts are reached only for
+  something that grows or for a symbol your family lacks.
+- Math follows [`set_font_family`][pyplotrs.set_font_family]. Set Helvetica and
+  your variables are Helvetica Italic.
+
+#### Uniformly serif math
+
+To set every atom in STIX Two Math instead — the traditional look, and what you
+want when the body text is a serif too:
+
+```python
+pyplotrs.set_mathtext_fontset("stix")
+pyplotrs.set_font_family("STIX Two Text", "Times New Roman")
+```
+
+`set_mathtext_fontset("sans")` (the default) restores the behavior above. It is
+pyplotrs' analog of matplotlib's `rcParams["mathtext.fontset"]`.
+
+!!! note "HTML export"
+    Saving to `.html` re-renders math with MathJax, which carries its own
+    (serif) TeX fonts, so an HTML figure's math will not match a `sans` PNG or
+    PDF of the same figure. Everything else on the page still matches.
+
 ## Text annotations
 
 [`text`][pyplotrs.axes.Axes.text] draws a string at data coordinates:

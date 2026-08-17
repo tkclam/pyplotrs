@@ -15,7 +15,8 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 # Everything pyplotrs redistributes, with the notice each license requires:
-# the bundled fonts (Liberation Sans, STIX Two Math) under the SIL OFL; the
+# the bundled fonts (Liberation Sans, STIX Two Math and Fira Math under the
+# SIL OFL, a DejaVu Sans subset under the Bitstream Vera license); the
 # curated colormap/palette tables, matplotlib/colorcet/cmocean/seaborn-derived
 # (colorcet is CC-BY 4.0 and requires attribution); the MathJax bundle inlined
 # into `.html` output, Apache-2.0, which requires the license text and the
@@ -28,6 +29,8 @@ license-files = [
     "THIRD-PARTY-NOTICES.md",
     "assets/fonts/LiberationSans-OFL.txt",
     "assets/fonts/STIXTwoMath-OFL.txt",
+    "assets/fonts/DejaVuSans-LICENSE.txt",
+    "assets/fonts/FiraMath-OFL.txt",
     "assets/fonts/NOTICE.md",
     "THIRD_PARTY_COLORMAPS.md",
     "python/pyplotrs/_vendor/MATHJAX-LICENSE.txt",
@@ -150,7 +153,9 @@ python-source = "python"
 # shipped broken. `tests/test_packaging.py` builds a wheel from the sdist to
 # keep that from recurring.
 include = [
-    { path = "assets/fonts/*.ttf", format = "sdist" },
+    # `*` not `*.ttf`: Fira Math is an OpenType/CFF `.otf`, and the license
+    # texts have to reach the sdist too.
+    { path = "assets/fonts/*", format = "sdist" },
     { path = "python/pyplotrs/_vendor/*", format = "sdist" },
     { path = "vendor/krilla-0.8.2/**/*", format = "sdist" },
     # The test suite, so a downstream packager can validate the artifact they

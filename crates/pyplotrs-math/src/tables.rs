@@ -1,6 +1,11 @@
 //! LaTeX command tables, ported from the original `python/pyplotrs/mathtext.py`
 //! and annotated with TeX math atom *classes* (the thing the old engine
 //! lacked) so the layout pass can insert correct inter-atom spacing.
+//!
+//! This module also decides, for every character of a span, *which face draws
+//! it* — see [`place_char`].
+
+use crate::{FaceStyle, FontSet};
 
 /// TeX math atom class. Determines inter-atom spacing (see `spacing.rs`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -451,16 +456,168 @@ pub fn alphabet_style(name: &str) -> Option<Style> {
     })
 }
 
-/// Displayed codepoint for a literal (non-command) math character under the
-/// active alphabet `style`: ASCII `-` becomes a real minus sign (U+2212),
-/// otherwise the character is mapped through the alphabet (letters → math
-/// italic by default; digits/operators upright).
-pub fn styled_char_for_literal(c: char, style: Style) -> char {
+/// The substitution every literal math character gets before anything else:
+/// ASCII `-` is a real minus sign, `*` a real asterisk operator. Both are
+/// typographic, not stylistic, so they happen whatever face ends up drawing.
+pub fn literal_char(c: char) -> char {
     match c {
         '-' => '−', // U+2212 MINUS SIGN
         '*' => '∗', // U+2217 ASTERISK OPERATOR
-        _ => styled_char(c, style),
+        _ => c,
     }
+}
+
+/// Which face a character is drawn from, and as which codepoint.
+///
+/// The two travel together because they are one decision: a variable set in the
+/// body face is the plain letter `x` in an italic face, and the *same* variable
+/// set in the math font is U+1D465 in an upright one. Picking a codepoint first
+/// and a face afterwards is what made `$E = mc^2$` mix serif letters with sans
+/// digits.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Placement {
+    /// Draw `ch` from the body face `face`. The caller must check that the face
+    /// actually has the glyph and fall back to [`Placement::Math`] if not.
+    Body { ch: char, face: FaceStyle },
+    /// Draw `ch` from a math face.
+    ///
+    /// `symbol` is true when `ch` is a standalone mark — an operator, relation,
+    /// arrow or letterlike sign — whose design should match the text around it,
+    /// so the sans symbol face may draw it before the math font is asked. It is
+    /// false for a letter of a math alphabet (`\mathbb`, `\mathfrak`, the
+    /// Mathematical-Italic variables), where the distinct design *is* the point
+    /// and only the math font has it.
+    Math { ch: char, symbol: bool },
+}
+
+/// Whether `c` is a letter that stands for a variable - Latin or Greek. These
+/// are the characters whose *shape* a reader reads as belonging to the
+/// surrounding text, which is why they follow the body family when it has them.
+fn is_variable_letter(c: char) -> bool {
+    matches!(c,
+        'A'..='Z' | 'a'..='z'
+            | '\u{0391}'..='\u{03A9}'   // Α-Ω
+            | '\u{03B1}'..='\u{03C9}'   // α-ω
+            | '\u{03D1}' | '\u{03D5}' | '\u{03D6}'  // ϑ ϕ ϖ
+            | '\u{03F0}' | '\u{03F1}' | '\u{03F5}'  // ϰ ϱ ϵ
+    )
+}
+
+/// Whether a *non-letter* math atom can be set in the body face.
+///
+/// A reader compares a math label against the plain ones beside it, not against
+/// itself: a tick reading `10^{-3}` sits in a column with ticks reading `50` and
+/// `100`, and the digits must not change typeface between them. The bundled
+/// math font is STIX Two Math, a serif, so every digit that reached it used to
+/// come out Times-like next to sans labels.
+///
+/// Listed here are the characters a text face reliably carries *and* that gain
+/// nothing from math shaping. Big operators, radicals and fences are absent on
+/// purpose even though a text font has `∑ ∫ √`: those are grown through the
+/// MATH table's variant and assembly chains, which only the math font has, so a
+/// text copy of them would be a fixed-size glyph that cannot stretch. The
+/// arrows, relations and letterlike symbols here are drawn at one size and
+/// stretch nothing, so the body face's are as good and match their neighbors.
+///
+/// The list stays *short* on purpose. Anything not here that the body family
+/// happens to carry is drawn by the sans symbol face instead, which has the
+/// whole block — and one font per symbol family reads better than a body-face
+/// `≤` beside a symbol-face `≪`. What earns a place here is being a character
+/// of ordinary text as much as of math, common enough that matching the label's
+/// own typeface exactly is worth more than matching the rarer relation two
+/// symbols along.
+///
+/// Coverage is still verified against the resolved face before use, so a body
+/// family missing any of these moves down the chain rather than drawing
+/// `.notdef`.
+#[rustfmt::skip]
+fn body_face_symbol(c: char) -> bool {
+    matches!(c,
+        '0'..='9'
+            | '.' | ',' | ':' | ';' | '!' | '?' | '\'' | '\\'
+            | '+' | '−' | '±' | '×' | '·' | '÷' | '/' | '%' | '¬'
+            | '=' | '<' | '>' | '≤' | '≥' | '≠' | '≈' | '≡'
+            | '(' | ')' | '[' | ']' | '|'
+            | '∂' | '∞' | '°' | '′' | '″' | '…'
+            | '→' | '←' | '↔'
+    )
+}
+
+/// The body face a span sets `style` in, given its ambient face - or `None`
+/// when the style names an alphabet only the math font has (blackboard, script,
+/// Fraktur, monospace, and the Unicode sans blocks that stay stable regardless
+/// of what the body family happens to be).
+fn body_face_for_style(style: Style, ambient: FaceStyle) -> Option<FaceStyle> {
+    Some(match style {
+        // Variables lean; the weight is whatever the label around them is, so a
+        // bold title's math comes out bold instead of half-bold.
+        Style::Default | Style::It => FaceStyle {
+            bold: ambient.bold,
+            italic: true,
+        },
+        Style::Rm => ambient,
+        Style::Bf => FaceStyle {
+            bold: true,
+            italic: false,
+        },
+        Style::BfIt => FaceStyle {
+            bold: true,
+            italic: true,
+        },
+        Style::Bb | Style::Cal | Style::Frak | Style::Sf | Style::SfBf | Style::Tt => return None,
+    })
+}
+
+/// Decide the codepoint and face for `c` under alphabet `style`.
+///
+/// Under [`FontSet::Sans`] the body family draws whatever it can - letters,
+/// Greek, digits, and the operators of [`body_face_symbol`] - and the math font
+/// supplies the rest. Under [`FontSet::Stix`] every atom comes from the math
+/// font, so a span is uniformly serif.
+pub fn place_char(c: char, style: Style, ambient: FaceStyle, fontset: FontSet) -> Placement {
+    if fontset == FontSet::Stix {
+        // Uniformly serif: the sans symbol face is not consulted either.
+        return Placement::Math {
+            ch: styled_char(c, style),
+            symbol: false,
+        };
+    }
+    // A mark is a *symbol* when no alphabet claims it: the styling left it
+    // alone and it is not a letter. `∇` and `⇒` qualify; `x`, `α` and the
+    // `\mathbb{R}` that `styled_char` turned into `ℝ` do not.
+    let math = || Placement::Math {
+        ch: styled_char(c, style),
+        symbol: styled_char(c, style) == c && !is_variable_letter(c),
+    };
+    let Some(face) = body_face_for_style(style, ambient) else {
+        return math();
+    };
+    if is_variable_letter(c) {
+        // Uppercase Greek is upright in the default alphabet (TeX sets `\Gamma`
+        // roman and `\gamma` italic), and `math_italic` is the existing record
+        // of which characters lean - so ask it rather than restate the rule.
+        let face = if matches!(style, Style::Default | Style::It) && math_italic(c) == c {
+            FaceStyle {
+                bold: face.bold,
+                italic: false,
+            }
+        } else {
+            face
+        };
+        return Placement::Body { ch: c, face };
+    }
+    if body_face_symbol(c) {
+        // Digits and operators are upright under every alphabet; only the weight
+        // carries over, so `\mathbf{2}` is a bold 2 and `x_2` an ordinary one.
+        return Placement::Body {
+            ch: c,
+            face: FaceStyle {
+                bold: face.bold,
+                italic: false,
+            },
+        };
+    }
+    math()
 }
 
 /// Default class for a literal (non-command) character.

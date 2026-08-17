@@ -105,6 +105,7 @@ fig.save("out.pdf", tagged=True)        # accessible, tagged PDF
 | `plt.style.use("seaborn")` | `pp.subplots(theme="nature")` or a `Theme` |
 | `rcParams["font.sans-serif"]` | `pp.set_font_family(...)` |
 | `rcParams["axes.unicode_minus"]` | `pp.set_unicode_minus(...)` |
+| `rcParams["mathtext.fontset"]` | `pp.set_mathtext_fontset(...)` (`"sans"`, `"stix"`) |
 | `ax.plot_surface(X, Y, Z)` | `ax.surface(X, Y, Z)` |
 | `ax.pcolor` / `pcolormesh` | same names |
 | `plt.show()` | — (a `Figure` displays itself in a notebook) |
