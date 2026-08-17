@@ -102,7 +102,7 @@ fig.save("out.pdf", tagged=True)        # accessible, tagged PDF
 | `fig.suptitle("…")` | `fig.set(suptitle="…")` |
 | `fig.savefig("f.png", dpi=300)` | `fig.save("f.png", dpi=300)` |
 | `fig.tight_layout()` | *not needed* — layout is solved before drawing |
-| `plt.style.use("seaborn")` | `pp.subplots(theme="nature")` or a `Theme` |
+| `plt.style.use("seaborn")` | `pp.subplots(theme="dark")` or a `Theme` |
 | `rcParams["font.sans-serif"]` | `pp.set_font_family(...)` |
 | `rcParams["axes.unicode_minus"]` | `pp.set_unicode_minus(...)` |
 | `rcParams["mathtext.fontset"]` | `pp.set_mathtext_fontset(...)` (`"sans"`, `"stix"`) |
@@ -129,6 +129,11 @@ ax.line(xs, ys, color=(70, 130, 180))       # bytes in 0–255, the native form
 `"C0".."Cn"` indexes the *active theme's* palette rather than a fixed global
 cycle, so restyling a figure moves every `"C3"` in it. The default palette is
 Okabe-Ito, which is colorblind-safe.
+
+Note that the indices do **not** line up with matplotlib's. Okabe-Ito leads with
+black, so `C0` is ink rather than tab10's blue, and a single unstyled line comes
+out black instead of blue. Ported code that names colors positionally needs its
+indices read once rather than trusted.
 
 ## Figure size is in points
 

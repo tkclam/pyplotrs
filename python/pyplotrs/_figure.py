@@ -50,7 +50,18 @@ from .text import plain as _plain
 from .theme import Theme
 
 
-def _svg_to_html(svg: str, title: str, alt: str) -> str:
+def _css_rgba(c) -> str:
+    """An RGBA tuple as a CSS color, dropping a fully opaque alpha."""
+    r, g, b = c[0], c[1], c[2]
+    a = c[3] if len(c) > 3 else 255
+    if a >= 255:
+        return f"#{r:02x}{g:02x}{b:02x}"
+    return f"rgba({r},{g},{b},{a / 255:.3f})"
+
+
+def _svg_to_html(svg: str, title: str, alt: str,
+                 page: tuple[str, str, str] = ("#f5f5f5", "#fff",
+                                               ";box-shadow:0 1px 6px rgba(0,0,0,.15)")) -> str:
     """Wrap a standalone SVG document in a self-contained HTML5 page.
 
     The SVG is *inlined* (not referenced via ``<img>``), so the result is a
@@ -72,8 +83,8 @@ def _svg_to_html(svg: str, title: str, alt: str) -> str:
         f"<title>{html.escape(title)}</title>\n"
         "<style>\n"
         "html,body{margin:0;height:100%}\n"
-        "body{display:flex;align-items:center;justify-content:center;background:#f5f5f5}\n"
-        "svg{max-width:100%;height:auto;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.15)}\n"
+        f"body{{display:flex;align-items:center;justify-content:center;background:{page[0]}}}\n"
+        f"svg{{max-width:100%;height:auto;background:{page[1]}{page[2]}}}\n"
         "</style>\n"
         "</head>\n"
         "<body>\n"
@@ -247,7 +258,8 @@ class Figure:
         }
         return self
 
-    def _build_scene(self, capture: list | None = None) -> "_core.Scene":
+    def _build_scene(self, capture: list | None = None,
+                     transparent: bool = False) -> "_core.Scene":
         width, height = self.size_pt
         scene = _core.Scene(width, height)
         if capture is not None:
@@ -255,6 +267,17 @@ class Figure:
             # HTML) and drops their baked glyphs; everything else is unchanged.
             from ._htmlmath import _MathCapture
             scene = _MathCapture(scene, capture)
+
+        # The page, painted before anything else so it sits behind the lot.
+        # It has to be a real path rather than a renderer setting, because only
+        # PNG has a page fill to set - PDF/SVG/HTML paint nothing, and a theme
+        # that states a dark page has to carry it into every format alike.
+        # `transparent` is the caller asking for no page at all, so it wins.
+        if self.theme.figure_facecolor is not None and not transparent:
+            scene.add_path(
+                [(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)],
+                fill_color=self.theme.figure_facecolor, close=True,
+            )
 
         # Per-axes data ranges, optionally unified for shared axes.
         ranges = [ax._ranges() for ax in self.axes]
@@ -326,6 +349,25 @@ class Figure:
 
         return scene
 
+    def _page_css(self) -> tuple[str, str, str]:
+        """``(surround, sheet, shadow)`` CSS for the HTML wrappers.
+
+        An HTML export frames the figure as a sheet of paper on a desk: a white
+        sheet, a light gray desk, a soft drop shadow between them. That reads
+        as paper only while the figure *is* white — put a dark figure on it and
+        the light desk becomes a glaring border around it.
+
+        So a theme that states its own page gets the desk in that same color and
+        no shadow: the browser page becomes the figure's background, edge to
+        edge. Themes that state no page keep the sheet-on-desk framing exactly
+        as before.
+        """
+        face = self.theme.figure_facecolor
+        if face is None:
+            return "#f5f5f5", "#fff", ";box-shadow:0 1px 6px rgba(0,0,0,.15)"
+        css = _css_rgba(face)
+        return css, css, ""
+
     def _accessible_text(self) -> tuple[str, str]:
         """A ``(title, alt)`` pair describing this figure for tagged PDF, derived
         from the suptitle and per-axes titles/labels when not given explicitly.
@@ -383,10 +425,14 @@ class Figure:
         """Save to ``path``; the format is inferred from the extension
         (``.pdf``, ``.svg``, ``.png``, or ``.html``/``.htm``).
 
-        ``transparent=True`` drops the white page fill from ``.png`` output in
-        favor of an alpha channel. ``.pdf``/``.svg``/``.html`` paint no page
-        background to begin with, so they are already "transparent" and ignore
-        this flag.
+        ``transparent=True`` drops the page behind the figure, in favor of an
+        alpha channel. That means two things at once: the white fill ``.png``
+        would otherwise paint, and — for a theme that states a page of its own,
+        such as [`themes.dark`][pyplotrs.theme] — that fill too, in every
+        format. A dark figure saved this way keeps its light text and rules but
+        carries no background, ready to composite onto whatever is behind it.
+        ``.pdf``/``.svg``/``.html`` under a theme with no stated page paint no
+        background to begin with, so for them the flag changes nothing.
 
         ``.html`` writes a single self-contained page with the figure inlined as
         vector SVG (real selectable text, embedded fonts, nothing fetched at view
@@ -427,18 +473,21 @@ class Figure:
                 # render the math with MathJax (selectable/copyable, offline);
                 # otherwise inline the baked-vector SVG as before.
                 placements: list = []
-                svg = self._build_scene(capture=placements).to_svg()
+                svg = self._build_scene(capture=placements,
+                                        transparent=transparent).to_svg()
                 if placements:
                     from ._htmlmath import figure_to_math_html
                     doc = figure_to_math_html(svg, placements, self.size_pt,
-                                              title or auto_title, alt or auto_alt)
+                                              title or auto_title, alt or auto_alt,
+                                              page=self._page_css())
                 else:
-                    doc = _svg_to_html(svg, title or auto_title, alt or auto_alt)
+                    doc = _svg_to_html(svg, title or auto_title, alt or auto_alt,
+                                       page=self._page_css())
             with open(path_str, "w", encoding="utf-8") as f:
                 f.write(doc)
             return
 
-        scene = self._build_scene()
+        scene = self._build_scene(transparent=transparent)
         if ext == "pdf":
             if tagged:
                 auto_title, auto_alt = self._accessible_text()

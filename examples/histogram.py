@@ -17,6 +17,6 @@ def normals(n, seed=1):
     return out
 
 fig, ax = pp.subplots()
-ax.hist(normals(2000), bins=30, color="C4", density=True)
+ax.hist(normals(2000), bins=30, color="C2", density=True)
 ax.set(title="Histogram", xlabel="value", ylabel="density")
 fig.save("histogram.png")

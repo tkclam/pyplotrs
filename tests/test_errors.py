@@ -252,7 +252,7 @@ def test_no_public_object_reprs_as_a_bare_address():
 
 def test_the_theme_repr_names_a_builtin_and_stays_short():
     """The dataclass-generated repr was ~1000 characters of raw RGBA tuples."""
-    assert repr(pp.themes.nature) == "<Theme 'nature'>"
+    assert repr(pp.themes.dark) == "<Theme 'dark'>"
     derived = repr(pp.themes.default.with_(title_size=14))
     assert "derived" in derived and len(derived) < 100, derived
 

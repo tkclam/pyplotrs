@@ -6,9 +6,9 @@ is **no global "current theme"** - a theme is passed to [`pyplotrs.subplots`][py
 (or [`pyplotrs.Figure`][pyplotrs.Figure]) and flows to its axes, matching the library's
 no-global-state philosophy.
 
-Built-in presets are module attributes, so ``pyplotrs.themes.nature`` etc. work::
+Built-in presets are module attributes, so ``pyplotrs.themes.dark`` etc. work::
 
-    fig, ax = pyplotrs.subplots(theme=pyplotrs.themes.presentation)
+    fig, ax = pyplotrs.subplots(theme=pyplotrs.themes.dark)
 
 Derive your own with ``Theme.with_``::
 
@@ -21,16 +21,65 @@ from dataclasses import dataclass, replace
 
 RGBA = tuple[int, int, int, int]
 
-# Okabe-Ito colorblind-safe categorical palette (C0-C7).
+# Okabe-Ito's colorblind-safe categorical palette, in the order Okabe and Ito
+# published it (Color Universal Design, 2002) rather than one of our own.
+#
+# The order is not incidental, whatever its authors intended by it. Scored as a
+# *cycle* - the worst-separated pair among the first n entries, under normal,
+# protan and deutan vision, in CAM16-UCS - it ties the best of all 40320
+# orderings of these eight colors at n=2 and n=3, and trails the best by little
+# after that. A tab10-shaped reordering (blue, orange, green, ...) scores worse
+# at every n, so there is nothing to buy by rearranging it and a citable
+# palette to lose.
+#
+# Black leading is the part worth stating out loud, because it decides what a
+# one-series figure looks like. A lone line has nothing to contrast against, so
+# a hue on it encodes nothing and merely asks to be read as if it did; ink is
+# the honest default, and `grayscale` below already starts the same way. It is
+# also the most separable entry here - its nearest neighbor under CVD sits at
+# 54.8 where every other color's is under 16 - so C0 is where it does the most
+# good. Every ordering that maximizes cycle separation puts it first.
+#
+# The one wart: C4 yellow is 1.32:1 against a white page, so the fifth line of
+# a five-line plot is faint at the default 1.2 pt width. That is Okabe-Ito
+# being designed for filled regions rather than hairlines, and it is the price
+# of using the published order. Reach past it (`color="C5"`) or reorder the
+# palette in a derived theme if a fifth *line* is what you need.
 _OKABE_ITO: tuple[RGBA, ...] = (
-    (0, 114, 178, 255),    # C0 blue
+    (0, 0, 0, 255),        # C0 black
     (230, 159, 0, 255),    # C1 orange
-    (0, 158, 115, 255),    # C2 green
-    (204, 121, 167, 255),  # C3 pink
-    (86, 180, 233, 255),   # C4 sky blue
-    (213, 94, 0, 255),     # C5 vermillion
-    (240, 228, 66, 255),   # C6 yellow
-    (0, 0, 0, 255),        # C7 black
+    (86, 180, 233, 255),   # C2 sky blue
+    (0, 158, 115, 255),    # C3 bluish green
+    (240, 228, 66, 255),   # C4 yellow
+    (0, 114, 178, 255),    # C5 blue
+    (213, 94, 0, 255),     # C6 vermillion
+    (204, 121, 167, 255),  # C7 reddish purple
+)
+
+# The same palette re-aimed at a dark page, index for index, so switching a
+# figure between `default` and `dark` keeps every series on its own hue.
+#
+# Only two entries had to move. Okabe-Ito's blue reaches just 3.6:1 against the
+# dark page - legible as a filled area, thin and sunken as a 1.2 pt line - so it
+# is lifted in Oklch (hue held, chroma shrunk only as far as the sRGB gamut
+# demands) to the smallest lightness that clears 4.5:1. Black cannot be lifted
+# at all without becoming a different color, so C0 is the page's ink instead -
+# which keeps its meaning across the switch, since what C0 stands for is "no
+# hue, just ink" rather than "black" specifically. The other six clear the
+# target as they stand and are Okabe-Ito verbatim.
+#
+# Lifting *every* entry to a common lightness was the obvious first try and is
+# wrong: blue and sky blue are separated as much by lightness as by hue, and a
+# flat lightness collapses them into each other.
+_OKABE_ITO_DARK: tuple[RGBA, ...] = (
+    (235, 235, 235, 255),  # C0 off-white (replaces black)
+    (230, 159, 0, 255),    # C1 orange
+    (86, 180, 233, 255),   # C2 sky blue
+    (0, 158, 115, 255),    # C3 bluish green
+    (240, 228, 66, 255),   # C4 yellow
+    (33, 130, 195, 255),   # C5 blue    (Okabe-Ito blue, lifted to 4.5:1)
+    (213, 94, 0, 255),     # C6 vermillion
+    (204, 121, 167, 255),  # C7 reddish purple
 )
 
 # Print-safe categorical grays (distinguishable on white without color); pair
@@ -217,7 +266,7 @@ class Theme:
     spine_color: RGBA = (0, 0, 0, 255)
     # Which of "left"/"right"/"top"/"bottom" spines (and their ticks) to draw.
     spines: tuple[str, ...] = ("left", "bottom")
-    spine_width: float = 1.0
+    spine_width: float = 0.8
     # How a spine finishes where another line abuts its end - the perpendicular
     # spine at a corner, or a tick mark sitting on the axis limit. Stroked
     # separately, the two stop on each other's centerline and leave the outer
@@ -226,11 +275,14 @@ class Theme:
     # never - the geometry before this was noticed.
     spine_join: str = "miter"
 
-    tick_label_size: float = 9.0
-    axis_label_size: float = 10.0
-    title_size: float = 11.0
-    suptitle_size: float = 13.0
-    legend_size: float = 9.0
+    # Calibrated for a figure printed at journal column width (~3.3 in), where
+    # the type has to stay readable after the page scales it down. Screen-first
+    # work usually wants a step up: `default.with_(...)` or a larger `figsize`.
+    tick_label_size: float = 8.0
+    axis_label_size: float = 9.0
+    title_size: float = 10.0
+    suptitle_size: float = 11.0
+    legend_size: float = 8.0
 
     # Weight of the figure's chrome text: "normal" or "bold". Bold panel titles
     # are near-universal in multi-panel journal figures, and are a theme choice
@@ -240,12 +292,19 @@ class Theme:
     suptitle_weight: str = "normal"
     axis_label_weight: str = "normal"
 
-    line_width: float = 1.5  # default width of a `line` mark
+    line_width: float = 1.2  # default width of a `line` mark
 
     grid: bool = False
     grid_color: RGBA = (221, 221, 221, 255)
     grid_width: float = 0.6
 
+    # The page the whole figure is drawn on, painted before anything else.
+    # `None` paints nothing at all, which is what every light theme wants: PNG
+    # already fills the page white, and PDF/SVG/HTML are deliberately
+    # transparent so a figure drops onto whatever background it lands on. A
+    # dark theme has to state its page, because white text over "nothing"
+    # is white text over a white page in every viewer that opens it.
+    figure_facecolor: RGBA | None = None
     axes_facecolor: RGBA | None = None  # plot-area background fill
     legend_facecolor: RGBA = (255, 255, 255, 255)
     legend_edgecolor: RGBA = (179, 179, 179, 255)
@@ -266,11 +325,18 @@ class Theme:
         pie wedges.
 
         The intent is "the plot background showing through", so it follows
-        ``axes_facecolor`` and falls back to white when that is ``None``
-        (a transparent plot area over a white page). Hardcoding white here is
-        what made histogram bins grow white outlines under a dark theme.
+        ``axes_facecolor``, then the page behind it, and only reaches white
+        when neither is stated. Hardcoding white here is what made histogram
+        bins grow white outlines under a dark theme; stopping the chain at
+        ``axes_facecolor`` brought the same outlines back for a theme that
+        darkens the *page* and lets it show through the plot area - which is
+        exactly what ``dark`` does.
         """
-        return self.axes_facecolor if self.axes_facecolor is not None else (255, 255, 255, 255)
+        if self.axes_facecolor is not None:
+            return self.axes_facecolor
+        if self.figure_facecolor is not None:
+            return self.figure_facecolor
+        return (255, 255, 255, 255)
 
     def resolve(self, color) -> RGBA:
         """Resolve a color spec against this theme's palette (see
@@ -284,51 +350,47 @@ class Theme:
 
 # -- built-in presets -------------------------------------------------------
 
-#: The zero-config publication default (Okabe-Ito, despined, no grid).
+#: The zero-config publication default: Okabe-Ito, despined, no grid, with the
+#: compact type and thin rules a journal column wants.
 default = Theme()
 
-#: Compact journal preset: smaller type and thinner rules for dense, two-column
-#: figures (e.g. ~3.3in wide).
-nature = Theme(
-    tick_label_size=8.0,
-    axis_label_size=9.0,
-    title_size=10.0,
-    suptitle_size=11.0,
-    legend_size=8.0,
-    spine_width=0.8,
-    line_width=1.2,
-)
-
-#: Print-safe grayscale preset: monochrome palette, black spines/text.
-grayscale = Theme(
-    palette=_GREYS,
-    spine_color=(0, 0, 0, 255),
-    line_width=1.3,
-    legend_edgecolor=(120, 120, 120, 255),
-)
+#: `default` with the color taken out. Nothing else moves - same type scale,
+#: same rules - so a figure keeps its layout when it goes to a mono press.
+#:
+#: The grays are ordered by bisection rather than by darkness (0, 120, 60, 165,
+#: ...), so *any* prefix of them is spread as widely as that many grays can be:
+#: two series get black against mid-gray, not black against near-black. Past
+#: three or four, pair them with distinct line styles or markers - luminance
+#: alone runs out well before the palette does.
+grayscale = Theme(palette=_GREYS)
 bw = grayscale  # alias
 
-#: Large type and heavy strokes with a light grid, tuned for slides/posters.
-presentation = Theme(
-    tick_label_size=12.0,
-    axis_label_size=14.0,
-    title_size=16.0,
-    suptitle_size=19.0,
-    legend_size=12.0,
-    spine_width=1.4,
-    line_width=2.5,
-    grid=True,
-    grid_color=(228, 228, 228, 255),
-    grid_width=0.8,
+#: `default` with the ink and the paper swapped: a near-black page, off-white
+#: text and spines, and the palette re-aimed at a dark background.
+#:
+#: The page is near-black rather than pure black, which is what dark UI themes
+#: settle on for the same reason - #000 with white text glares, and on OLED it
+#: blooms around the type. `dark.with_(figure_facecolor=(0, 0, 0, 255))` if you
+#: need the true black, e.g. to sit seamlessly on a black slide.
+#:
+#: `axes_facecolor` is left unset on purpose, exactly as in `default`: the plot
+#: area is not a panel floating on the page, it *is* the page.
+dark = Theme(
+    palette=_OKABE_ITO_DARK,
+    text_color=(235, 235, 235, 255),
+    spine_color=(235, 235, 235, 255),
+    figure_facecolor=(18, 18, 18, 255),
+    grid_color=(45, 45, 45, 255),
+    legend_facecolor=(18, 18, 18, 255),
+    legend_edgecolor=(73, 73, 73, 255),
 )
 
 #: All presets keyed by name (for `get(...)`).
 _PRESETS = {
     "default": default,
-    "nature": nature,
     "grayscale": grayscale,
     "bw": bw,
-    "presentation": presentation,
+    "dark": dark,
 }
 
 

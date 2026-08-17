@@ -10,7 +10,7 @@ every axes.
 ```python
 import pyplotrs as pp
 
-fig, ax = pp.subplots(theme="presentation")
+fig, ax = pp.subplots(theme="dark")
 ax.line(xs, ys)
 ```
 
@@ -18,10 +18,9 @@ Built-in presets (pass the name, or `pyplotrs.themes.<name>`):
 
 | Preset | For |
 |---|---|
-| `default` | The zero-config publication default (Okabe-Ito palette, despined, no grid) |
-| `nature` | Compact: smaller type and thinner rules for dense two-column figures |
-| `grayscale` (alias `bw`) | Print-safe monochrome palette with black spines/text |
-| `presentation` | Large type, heavy strokes and a light grid, tuned for slides |
+| `default` | The zero-config publication default: Okabe-Ito palette, despined, no grid, compact type sized for a journal column |
+| `grayscale` (alias `bw`) | `default` with the color taken out, for a monochrome press |
+| `dark` | `default` with the ink and the paper swapped: near-black page, off-white type, palette re-aimed at a dark background |
 
 ```python
 --8<-- "examples/themes.py"
@@ -29,10 +28,46 @@ Built-in presets (pass the name, or `pyplotrs.themes.<name>`):
 
 <div class="grid" markdown>
 ![default](../gallery/images/theme_default.png)
-![nature](../gallery/images/theme_nature.png)
 ![grayscale](../gallery/images/theme_grayscale.png)
-![presentation](../gallery/images/theme_presentation.png)
+![dark](../gallery/images/theme_dark.png)
 </div>
+
+All three share one type scale and one set of rules, so a figure keeps its
+layout when you switch between them — only the color changes.
+
+### The dark theme
+
+`dark` states a page of its own (`figure_facecolor`), which no light theme does:
+`.png` already fills its page white, and `.pdf`/`.svg`/`.html` deliberately
+paint nothing so a figure drops onto whatever is behind it. White text over
+"nothing" is white text on a white page in every viewer that opens it, so the
+dark page is painted into every format alike.
+
+Two consequences worth knowing:
+
+```python
+fig.save("plot.png", transparent=True)   # keeps the light ink, drops the page
+```
+
+`transparent=True` now means "no page" in *every* format, not just `.png` —
+which is how you composite a dark figure onto a background of your own.
+
+The palette is Okabe-Ito index for index, so `C3` is the same bluish green in
+`default` and in `dark` and a figure keeps its series colors across the switch.
+Only two entries moved. `C0` black becomes off-white, since black cannot be
+lifted without becoming a different color — which keeps its meaning rather than
+breaking it, because `C0` stands for "ink, no hue" and not for black in
+particular. And Okabe-Ito's blue at `C5` reaches just 3.6:1 against the dark
+page, so it is lifted in Oklch — hue held, chroma shrunk only as far as the
+sRGB gamut demands — to the smallest lightness clearing 4.5:1.
+
+The page is near-black rather than pure black, for the reason every dark UI
+theme lands there: `#000` under white text glares, and on OLED it blooms around
+the type. If you need true black — to sit seamlessly on a black slide, say:
+
+```python
+pp.subplots(theme=pp.themes.dark.with_(figure_facecolor=(0, 0, 0, 255)))
+```
 
 ## Deriving your own theme
 
@@ -61,27 +96,33 @@ script — or the same thread pool — can use different ones without interferin
 | `text_color` | black | Titles, labels, tick labels, annotations |
 | `spine_color` | black | Axis lines and tick marks |
 | `spines` | `("left", "bottom")` | Which spines (and their ticks) to draw |
-| `spine_width` | `1.0` | Spine stroke width |
+| `spine_width` | `0.8` | Spine stroke width |
 | `spine_join` | `"miter"` | How a spine finishes where another abuts it: `"miter"`, `"square"`, `"butt"` |
-| `tick_label_size` | `9.0` | Type scale, in points |
-| `axis_label_size` | `10.0` | " |
-| `title_size` | `11.0` | " |
-| `suptitle_size` | `13.0` | " |
-| `legend_size` | `9.0` | " |
+| `tick_label_size` | `8.0` | Type scale, in points |
+| `axis_label_size` | `9.0` | " |
+| `title_size` | `10.0` | " |
+| `suptitle_size` | `11.0` | " |
+| `legend_size` | `8.0` | " |
 | `title_weight` | `"normal"` | `"normal"` or `"bold"` chrome weight |
 | `suptitle_weight` | `"normal"` | " |
 | `axis_label_weight` | `"normal"` | " |
-| `line_width` | `1.5` | Default stroke width of a `line` mark |
+| `line_width` | `1.2` | Default stroke width of a `line` mark |
 | `grid` | `False` | Draw gridlines |
 | `grid_color` | light gray | " |
 | `grid_width` | `0.6` | " |
+| `figure_facecolor` | `None` | The page the whole figure sits on (`None` = paint none) |
 | `axes_facecolor` | `None` | Plot-area background fill (`None` = transparent) |
 | `legend_facecolor` | white | Legend box fill |
 | `legend_edgecolor` | gray | Legend box border |
 
+The type scale is calibrated for a figure printed at journal column width
+(~3.3 in), where the page scales it down. Screen-first work usually wants a step
+up — `default.with_(title_size=14, ...)`, or simply a larger `figsize`.
+
 A theme also derives `separator_color` — the hairline between adjacent filled
-shapes such as histogram bins and pie wedges — from `axes_facecolor`, so those
-seams read as "the background showing through" whatever the background is.
+shapes such as histogram bins and pie wedges — from `axes_facecolor`, then from
+`figure_facecolor`, so those seams read as "the background showing through"
+whatever the background is.
 
 ## Colors
 
@@ -101,8 +142,20 @@ ax.line(xs, ys, color=(214, 39, 40))            # literal RGB bytes
 ax.scatter(xs, ys, color=(31, 119, 180, 128))   # semi-transparent
 ```
 
-The default palette is **Okabe-Ito**, a colorblind-safe categorical set. Swap in
-any of the [built-in palettes](colormaps-and-images.md#categorical-palettes):
+The default palette is **Okabe-Ito**, a colorblind-safe categorical set, in the
+order Okabe and Ito published it. Two things follow from that order:
+
+- **`C0` is black**, so a single unstyled line comes out in ink. A lone series
+  has nothing to contrast against, so a hue on it encodes nothing — and black is
+  also the entry that separates best from the other seven, which is why it earns
+  the slot twice over. On `dark` it becomes the page's off-white.
+- **`C4` is yellow**, which is only 1.32:1 against a white page. It reads well
+  as a fill but is faint as a 1.2 pt line, so a five-line plot on the stock
+  palette has one weak line. Skip past it with an explicit `color="C5"`, or
+  reorder the palette in a derived theme.
+
+Swap in any of the
+[built-in palettes](colormaps-and-images.md#categorical-palettes):
 
 ```python
 mine = pp.themes.default.with_(palette=pp.palettes.get("tab10"))
@@ -144,7 +197,7 @@ The figure's own chrome is a theme choice, since bold panel titles are a
 document-wide decision rather than a per-call one:
 
 ```python
-journal = pp.themes.nature.with_(title_weight="bold")
+journal = pp.themes.default.with_(title_weight="bold")
 fig, ax = pp.subplots(theme=journal)
 ```
 

@@ -47,8 +47,11 @@ def test_hex_and_named_colors_are_accepted():
 
 
 def test_palette_indices_still_resolve_against_the_theme():
-    assert parse_color("C0", pp.themes.default.palette) == (0, 114, 178, 255)
+    # C0 is ink in both, by design; C1 is where the themes part company.
+    assert parse_color("C0", pp.themes.default.palette) == (0, 0, 0, 255)
     assert parse_color("C0", pp.themes.grayscale.palette) == (0, 0, 0, 255)
+    assert parse_color("C1", pp.themes.default.palette) == (230, 159, 0, 255)
+    assert parse_color("C1", pp.themes.grayscale.palette) == (120, 120, 120, 255)
 
 
 def test_unknown_color_string_still_raises():
@@ -70,7 +73,7 @@ def test_barh_with_label_and_legend(tmp_path):
     fig.save(str(tmp_path / "barh.png"))
 
 
-@pytest.mark.parametrize("theme", ["default", "nature", "grayscale", "presentation"])
+@pytest.mark.parametrize("theme", ["default", "grayscale", "dark"])
 def test_legend_swatch_matches_the_theme_type_size(theme, tmp_path):
     """The legend box was *measured* at ``theme.legend_size`` but its swatches
     were *drawn* at a hardcoded 9.0 pt, so any theme with a different legend
@@ -138,6 +141,114 @@ def test_hist_bar_edges_follow_the_theme(tmp_path):
     assert "#ffffff" not in svg.lower(), (
         "hist still emits hardcoded white edges under a dark theme"
     )
+
+
+def test_separator_falls_through_to_the_page_when_the_plot_area_is_unset(tmp_path):
+    """The separator chain stopped at ``axes_facecolor`` and then jumped to
+    white.
+
+    ``themes.dark`` darkens the *page* and leaves ``axes_facecolor`` unset, so
+    the plot area is the page showing through - exactly as in ``default``. That
+    put the chain straight onto the white fallback and grew white hairlines
+    between histogram bins again, the very defect the chain was added to fix.
+    """
+    assert pp.themes.dark.axes_facecolor is None, "the premise of this test"
+    assert pp.themes.dark.separator_color == pp.themes.dark.figure_facecolor
+
+    fig, ax = pp.subplots(figsize=(240, 180), theme="dark")
+    ax.hist([1, 2, 2, 3, 3, 3, 4], bins=4)
+    out = tmp_path / "hist_dark_page.svg"
+    fig.save(str(out))
+    assert "#ffffff" not in out.read_text().lower()
+
+
+# -- a theme that states its own page ---------------------------------------
+
+def test_a_dark_theme_paints_its_page_into_every_format(tmp_path):
+    """Only PNG has a page fill to set; PDF/SVG/HTML paint nothing at all.
+
+    So a theme whose text is near-white had no way to be readable outside PNG -
+    the labels landed on whatever the viewer painted, which is white. The page
+    is now a real path in the scene, so it travels into every format alike.
+    """
+    from conftest import read_png
+
+    fig, ax = pp.subplots(figsize=(240, 180), theme="dark")
+    ax.line([0, 1, 2], [0, 1, 4], label="a")
+    ax.legend()
+
+    svg = (tmp_path / "d.svg")
+    fig.save(str(svg))
+    body = svg.read_text()
+    # the page rect is drawn first, before any of the data
+    first = body.index("<path")
+    assert "#121212" in body[first:first + 200], body[first:first + 200]
+
+    html = (tmp_path / "d.html")
+    fig.save(str(html))
+    assert "#121212" in html.read_text()
+
+    png = (tmp_path / "d.png")
+    fig.save(str(png))
+    w, h, px = read_png(png)
+    assert tuple(px[0:4]) == (18, 18, 18, 255), "top-left pixel is not the page"
+
+
+def test_transparent_drops_a_stated_page_rather_than_baking_it_in(tmp_path):
+    """``transparent=True`` means "no page" - including a page the *theme*
+    states, not just the white one PNG would otherwise fill.
+
+    Without this a dark figure could never be composited onto a background of
+    its own choosing: the near-black would be baked into the alpha channel.
+    """
+    from conftest import read_png
+
+    fig, ax = pp.subplots(figsize=(240, 180), theme="dark")
+    ax.line([0, 1, 2], [0, 1, 4])
+
+    opaque = tmp_path / "op.png"
+    fig.save(str(opaque))
+    clear = tmp_path / "cl.png"
+    fig.save(str(clear), transparent=True)
+
+    assert tuple(read_png(opaque)[2][0:4]) == (18, 18, 18, 255)
+    assert tuple(read_png(clear)[2][0:4]) == (0, 0, 0, 0)
+
+    # and the light default is unaffected either way
+    fig2, ax2 = pp.subplots(figsize=(240, 180))
+    ax2.line([0, 1, 2], [0, 1, 4])
+    light = tmp_path / "li.png"
+    fig2.save(str(light))
+    assert tuple(read_png(light)[2][0:4]) == (255, 255, 255, 255)
+
+
+def test_the_dark_palette_stays_readable_and_keeps_okabe_ito_indexing(tmp_path):
+    """Two properties the dark palette is only useful if it has.
+
+    Every entry has to clear a contrast floor against the page - Okabe-Ito's own
+    blue reaches 3.6:1 there and its black is invisible - and every entry has to
+    keep its light-theme *hue*, so switching themes does not silently recolor a
+    series that a caption already refers to by color.
+    """
+    def rel_lum(c):
+        def ch(v):
+            v /= 255.0
+            return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+        r, g, b = (ch(x) for x in c[:3])
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+    page = pp.themes.dark.figure_facecolor
+    for i, c in enumerate(pp.themes.dark.palette):
+        lo, hi = sorted((rel_lum(c), rel_lum(page)))
+        ratio = (hi + 0.05) / (lo + 0.05)
+        assert ratio >= 4.5, f"C{i} {c} is only {ratio:.2f}:1 on the page"
+
+    light = pp.themes.default.palette
+    dark = pp.themes.dark.palette
+    assert len(light) == len(dark)
+    # six of the eight are Okabe-Ito untouched; only black (C0, which cannot be
+    # lifted, so it becomes the page's ink) and blue (C5, lifted) differ
+    assert [i for i in range(len(light)) if light[i] != dark[i]] == [0, 5]
 
 
 # -- 3D methods that never worked -------------------------------------------

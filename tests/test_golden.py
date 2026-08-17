@@ -66,7 +66,7 @@ def _theme_case(name):
     return build
 
 
-for _name in ("default", "nature", "grayscale", "presentation"):
+for _name in ("default", "grayscale", "dark"):
     CASES[f"theme_{_name}"] = _theme_case(_name)
 
 

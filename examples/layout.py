@@ -30,7 +30,7 @@ zoom.set(xlim=(0, 4))
 axd["B"].scatter([math.sin(x) for x in xs], [math.cos(3 * x) for x in xs], markersize=2)
 axd["B"].set(title="B")
 
-axd["C"].hist([math.sin(x) * 2 for x in xs], bins=14, color="C2")
+axd["C"].hist([math.sin(x) * 2 for x in xs], bins=14, color="C3")
 axd["C"].set(title="C")
 
 fig.set(suptitle="subplot_mosaic + twinx + inset_axes")

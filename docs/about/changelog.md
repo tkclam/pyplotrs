@@ -41,6 +41,22 @@ All notable changes to pyplotrs are documented here. The format is based on
   `rcParams["mathtext.fontset"]`. `"sans"` is the new default (see **Changed**);
   `"stix"` sets every atom in STIX Two Math, for figures whose body text is a
   serif too.
+- **A `dark` theme.** `default` with the ink and the paper swapped: a near-black
+  page, off-white type and spines, and the palette re-aimed at a dark
+  background. The palette is Okabe-Ito index for index — `C3` is the same
+  bluish green in both themes, so a figure keeps its series colors across the
+  switch. Only two entries moved: `C0` black becomes off-white since black
+  cannot be lifted without becoming a different color, which keeps its meaning
+  because `C0` stands for "ink, no hue" rather than for black in particular;
+  and Okabe-Ito's blue at `C5` reaches just 3.6:1 against the dark page, so it
+  is lifted in Oklch (hue held, chroma shrunk only as far as the sRGB gamut
+  demands) to the smallest lightness clearing 4.5:1.
+- **`Theme.figure_facecolor`** — the page the whole figure is drawn on, painted
+  before anything else. Light themes leave it `None` and nothing changes: `.png`
+  already fills its page white, and `.pdf`/`.svg`/`.html` deliberately paint
+  nothing so a figure drops onto whatever is behind it. A dark theme has to
+  state its page, because white text over "nothing" is white text on a white
+  page in every viewer that opens it.
 
 ### Changed
 
@@ -93,9 +109,56 @@ All notable changes to pyplotrs are documented here. The format is based on
     `set_mathtext_fontset("stix")`, and under `sans` it is the last resort for
     the Script and Fraktur alphabets and double-struck digits, which no sans
     math font here carries.
+- **The default palette is now in Okabe-Ito's published order**, which it was
+  not before: the entries had been rearranged to put blue, orange and green in
+  tab10's slots. Scored as a *cycle* — the worst-separated pair among the first
+  n entries, under normal, protan and deutan vision, in CAM16-UCS — the
+  published order ties the best of all 40320 orderings of these eight colors at
+  n=2 and n=3, and the tab10-shaped rearrangement was worse at every n. There
+  was nothing to buy by rearranging it and a citable palette to lose.
+
+    Two visible consequences. **`C0` is black**, so a single unstyled line now
+    draws in ink rather than blue — which is what a lone series wants, having
+    nothing to contrast against. And **`C4` is yellow** at 1.32:1 against a
+    white page, fine as a fill but faint as a 1.2 pt line, so a five-line plot
+    on the stock palette has one weak line; reach past it with `color="C5"` or
+    reorder the palette in a derived theme.
+
+    The indices do not correspond to matplotlib's, and did not before either.
+    Code that names palette colors positionally needs its indices re-read.
+- **`default` now carries the compact type scale that `nature` used to.** Tick
+  labels 8pt, axis labels 9pt, title 10pt, suptitle 11pt, legend 8pt, spines
+  0.8pt, lines 1.2pt. Every figure drawn with the default theme changes size
+  slightly; nothing else about it moves.
+- **The `nature` and `presentation` themes are gone.** `nature` was never
+  derived from Nature's artwork guidelines — it was a compact journal preset
+  wearing a journal's name, which promised a specification it did not implement.
+  Its scaling *was* the better default, so it became one: replace
+  `theme="nature"` with the default, i.e. drop the argument. `presentation` has
+  no replacement; derive it if you want it —
+  `pp.themes.default.with_(title_size=16, line_width=2.5, grid=True)`.
+- **`grayscale` is now exactly `default` with the color taken out** — a palette
+  swap and nothing else. It previously also thickened its lines and lightened
+  its legend border, so a figure changed shape as well as color on the way to a
+  mono press. `bw` remains an alias for it.
+- **`transparent=True` now means "no page" in every format**, including a page
+  the theme itself states. Previously it dropped only the white fill `.png`
+  would otherwise paint. This is what lets a dark figure be composited onto a
+  background of your own rather than baking the near-black into the alpha
+  channel. Themes that state no page are unaffected in every format.
 
 ### Fixed
 
+- **The separator hairline follows the page when the plot area is unset.** The
+  chain that keeps histogram-bin and pie-wedge seams reading as "the background
+  showing through" stopped at `axes_facecolor` and then jumped to white — so a
+  theme that darkens the *page* and lets it show through the plot area, which is
+  exactly what `dark` does, grew white outlines between its bins. It now falls
+  through `axes_facecolor` → `figure_facecolor` → white.
+- **The interactive 3D HTML viewer cleared its canvas to a hardcoded white**, so
+  a dark figure's off-white labels landed on a white cell in that one output
+  format. It now clears to the theme's page, and the viewer's HTML chrome — the
+  suptitle and the drag hint — takes the theme's text color.
 - **`imshow` filters each axis on its own terms.** A tall or wide image is
   magnified along one axis and reduced along the other, and the two want
   opposite filters — but a backend offers only one for the whole image

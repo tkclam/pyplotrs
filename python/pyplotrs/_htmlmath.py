@@ -165,7 +165,10 @@ def _overlay_div(p: dict) -> str:
 
 
 def figure_to_math_html(svg: str, placements: list, size_pt, title: str,
-                        alt: str) -> str:
+                        alt: str,
+                        page: tuple[str, str, str] = (
+                            "#f5f5f5", "#fff",
+                            ";box-shadow:0 1px 6px rgba(0,0,0,.15)")) -> str:
     """Wrap a (math-suppressed) figure ``svg`` plus its captured math
     ``placements`` in a self-contained MathJax HTML page."""
     w_pt, h_pt = size_pt
@@ -184,10 +187,10 @@ def figure_to_math_html(svg: str, placements: list, size_pt, title: str,
         f"<title>{html.escape(title)}</title>\n"
         "<style>\n"
         "html,body{margin:0}\n"
-        "body{background:#f5f5f5;display:flex;align-items:center;"
+        f"body{{background:{page[0]};display:flex;align-items:center;"
         "justify-content:center;min-height:100vh}\n"
         f".fxwrap{{position:relative;width:{w_pt:.3f}px;height:{h_pt:.3f}px;"
-        "background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.15)}\n"
+        f"background:{page[1]}{page[2]}}}\n"
         ".fxmath{position:absolute;white-space:nowrap;line-height:1}\n"
         "mjx-container{margin:0!important}\n"
         "</style>\n</head>\n<body>\n"

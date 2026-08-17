@@ -773,5 +773,9 @@ class Axes3D(_AxesBase):
                 "grid": list(_GRID_3D), "pane_fill": list(_PANE_FILL), "pane_edge": list(_PANE_EDGE),
                 "text": list(t.text_color), "tick_size": t.tick_label_size,
                 "axis_size": t.axis_label_size, "title_size": t.title_size, "cube_fill": _CUBE_FILL,
+                # The canvas clears to this every frame. It used to be a
+                # hardcoded white, which left a dark theme's off-white labels
+                # on a white cell in the interactive viewer alone.
+                "bg": list(t.figure_facecolor or (255, 255, 255, 255)),
             },
         }

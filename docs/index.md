@@ -91,7 +91,7 @@ fig.save("hello.png")   # 200 dpi by default
 | **3D** | `scatter`, `plot`, `surface`, `bar3d`, `plot_wireframe`, `contour3d`, `plot_trisurf`, `quiver3d`, `voxels` — projected to editable 2D vectors, with an interactive HTML viewer |
 | **Axes** | Linear, log, symlog, logit, date and categorical scales; 8 tick formatters; 4 color norms |
 | **Layout** | Grids with ratios, `subplot_mosaic`, `GridSpec`, twin axes, insets, secondary axes |
-| **Themes** | `default`, `nature`, `grayscale`, `presentation`, plus `Theme.with_(...)` |
+| **Themes** | `default`, `grayscale`, `dark`, plus `Theme.with_(...)` |
 | **Color** | 127 exact colormaps, 25 categorical palettes, Oklab/CAM16-UCS conversion and CVD checks |
 | **Annotations** | `text`, `annotate` with callout arrows; LaTeX math anywhere |
 | **Animation** | `animate(render, frames)` → GIF / APNG |

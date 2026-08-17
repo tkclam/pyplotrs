@@ -58,7 +58,7 @@ def test_every_gallery_image_is_shown_on_the_gallery_page():
     """An image nobody displays is dead weight in every clone.
 
     Matched against the page rather than against script names: one script can
-    produce several images (`themes.py` renders all four built-in themes), so
+    produce several images (`themes.py` renders every built-in theme), so
     stem-for-stem is the wrong pairing. That an image is *reproducible* is
     covered by the byte comparison above.
     """

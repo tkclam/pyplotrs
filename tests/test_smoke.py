@@ -293,7 +293,7 @@ def test_twin_inset_secondary_render(tmp_path, figure_factory):
     _save_all(fig, tmp_path, "twins")
 
 
-@pytest.mark.parametrize("theme", ["default", "nature", "grayscale", "presentation"])
+@pytest.mark.parametrize("theme", ["default", "grayscale", "dark"])
 def test_themes_render(theme, tmp_path):
     fig, ax = pp.subplots(figsize=(240, 180), theme=theme)
     ax.line([0, 1, 2], [0, 1, 4], label="a")

@@ -106,9 +106,10 @@ fig
 
 Three things worth naming:
 
-- **`color="C0"`** is *this theme's* first palette color, not a fixed blue. The
-  band, the fit and the points share it because they are one story; switch the
-  theme and all three move together.
+- **`color="C0"`** is *this theme's* first palette color, not a fixed color. In
+  `default` that is ink, because Okabe-Ito leads with black; in `dark` the same
+  `C0` is off-white. The band, the fit and the points share it because they are
+  one story, so switching the theme moves all three together.
 - **`linestyle="none"`** on the error bars leaves the markers and whiskers but
   drops the connecting line — the fit is the line now.
 - **`$...$` in the labels** is real LaTeX math, typeset by pyplotrs' own engine.
@@ -196,11 +197,12 @@ fig.save("catalyst.pdf", tagged=True, title="Figure 2",
 ## Step 7 — retarget it
 
 Nothing above is tied to one output style. The same figure code takes a
-`theme`, so the manuscript version and the slide version differ by one word:
+`theme`, so the manuscript version and the dark-slide version differ by one
+word:
 
 ```python
 fig, (top, bottom) = pp.subplots(2, 1, figsize=(250, 260), sharex=True,
-                                  height_ratios=[3, 1], theme="presentation")
+                                  height_ratios=[3, 1], theme="dark")
 ```
 
 And a journal with a hard column width takes its units directly:

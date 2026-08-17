@@ -134,7 +134,7 @@ class Plot3D {
     if (!this.ready) return;  // wait for MathJax to typeset overlay labels
     const ctx = this.ctx, d = this.d, P = this._proj();
     ctx.clearRect(0, 0, this.W, this.H);
-    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, this.W, this.H);
+    ctx.fillStyle = rgba(d.theme.bg); ctx.fillRect(0, 0, this.W, this.H);
     ctx.lineJoin = "round"; ctx.lineCap = "round";
     const pj = p => P.projn(p);
 
@@ -403,6 +403,13 @@ def figure_to_interactive_html(fig, title: str, alt: str) -> str:
             f"<script>{_mathjax_bundle()}</script>\n"
         )
     cw, ch = fig.size_pt[0] / fig.ncols, fig.size_pt[1] / fig.nrows
+    # The page framing, plus the chrome that lives in HTML rather than on the
+    # canvas: the suptitle and the drag hint are real DOM text, so they take
+    # their color from the theme or stay black on a dark page.
+    from ._figure import _css_rgba
+    page = fig._page_css()
+    ink = _css_rgba(fig.theme.text_color)
+    hint = _css_rgba((*fig.theme.text_color[:3], 150))
     return (
         "<!DOCTYPE html>\n"
         '<html lang="en">\n'
@@ -414,18 +421,19 @@ def figure_to_interactive_html(fig, title: str, alt: str) -> str:
         f"{_body_font_face()}"
         "html,body{margin:0;height:100%}\n"
         "body{display:flex;flex-direction:column;align-items:center;justify-content:center;"
-        "background:#f5f5f5;font-family:Arial,Helvetica,'Liberation Sans',system-ui,sans-serif}\n"
+        f"background:{page[0]};color:{ink};"
+        "font-family:Arial,Helvetica,'Liberation Sans',system-ui,sans-serif}\n"
         f".suptitle{{font-size:{fig.theme.suptitle_size}px;font-weight:600;margin:10px 0 4px}}\n"
         f".grid{{display:grid;grid-template-columns:repeat({fig.ncols},{cw:.1f}px);"
         f"grid-template-rows:repeat({fig.nrows},{ch:.1f}px);gap:6px;"
-        "background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.15)}\n"
+        f"background:{page[1]}{page[2]}}}\n"
         ".figcell{position:relative;width:100%;height:100%}\n"
         ".ovl{position:absolute;inset:0;overflow:hidden;pointer-events:none}\n"
         ".fxm{position:absolute;left:0;top:0;white-space:nowrap;line-height:1}\n"
         "mjx-container{margin:0!important}\n"
         "canvas.pyplotrs3d{width:100%;height:100%;display:block;cursor:grab;touch-action:none}\n"
         "canvas.pyplotrs3d:active{cursor:grabbing}\n"
-        ".hint{font-size:11px;color:#666;margin:6px 0 10px}\n"
+        f".hint{{font-size:11px;color:{hint};margin:6px 0 10px}}\n"
         "</style>\n"
         "</head>\n"
         "<body>\n"

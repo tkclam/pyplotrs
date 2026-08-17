@@ -129,7 +129,7 @@ into a gap rather than distorting the plot. More in
 === "Themes"
 
     ```python
-    fig, ax = pp.subplots(theme="presentation")
+    fig, ax = pp.subplots(theme="dark")
     ax.line(xs, [math.sin(x) for x in xs])
     fig.save("slide.png")
     ```
