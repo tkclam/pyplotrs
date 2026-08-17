@@ -12,6 +12,7 @@ import math
 from . import _pyplotrs_core as _core
 from . import mathtext as _mathtext
 from . import scales as _scales
+from . import text as _richtext
 from . import theme as _theme
 from . import ticker as _ticker
 from ._const import (
@@ -39,20 +40,168 @@ def _font(weight: str = "normal", style: str = "normal") -> str:
     return "body-" + ("bold" if bold else "") + ("italic" if italic else "")
 
 
-def _tw(scene, text, size, font: str = "body") -> float:
+def _font_parts(font: str) -> tuple[bool, bool]:
+    """The ``(bold, italic)`` a face selector stands for - `_font` inverted.
+
+    A rich-text span states only what it *changes*, so drawing one needs the
+    label's own face broken back apart: a bold title with an italic span in it
+    must come out bold-italic, not italic.
+    """
+    suffix = font.partition("-")[2]
+    return "bold" in suffix, "italic" in suffix
+
+
+#: Padding around a highlight panel, as a fraction of the type size: a little
+#: air on the sides, less above and below (the panel already spans the full
+#: line height, ascenders and descenders included).
+_MARK_PAD_X = 0.18
+_MARK_PAD_Y = 0.10
+
+
+def _runs(text, size, color, font: str = "body", theme=None) -> list[dict]:
+    """Resolve ``text`` into the concrete runs to draw, left to right.
+
+    One dict per run: the string, the face and size to set it in, its ink
+    color, and its optional highlight/underline/strikeout. A plain string is
+    one run and costs nothing extra, which is the overwhelmingly common case.
+    """
+    base_bold, base_italic = _font_parts(font)
+    if not isinstance(text, _richtext.Span):
+        return [{"s": text, "size": size, "font": font, "color": color,
+                 "bgcolor": None, "underline": False, "strike": False}]
+
+    t = _theme.get(theme)
+    out = []
+    for s, style in _richtext.flatten(text):
+        bold = base_bold if "weight" not in style else _font_parts(
+            _font(style["weight"], "normal"))[0]
+        italic = base_italic if "style" not in style else _font_parts(
+            _font("normal", style["style"]))[1]
+        if "size" in style:
+            run_size = float(style["size"])
+        elif "scale" in style:
+            run_size = size * float(style["scale"])
+        else:
+            run_size = size
+        out.append({
+            "s": s,
+            "size": run_size,
+            "font": _font("bold" if bold else "normal",
+                          "italic" if italic else "normal"),
+            "color": color if style.get("color") is None else t.resolve(style["color"]),
+            "bgcolor": None if style.get("bgcolor") is None else t.resolve(style["bgcolor"]),
+            "underline": bool(style.get("underline")),
+            "strike": bool(style.get("strike")),
+        })
+    return out
+
+
+def _measure_runs(scene, runs: list[dict], theme=None):
+    """``(widths, width, ascent, depth)`` for a resolved run list.
+
+    Widths add; ascent and depth are the deepest of any run, so a label's
+    reserved band fits its tallest piece rather than its first one. A
+    highlighted run also claims its panel's padding, or the layout engine would
+    reserve a band the panel then bleeds out of.
+
+    The per-run widths come back alongside the totals because the draw pass
+    needs both, and measuring is the expensive half of drawing a label - a
+    figure with rich tick labels would otherwise shape every run twice.
+
+    The highlight padding is added **once**, to the line rather than to the run
+    that asked for it. Adding it per run and again when drawing the panel
+    counted it twice, so the panel sat a padding's worth outside the band the
+    layout engine had reserved - which is the one thing this measurement
+    exists to prevent. Drawing the panel across exactly `(ascent, depth)` now
+    gives it its air and keeps it inside the band.
+    """
+    widths, w, a, d, pad = [], 0.0, 0.0, 0.0, 0.0
+    for r in runs:
+        rw, ra, rd = _mathtext.measure(
+            scene, _richtext.resolve_math_colors(r["s"], theme), r["size"], r["font"])
+        widths.append(rw)
+        w += rw
+        a = max(a, ra)
+        d = max(d, rd)
+        if r["bgcolor"] is not None:
+            pad = max(pad, r["size"] * _MARK_PAD_Y)
+    return widths, w, a + pad, d + pad
+
+
+def _runs_extent(scene, runs: list[dict], theme=None) -> tuple[float, float, float]:
+    """``(width, ascent, depth)`` of a resolved run list."""
+    return _measure_runs(scene, runs, theme)[1:]
+
+
+def _tw(scene, text, size, font: str = "body", theme=None) -> float:
     """Math-aware text width (drop-in for ``scene.measure_text``)."""
-    return _mathtext.measure(scene, text, size, font)[0]
+    if not isinstance(text, _richtext.Span):
+        return _mathtext.measure(
+            scene, _richtext.resolve_math_colors(text, theme), size, font)[0]
+    return _runs_extent(scene, _runs(text, size, None, font, theme), theme)[0]
 
 
-def _th(scene, text, size, font: str = "body") -> tuple[float, float]:
+def _th(scene, text, size, font: str = "body", theme=None) -> tuple[float, float]:
     """Math-aware ``(ascent, depth)`` for a string at ``size``."""
-    _w, a, d = _mathtext.measure(scene, text, size, font)
+    if not isinstance(text, _richtext.Span):
+        _w, a, d = _mathtext.measure(
+            scene, _richtext.resolve_math_colors(text, theme), size, font)
+        return a, d
+    _w, a, d = _runs_extent(scene, _runs(text, size, None, font, theme), theme)
     return a, d
 
 
-def _text(scene, x, baseline, text, size, color, font: str = "body") -> None:
-    """Math-aware text draw (drop-in for ``scene.add_text``)."""
-    _mathtext.draw(scene, x, baseline, text, size, color, font)
+def _text(scene, x, baseline, text, size, color, font: str = "body",
+          theme=None) -> None:
+    """Math-aware, style-aware text draw (drop-in for ``scene.add_text``).
+
+    Runs are drawn in three passes rather than one so they layer correctly: all
+    the highlight panels first (a later run's panel must not cover an earlier
+    run's letters), then the glyphs, then the rules. Panels and rules are sized
+    from the *line's* band, so several of them across one label share an edge.
+    """
+    if not isinstance(text, _richtext.Span):
+        _mathtext.draw(scene, x, baseline,
+                       _richtext.resolve_math_colors(text, theme),
+                       size, color, font)
+        return
+
+    runs = _runs(text, size, color, font, theme)
+    widths, _w, line_a, line_d = _measure_runs(scene, runs, theme)
+
+    cursor = x
+    for r, w in zip(runs, widths):
+        if r["bgcolor"] is not None:
+            pad_x = r["size"] * _MARK_PAD_X
+            # Exactly the measured band - which already carries the vertical
+            # padding. See `_measure_runs`.
+            y0 = baseline - line_a
+            y1 = baseline + line_d
+            scene.add_path(
+                [(cursor - pad_x, y0), (cursor + w + pad_x, y0),
+                 (cursor + w + pad_x, y1), (cursor - pad_x, y1)],
+                fill_color=r["bgcolor"], close=True,
+            )
+        cursor += w
+
+    cursor = x
+    for r, w in zip(runs, widths):
+        _mathtext.draw(scene, cursor, baseline,
+                       _richtext.resolve_math_colors(r["s"], theme),
+                       r["size"], r["color"], r["font"])
+        cursor += w
+
+    cursor = x
+    for r, w in zip(runs, widths):
+        if r["underline"] or r["strike"]:
+            uo, ut, so, st = scene.text_decorations(r["size"], r["font"])
+            if r["underline"]:
+                scene.add_path([(cursor, baseline + uo), (cursor + w, baseline + uo)],
+                               stroke_color=r["color"], stroke_width=ut)
+            if r["strike"]:
+                scene.add_path([(cursor, baseline + so), (cursor + w, baseline + so)],
+                               stroke_color=r["color"], stroke_width=st)
+        cursor += w
 
 
 def _colorbar_ticks(cb: dict, max_ticks: int = 6) -> list[tuple[float, str]]:
@@ -258,20 +407,25 @@ def _draw_marker(scene, cx: float, cy: float, d: float, shape: str,
     )
 
 
-def _place_text(scene, dx: float, dy: float, s: str, size: float, color,
+def _place_text(scene, dx: float, dy: float, s, size: float, color,
                 ha: str = "left", va: str = "baseline", font: str = "body",
-                rotation: float = 0.0) -> None:
-    """Draw ``s`` (math-aware) anchored at device ``(dx, dy)`` with the given
-    horizontal/vertical alignment. Coordinates are y-down device points.
-    ``font`` must match between measuring and drawing or the anchor drifts.
+                rotation: float = 0.0, theme=None) -> None:
+    """Draw ``s`` (math- and rich-text-aware) anchored at device ``(dx, dy)``
+    with the given horizontal/vertical alignment. Coordinates are y-down device
+    points. ``font`` must match between measuring and drawing or the anchor
+    drifts.
+
+    ``s`` may be a plain string or a [`pyplotrs.text.Span`][pyplotrs.text.Span];
+    ``theme`` is what a span's ``color``/``bgcolor`` are resolved against, so
+    ``"C0"`` in a label means the same as ``"C0"`` on a line.
 
     ``rotation`` is degrees counter-clockwise about the anchor. It is applied
     as a group transform rather than anything text-specific: the IR already
     carries an affine per group and all three backends honor it, so rotated
     labels stay real selectable text in PDF and SVG instead of becoming paths.
     """
-    tw = _tw(scene, s, size, font)
-    a, d = _th(scene, s, size, font)
+    tw = _tw(scene, s, size, font, theme)
+    a, d = _th(scene, s, size, font, theme)
     ox = -tw / 2.0 if ha == "center" else (-tw if ha == "right" else 0.0)
     if va == "bottom":
         oy = -d
@@ -282,7 +436,7 @@ def _place_text(scene, dx: float, dy: float, s: str, size: float, color,
     else:  # baseline
         oy = 0.0
     if not rotation:
-        _text(scene, dx + ox, dy + oy, s, size, color, font)
+        _text(scene, dx + ox, dy + oy, s, size, color, font, theme)
         return
     # Rotate about the anchor: translate to it, rotate, then lay the text out
     # in the rotated frame. Device y runs downward, so a positive (visually
@@ -290,7 +444,7 @@ def _place_text(scene, dx: float, dy: float, s: str, size: float, color,
     th = math.radians(-rotation)
     cos_t, sin_t = math.cos(th), math.sin(th)
     scene.begin_group(cos_t, sin_t, -sin_t, cos_t, dx, dy, None, 1.0)
-    _text(scene, ox, oy, s, size, color, font)
+    _text(scene, ox, oy, s, size, color, font, theme)
     scene.end_group()
 
 
@@ -339,7 +493,8 @@ def _measure_legend(scene, entries, theme=None, opts=None):
     col_ws = []
     for c in range(ncol):
         chunk = entries[c * nrow:(c + 1) * nrow]
-        widest = max((_tw(scene, m["label"], size) for m in chunk), default=0.0)
+        widest = max((_tw(scene, m["label"], size, theme=theme) for m in chunk),
+                     default=0.0)
         col_ws.append(glyph_w + glyph_gap + widest)
     box_w = pad * 2.0 + sum(col_ws) + col_gap * (ncol - 1)
     box_h = pad * 2.0 + nrow * row_h + (nrow - 1) * row_gap
@@ -347,7 +502,7 @@ def _measure_legend(scene, entries, theme=None, opts=None):
     if title:
         title_h = row_h + row_gap
         box_h += title_h
-        box_w = max(box_w, pad * 2.0 + _tw(scene, title, size))
+        box_w = max(box_w, pad * 2.0 + _tw(scene, title, size, theme=theme))
     mt = {
         "size": size, "ascent": a, "row_h": row_h, "row_gap": row_gap,
         "glyph_w": glyph_w, "glyph_gap": glyph_gap, "pad": pad,
@@ -355,6 +510,9 @@ def _measure_legend(scene, entries, theme=None, opts=None):
         "title": title, "title_h": title_h, "frameon": opts.get("frameon", True),
         "box_w": box_w, "box_h": box_h,
         "bg": t.legend_facecolor, "border": t.legend_edgecolor, "text_color": t.text_color,
+        # Carried so `_draw_legend_box` resolves a rich label's `"C0"` against
+        # the same theme this measurement used.
+        "theme": theme,
     }
     return box_w, box_h, mt
 
@@ -371,7 +529,7 @@ def _draw_legend_box(scene, entries, bx: float, by: float, mt: dict) -> None:
     top = by + pad
     if mt.get("title"):
         _text(scene, bx + pad, top + mt["ascent"], mt["title"], mt["size"],
-              mt["text_color"])
+              mt["text_color"], theme=mt.get("theme"))
         top += mt["title_h"]
     nrow = mt.get("nrow") or len(entries)
     x = bx + pad
@@ -381,7 +539,7 @@ def _draw_legend_box(scene, entries, bx: float, by: float, mt: dict) -> None:
             gx1 = x + mt["glyph_w"]
             _draw_legend_glyph(scene, m, x, gx1, y + mt["row_h"] / 2.0, mt["size"])
             _text(scene, gx1 + mt["glyph_gap"], y + mt["ascent"], m["label"],
-                  mt["size"], mt["text_color"])
+                  mt["size"], mt["text_color"], theme=mt.get("theme"))
             y += mt["row_h"] + mt["row_gap"]
         x += col_w + mt["col_gap"]
 
@@ -391,7 +549,7 @@ def _draw_legend_glyph(scene, m: dict, x0: float, x1: float, cy: float,
     """Draw one legend key. ``size`` is the theme's legend type size, so the
     swatch scales with the box the caller measured (they used to disagree: the
     box was measured at ``theme.legend_size`` and the swatch drawn at a fixed
-    9 pt, which showed up under ``themes.presentation``)."""
+    9 pt, which showed up on any theme whose legend type was not 9 pt)."""
     kind = m["kind"]
     color = m["color"]
     cx = (x0 + x1) / 2.0

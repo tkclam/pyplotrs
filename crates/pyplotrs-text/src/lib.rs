@@ -66,6 +66,13 @@ pub fn run_width(run: &GlyphRun) -> f32 {
 }
 
 /// Vertical font metrics, scaled to a given size (points).
+///
+/// The four `ascent`/`descent` fields are magnitudes (both positive), matching
+/// how a layout pass thinks about a line's band. The two decoration offsets
+/// instead follow the **scene** convention - y-down, baseline at 0 - so a
+/// renderer adds them to a baseline directly: `underline_offset` is positive
+/// (the rule sits below the baseline) and `strikeout_offset` is negative (it
+/// crosses above it).
 #[derive(Debug, Clone, Copy)]
 pub struct VMetrics {
     /// Distance from baseline up to the top of the ascenders (positive).
@@ -74,6 +81,12 @@ pub struct VMetrics {
     pub descent: f32,
     /// Recommended extra leading between lines.
     pub line_gap: f32,
+    /// Baseline-relative y of the underline rule, y-down (so, positive).
+    pub underline_offset: f32,
+    pub underline_thickness: f32,
+    /// Baseline-relative y of the strikeout rule, y-down (so, negative).
+    pub strikeout_offset: f32,
+    pub strikeout_thickness: f32,
 }
 
 impl VMetrics {
@@ -83,15 +96,23 @@ impl VMetrics {
     }
 }
 
-/// The four raw (unscaled, font-units) header fields `font_vmetrics` needs -
-/// cheap to store, and all that's needed to answer any `size` query without
+/// The raw (unscaled, font-units) header fields `font_vmetrics` needs - cheap
+/// to store, and all that's needed to answer any `size` query without
 /// re-parsing the font.
+///
+/// The decoration fields are kept in the font's own y-**up** sign convention
+/// (`post.underlinePosition` is negative, `OS/2.yStrikeoutPosition` positive);
+/// the flip to scene coordinates happens once, in `font_vmetrics`.
 #[derive(Clone, Copy)]
 struct RawVMetrics {
     units_per_em: f32,
     ascender: f32,
     descender: f32,
     line_gap: f32,
+    underline_position: f32,
+    underline_thickness: f32,
+    strikeout_position: f32,
+    strikeout_thickness: f32,
 }
 
 /// Per-font-buffer cache of [`RawVMetrics`], so a layout pass that asks for
@@ -150,11 +171,24 @@ pub fn font_vmetrics(font: &FontData, size: f32) -> VMetrics {
     }
     let (_, raw) = cache.entry(key).or_insert_with(|| {
         let face = Face::from_slice(&font.data, font.index).expect("invalid font data");
+        let upem = face.units_per_em() as f32;
+        // `post` and `OS/2` are both optional tables, and a subset face can
+        // arrive without either. The fallbacks are the usual typographic
+        // proportions - a rule one em-twentieth thick, sitting a tenth of an em
+        // under the baseline, and a strikeout at about half the x-height - so a
+        // font missing its metrics gets a plausible rule rather than one drawn
+        // through the baseline at zero thickness.
+        let underline = face.underline_metrics();
+        let strikeout = face.strikeout_metrics();
         let raw = RawVMetrics {
-            units_per_em: face.units_per_em() as f32,
+            units_per_em: upem,
             ascender: face.ascender() as f32,
             descender: face.descender() as f32,
             line_gap: face.line_gap() as f32,
+            underline_position: underline.map_or(-0.1 * upem, |m| m.position as f32),
+            underline_thickness: underline.map_or(0.05 * upem, |m| m.thickness as f32),
+            strikeout_position: strikeout.map_or(0.25 * upem, |m| m.position as f32),
+            strikeout_thickness: strikeout.map_or(0.05 * upem, |m| m.thickness as f32),
         };
         (font.data.clone(), raw)
     });
@@ -163,6 +197,12 @@ pub fn font_vmetrics(font: &FontData, size: f32) -> VMetrics {
         ascent: raw.ascender * scale,
         descent: -raw.descender * scale,
         line_gap: raw.line_gap * scale,
+        // Negated: the font measures both upward from the baseline, the scene
+        // measures downward.
+        underline_offset: -raw.underline_position * scale,
+        underline_thickness: raw.underline_thickness * scale,
+        strikeout_offset: -raw.strikeout_position * scale,
+        strikeout_thickness: raw.strikeout_thickness * scale,
     }
 }
 
@@ -233,5 +273,30 @@ mod tests {
         let b = font_vmetrics(&font, 20.0);
         assert!((b.ascent - a.ascent * 2.0).abs() < 1e-3);
         assert!((b.descent - a.descent * 2.0).abs() < 1e-3);
+        assert!((b.underline_offset - a.underline_offset * 2.0).abs() < 1e-3);
+        assert!((b.strikeout_offset - a.strikeout_offset * 2.0).abs() < 1e-3);
+    }
+
+    /// The decoration rules are reported in *scene* coordinates (y-down), which
+    /// is the sign flip a caller would otherwise get wrong: an underline sits
+    /// below the baseline (positive) and a strikeout above it (negative). Both
+    /// must land inside the line's own band, not out past the descenders.
+    #[test]
+    fn decoration_rules_sit_on_the_right_side_of_the_baseline() {
+        let font = FontData::from_bytes(liberation(), 0);
+        let m = font_vmetrics(&font, 12.0);
+        assert!(
+            m.underline_offset > 0.0 && m.underline_offset < m.descent,
+            "underline at {} should sit below the baseline, above the descender {}",
+            m.underline_offset,
+            m.descent
+        );
+        assert!(
+            m.strikeout_offset < 0.0 && -m.strikeout_offset < m.ascent,
+            "strikeout at {} should cross above the baseline, below the ascender {}",
+            m.strikeout_offset,
+            m.ascent
+        );
+        assert!(m.underline_thickness > 0.0 && m.strikeout_thickness > 0.0);
     }
 }

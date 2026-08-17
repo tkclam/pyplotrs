@@ -100,6 +100,73 @@ pyplotrs' analog of matplotlib's `rcParams["mathtext.fontset"]`.
     (serif) TeX fonts, so an HTML figure's math will not match a `sans` PNG or
     PDF of the same figure. Everything else on the page still matches.
 
+## Styling part of a label
+
+`weight=`/`style=` apply to a whole label. To style a *substring* — one bold
+number, one tinted word, one highlighted term — build the label with
+[`rich`][pyplotrs.text.rich] and its shorthands instead of passing a string:
+
+```python
+import pyplotrs as pp
+
+ax.set(title=pp.rich("Growth ", pp.bold("+42%", color="teal"),
+                     " over ", pp.italic("6 months")))
+```
+
+These work anywhere a label does: `title`, `xlabel`/`ylabel`, `suptitle`,
+`xticklabels`, a mark's `label=`, `text` and `annotate`.
+
+| Helper | Effect |
+|---|---|
+| `pp.rich(*parts, **style)` | the general span; with no style, just a container |
+| `pp.bold(...)`, `pp.italic(...)` | a **real face** of the body family, not a synthetic slant |
+| `pp.underline(...)`, `pp.strike(...)` | a rule from the face's own metrics |
+| `pp.mark(...)` | a highlight panel behind the run |
+| `pp.plain(label)` | the styling stripped back off, as a plain string |
+
+Style keys are `weight`, `style`, `color`, `bgcolor`, `underline`, `strike`,
+and either `scale` (a multiple of the label's own size — usually what you want,
+since a title and a tick label are set at different sizes) or `size` (absolute
+points). Colors accept everything the rest of the library does, `"C0"` palette
+indices included.
+
+Spans nest, and an inner style wins over an outer one, so a run can opt back
+out of what encloses it:
+
+```python
+pp.bold("all of this ", pp.rich("except this", weight="normal", color="#888"))
+```
+
+### Rich text and math
+
+A span may contain `$...$`, and the span's weight and slant become the
+**ambient face** the math is set in — so the math comes out bold *throughout*,
+variables included, rather than half-bold:
+
+```python
+ax.set(title=pp.rich("fitted ", pp.bold(r"$E = mc^2$")))
+```
+
+To color inside a *single* expression, use `\textcolor` and `\colorbox`, which
+take any color spelling the rest of the library takes:
+
+```python
+ax.set(xlabel=r"$\textcolor{C1}{\sigma} / \sqrt{N}$")
+ax.set(title=r"minimize $\colorbox{#ffe89a}{\frac{a}{b}} + c$")
+```
+
+Emphasis *within* math has a second spelling that means something different:
+`$\mathbf{v}$` selects the math **alphabet** (an upright bold vector), while
+`pp.bold("$v$")` changes the face the whole span is set in. Reach for the
+alphabet when the boldness is part of the notation, and for the span when it is
+part of the typography.
+
+!!! note "Kerning at a style boundary"
+    Each run is shaped separately, so a kern pair straddling a style change is
+    lost — `pp.rich("W", pp.bold("a"))` sets a hair wider than `"Wa"`. Adjacent
+    runs that share a style are merged back into one, so this costs you nothing
+    where the style does not actually change.
+
 ## Text annotations
 
 [`text`][pyplotrs.axes.Axes.text] draws a string at data coordinates:

@@ -1519,7 +1519,7 @@ class Axes(_AxesBase):
         about its anchor, and it stays selectable text in PDF/SVG - the
         rotation is a group transform in the IR, not baked-out paths."""
         self._annotations.append({
-            "kind": "text", "x": float(x), "y": float(y), "s": str(s),
+            "kind": "text", "x": float(x), "y": float(y), "s": s,
             "color": self._theme.text_color if color is None else self._theme.resolve(color),
             "size": None if fontsize is None else float(fontsize),
             "font": _font(weight, style), "ha": ha, "va": va,
@@ -1537,7 +1537,7 @@ class Axes(_AxesBase):
         a bold and/or italic face (see ``text``)."""
         xy = (float(xy[0]), float(xy[1]))
         self._annotations.append({
-            "kind": "annotate", "s": str(text), "xy": xy,
+            "kind": "annotate", "s": text, "xy": xy,
             "xytext": xy if xytext is None else (float(xytext[0]), float(xytext[1])),
             "color": self._theme.text_color if color is None else self._theme.resolve(color),
             "size": None if fontsize is None else float(fontsize),
@@ -1596,9 +1596,9 @@ class Axes(_AxesBase):
         if yticks is not None:
             self._yticks_manual = [float(v) for v in yticks]
         if xticklabels is not None:
-            self._xticklabels_manual = [str(s) for s in xticklabels]
+            self._xticklabels_manual = list(xticklabels)
         if yticklabels is not None:
-            self._yticklabels_manual = [str(s) for s in yticklabels]
+            self._yticklabels_manual = list(yticklabels)
         if xformatter is not None:
             self._xformatter = _ticker.get(xformatter)
         if yformatter is not None:
@@ -1942,15 +1942,15 @@ class Axes(_AxesBase):
         title_font = _font(t.title_weight)
         label_font = _font(t.axis_label_weight)
         if self._title:
-            a, d = _th(scene, self._title, _TITLE_SIZE, title_font)
+            a, d = _th(scene, self._title, _TITLE_SIZE, title_font, t)
             title_h = a + d + _TITLE_GAP
         xlabel_h = 0.0
         if self._xlabel:
-            a, d = _th(scene, self._xlabel, _AXIS_LABEL_SIZE, label_font)
+            a, d = _th(scene, self._xlabel, _AXIS_LABEL_SIZE, label_font, t)
             xlabel_h = a + d + _AXIS_LABEL_GAP
         ylabel_w = 0.0
         if self._ylabel:
-            a, d = _th(scene, self._ylabel, _AXIS_LABEL_SIZE, label_font)
+            a, d = _th(scene, self._ylabel, _AXIS_LABEL_SIZE, label_font, t)
             ylabel_w = a + d + _AXIS_LABEL_GAP
 
         cbar_w = cbar_h = 0.0
@@ -2256,30 +2256,30 @@ class Axes(_AxesBase):
         title_font = _font(t.title_weight)
         label_font = _font(t.axis_label_weight)
         if self._title:
-            a, _d = _th(scene, self._title, _TITLE_SIZE, title_font)
-            tw = _tw(scene, self._title, _TITLE_SIZE, title_font)
+            a, _d = _th(scene, self._title, _TITLE_SIZE, title_font, t)
+            tw = _tw(scene, self._title, _TITLE_SIZE, title_font, t)
             baseline = layout.title.y + a
             _text(scene, px + (pw - tw) / 2.0, baseline, self._title, _TITLE_SIZE,
-                  _BLACK, title_font)
+                  _BLACK, title_font, t)
 
         # X-axis label, centered over the plot area.
         if self._xlabel:
-            a, _d = _th(scene, self._xlabel, _AXIS_LABEL_SIZE, label_font)
-            tw = _tw(scene, self._xlabel, _AXIS_LABEL_SIZE, label_font)
+            a, _d = _th(scene, self._xlabel, _AXIS_LABEL_SIZE, label_font, t)
+            tw = _tw(scene, self._xlabel, _AXIS_LABEL_SIZE, label_font, t)
             baseline = layout.xlabel.y + a
             _text(scene, px + (pw - tw) / 2.0, baseline, self._xlabel, _AXIS_LABEL_SIZE,
-                  _BLACK, label_font)
+                  _BLACK, label_font, t)
 
         # Y-axis label, rotated 90deg CCW, centered on the plot area's height.
         if self._ylabel:
             a, d, _ = scene.font_vmetrics(_AXIS_LABEL_SIZE)
-            tw = _tw(scene, self._ylabel, _AXIS_LABEL_SIZE, label_font)
+            tw = _tw(scene, self._ylabel, _AXIS_LABEL_SIZE, label_font, t)
             band = layout.ylabel
             pivot_x = band.x + band.w / 2.0 - (d - a) / 2.0
             pivot_y = py + ph / 2.0
             # Affine = translate(pivot) * rotate(-90deg): (x,y) -> (y+px, -x+py).
             scene.begin_group(0.0, -1.0, 1.0, 0.0, pivot_x, pivot_y)
-            _text(scene, -tw / 2.0, 0.0, self._ylabel, _AXIS_LABEL_SIZE, _BLACK, label_font)
+            _text(scene, -tw / 2.0, 0.0, self._ylabel, _AXIS_LABEL_SIZE, _BLACK, label_font, t)
             scene.end_group()
 
         # Annotations (text + callout arrows), on top of the data.
@@ -2307,11 +2307,11 @@ class Axes(_AxesBase):
                                 self._theme.spine_color, max(self._theme.spine_width, 1.0))
                 _place_text(scene, sx(tx), sy(ty), an["s"], size, color,
                             an["ha"], an["va"], an.get("font", "body"),
-                            an.get("rotation", 0.0))
+                            an.get("rotation", 0.0), self._theme)
             else:  # plain text
                 _place_text(scene, sx(an["x"]), sy(an["y"]), an["s"], size, color,
                             an["ha"], an["va"], an.get("font", "body"),
-                            an.get("rotation", 0.0))
+                            an.get("rotation", 0.0), self._theme)
 
     # -- twin / secondary / inset drawing -----------------------------------
 

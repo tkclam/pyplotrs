@@ -46,6 +46,7 @@ from .axes import Axes
 from .axes3d import Axes3D
 from .mappable import Mappable
 from .polar import PolarAxes
+from .text import plain as _plain
 from .theme import Theme
 
 
@@ -278,7 +279,7 @@ class Figure:
         suptitle_h = 0.0
         suptitle_font = _font(self.theme.suptitle_weight)
         if self.suptitle:
-            a, d = _th(scene, self.suptitle, _SUPTITLE_SIZE, suptitle_font)
+            a, d = _th(scene, self.suptitle, _SUPTITLE_SIZE, suptitle_font, self.theme)
             suptitle_h = a + d + _TITLE_GAP * 1.5
 
         # Figure-level legend: measure its box up front so the layout can reserve
@@ -311,11 +312,11 @@ class Figure:
                 ax._draw_extras(scene, axl, xr, yr)
 
         if self.suptitle:
-            a, _d = _th(scene, self.suptitle, _SUPTITLE_SIZE, suptitle_font)
-            tw = _tw(scene, self.suptitle, _SUPTITLE_SIZE, suptitle_font)
+            a, _d = _th(scene, self.suptitle, _SUPTITLE_SIZE, suptitle_font, self.theme)
+            tw = _tw(scene, self.suptitle, _SUPTITLE_SIZE, suptitle_font, self.theme)
             st = layout.suptitle
             _text(scene, st.x + (st.w - tw) / 2.0, st.y + a, self.suptitle,
-                  _SUPTITLE_SIZE, self.theme.text_color, suptitle_font)
+                  _SUPTITLE_SIZE, self.theme.text_color, suptitle_font, self.theme)
 
         if legend_mt is not None:
             lr = layout.legend
@@ -327,17 +328,23 @@ class Figure:
 
     def _accessible_text(self) -> tuple[str, str]:
         """A ``(title, alt)`` pair describing this figure for tagged PDF, derived
-        from the suptitle and per-axes titles/labels when not given explicitly."""
+        from the suptitle and per-axes titles/labels when not given explicitly.
+
+        Every label goes through `plain`, since a label may be rich text and
+        what an assistive technology wants from it is its characters - a screen
+        reader has no use for which word was bold, and the alternative is a
+        `repr` full of constructors read out loud.
+        """
         parts: list[str] = []
         if self.suptitle:
-            parts.append(self.suptitle)
+            parts.append(_plain(self.suptitle))
         for ax in self.axes:
             if getattr(ax, "_title", None):
-                parts.append(ax._title)
+                parts.append(_plain(ax._title))
             xl, yl = getattr(ax, "_xlabel", None), getattr(ax, "_ylabel", None)
             if xl and yl:
-                parts.append(f"{yl} versus {xl}")
-        title = self.suptitle or next((p for p in parts), "figure")
+                parts.append(f"{_plain(yl)} versus {_plain(xl)}")
+        title = _plain(self.suptitle) if self.suptitle else next((p for p in parts), "figure")
         alt = "; ".join(parts) if parts else "figure"
         return title, alt
 

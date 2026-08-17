@@ -72,6 +72,7 @@ nav:
       - Colormaps: api/colormaps.md
       - Palettes: api/palettes.md
       - Color science: api/color.md
+      - Rich text: api/text.md
       - Themes: api/themes.md
       - Animation: api/animation.md
   - About:

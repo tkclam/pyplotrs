@@ -13,6 +13,29 @@ All notable changes to pyplotrs are documented here. The format is based on
 
 ### Added
 
+- **Rich text: style a *substring* of any label.** `weight=`/`style=` applied to
+  a whole label, so emphasis was all-or-nothing — a whole title could be bold,
+  one word in it could not. `pp.rich(...)` and its shorthands `pp.bold`,
+  `pp.italic`, `pp.underline`, `pp.strike` and `pp.mark` build a span tree that
+  every label slot accepts: titles, axis labels, tick labels, `label=`, `text`
+  and `annotate`. Styles are `weight`, `style`, `color`, `bgcolor`,
+  `underline`, `strike`, and `scale`/`size`; spans nest, and an inner style
+  wins, so a run can opt back out of what encloses it. Colors resolve against
+  the figure's theme, `"C0"` palette indices included. `pp.plain(label)` gives
+  the text back unstyled, which is what the tagged-PDF description now uses.
+  Underline and strikeout rules come from the face's own `post`/`OS/2` metrics
+  rather than a fraction of the type size, so they sit where the type designer
+  put them and move correctly between faces.
+- **Rich text carries into math.** A span's weight and slant become the
+  *ambient* face of any `$...$` it contains, so `pp.bold(r"$E = mc^2$")` is bold
+  throughout — variables included — rather than half-bold.
+- **`\textcolor{...}{...}` and `\colorbox{...}{...}` inside math**, for tinting
+  or highlighting one term of an expression rather than the whole label. Both
+  take any color spelling the rest of the library takes (`"C1"`, CSS names,
+  hex), resolved against the theme before the typesetter sees them. Nesting
+  resolves innermost-first, and a color that does not parse costs the color and
+  not the term it wraps. Fraction bars, radical rules and accents take the color
+  along with the glyphs, and the text stays real, selectable text in PDF/SVG.
 - **`set_mathtext_fontset()` / `get_mathtext_fontset()`** — which family `$...$`
   math is drawn in, pyplotrs' analog of matplotlib's
   `rcParams["mathtext.fontset"]`. `"sans"` is the new default (see **Changed**);

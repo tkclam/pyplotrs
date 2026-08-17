@@ -28,7 +28,7 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 
 from . import _pyplotrs_core as _core
-from . import color, colormaps, norms, palettes, scales, ticker
+from . import color, colormaps, norms, palettes, scales, text, ticker
 from . import theme as themes
 from ._const import DEFAULT_FIGSIZE
 from ._figure import (
@@ -43,6 +43,7 @@ from ._figure import (
 )
 from .animation import Animation, animate
 from .colormaps import Colormap, get_cmap
+from .text import Span, bold, italic, mark, plain, rich, strike, underline
 from .theme import Theme
 
 try:
@@ -183,4 +184,6 @@ __all__ = [
     "resolved_font_variants",
     "set_unicode_minus", "get_unicode_minus",
     "set_mathtext_fontset", "get_mathtext_fontset",
+    # rich text: styling a substring of any label
+    "text", "Span", "rich", "bold", "italic", "underline", "strike", "mark", "plain",
 ]

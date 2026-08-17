@@ -80,6 +80,7 @@ fig.save("hello.html")  # self-contained, selectable text
 | **Themes** | `default`, `nature`, `grayscale`, `presentation`, plus `Theme.with_(...)` to derive your own |
 | **Color** | 127 exact colormaps, 25 categorical palettes, Oklab/CAM16-UCS conversion and CVD checks |
 | **Annotations** | `text`, `annotate` with callout arrows; LaTeX math anywhere |
+| **Rich text** | `rich`/`bold`/`italic`/`mark` to style a substring of any label — math included |
 | **Animation** | `animate(render, frames)` → GIF / APNG |
 | **Formats** | PDF, SVG, PNG (with DPI), and self-contained HTML |
 

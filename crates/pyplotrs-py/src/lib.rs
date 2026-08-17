@@ -1710,6 +1710,27 @@ impl Scene {
         (m.ascent as f64, m.descent as f64, m.line_gap as f64)
     }
 
+    /// Where to draw an underline and a strikeout for `size`-point text in
+    /// `font`: `(underline_offset, underline_thickness, strikeout_offset,
+    /// strikeout_thickness)`, in points.
+    ///
+    /// Both offsets are baseline-relative in **scene** coordinates (y-down), so
+    /// a caller adds them to a baseline directly - the underline is positive
+    /// (below), the strikeout negative (above). They come from the face's own
+    /// `post`/`OS/2` tables rather than a fraction of the type size, so the
+    /// rule sits where the type designer put it and moves correctly between
+    /// faces.
+    #[pyo3(signature = (size, font="body"))]
+    fn text_decorations(&self, size: f64, font: &str) -> (f64, f64, f64, f64) {
+        let m = pyplotrs_text::font_vmetrics(&font_for_kind(font), size as f32);
+        (
+            m.underline_offset as f64,
+            m.underline_thickness as f64,
+            m.strikeout_offset as f64,
+            m.strikeout_thickness as f64,
+        )
+    }
+
     /// Render to PDF bytes (real, embedded/subsetted, editable text). When
     /// `tagged` is set, emit a tagged/accessible PDF whose content is one
     /// `Figure` structure element carrying `alt` text, plus document metadata.
