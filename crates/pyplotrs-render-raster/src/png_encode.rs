@@ -26,6 +26,13 @@
 //! The output is an ordinary, spec-conformant PNG; nothing here changes the
 //! pixels, and the result is deterministic and machine-independent (the chunking
 //! depends only on the data length, never on the core count).
+//!
+//! [`encode_apng`] writes the animated container over the same two stages. It
+//! exists because the `png` crate's writer compresses one frame at a time on one
+//! thread, which does not scale at all: measured on a 30-frame colormapped field,
+//! that path took 0.786 s at 1 thread and 0.779 s at 20, while deflating the
+//! frames against each other here takes 0.097 s. Animation is where that gap
+//! hurts most, since the cost is paid once per frame.
 
 use flate2::{Compress, Compression, FlushCompress, Status};
 use rayon::prelude::*;
@@ -48,38 +55,168 @@ const DEFLATE_CHUNK: usize = 256 * 1024;
 /// chunk so consumers such as LaTeX's `\includegraphics` place the image at its
 /// intended physical size.
 pub fn encode_rgba8(rgba: &[u8], width: u32, height: u32, ppu: u32) -> Result<Vec<u8>, String> {
-    let stride = (width as usize)
-        .checked_mul(BPP)
-        .ok_or_else(|| format!("image row of {width} px overflows"))?;
-    if rgba.len() != stride * height as usize {
-        return Err(format!(
-            "pixel buffer is {} bytes, expected {} for {width} x {height}",
-            rgba.len(),
-            stride * height as usize
-        ));
-    }
+    let stride = row_stride(width)?;
+    check_frame_len(rgba.len(), stride, width, height, None)?;
 
-    let filtered = filter_scanlines(rgba, stride, height as usize);
-    let zlib = deflate_parallel(&filtered);
+    let zlib = frame_zlib(rgba, stride, height as usize);
 
     let mut out = Vec::with_capacity(zlib.len() + 128);
     out.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+    write_ihdr(&mut out, width, height);
+    write_phys(&mut out, ppu);
+    write_chunk(&mut out, b"IDAT", &zlib);
+    write_chunk(&mut out, b"IEND", &[]);
+    Ok(out)
+}
 
+/// Encode `frames` - equally-sized straight RGBA8 buffers - as an animated PNG.
+///
+/// `delay_num`/`delay_den` give each frame's on-screen time as a fraction of a
+/// second; `num_plays` is `0` to loop forever, or the number of times to play.
+/// `ppu` writes the same `pHYs` density a still PNG gets.
+///
+/// Every frame is written as a full-canvas keyframe, exactly as the `png`
+/// crate's writer did before this replaced it, so the decoded animation is
+/// unchanged - only the time it takes to produce it. (APNG can crop a frame to
+/// the region that changed, which is worth far more on a typical plot than the
+/// parallelism here, but it changes the frame geometry and is left for its own
+/// change.)
+pub fn encode_apng(
+    frames: &[&[u8]],
+    width: u32,
+    height: u32,
+    ppu: u32,
+    delay_num: u16,
+    delay_den: u16,
+    num_plays: u32,
+) -> Result<Vec<u8>, String> {
+    if frames.is_empty() {
+        return Err("animation needs at least one frame".to_string());
+    }
+    let stride = row_stride(width)?;
+    for (i, frame) in frames.iter().enumerate() {
+        check_frame_len(frame.len(), stride, width, height, Some(i))?;
+    }
+
+    // Frames are independent, so they deflate against each other; each one's own
+    // filter and deflate stages are parallel too, and rayon nests those without
+    // oversubscribing. `collect` preserves frame order.
+    let streams: Vec<Vec<u8>> = frames
+        .par_iter()
+        .map(|f| frame_zlib(f, stride, height as usize))
+        .collect();
+
+    let total: usize = streams.iter().map(Vec::len).sum();
+    let mut out = Vec::with_capacity(total + 64 * frames.len() + 128);
+    out.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+    write_ihdr(&mut out, width, height);
+    write_phys(&mut out, ppu);
+
+    // `acTL` has to precede the first `IDAT`, which is what marks the file as
+    // animated rather than a still with trailing junk.
+    let mut actl = Vec::with_capacity(8);
+    actl.extend_from_slice(&(frames.len() as u32).to_be_bytes());
+    actl.extend_from_slice(&num_plays.to_be_bytes());
+    write_chunk(&mut out, b"acTL", &actl);
+
+    // `fcTL` and `fdAT` share one sequence-number space. Frame 0 is the default
+    // image: an ordinary `IDAT` preceded by its own `fcTL`, carrying no sequence
+    // number itself, so it spends one. Every later frame spends two.
+    let mut seq = 0u32;
+    write_fctl(&mut out, seq, width, height, delay_num, delay_den);
+    seq += 1;
+    write_chunk(&mut out, b"IDAT", &streams[0]);
+
+    for stream in &streams[1..] {
+        write_fctl(&mut out, seq, width, height, delay_num, delay_den);
+        seq += 1;
+        let mut fdat = Vec::with_capacity(stream.len() + 4);
+        fdat.extend_from_slice(&seq.to_be_bytes());
+        fdat.extend_from_slice(stream);
+        write_chunk(&mut out, b"fdAT", &fdat);
+        seq += 1;
+    }
+    write_chunk(&mut out, b"IEND", &[]);
+    Ok(out)
+}
+
+/// Bytes per unfiltered scanline, or an error if the row alone overflows.
+fn row_stride(width: u32) -> Result<usize, String> {
+    (width as usize)
+        .checked_mul(BPP)
+        .ok_or_else(|| format!("image row of {width} px overflows"))
+}
+
+/// Reject a pixel buffer that is not exactly `width x height` RGBA8. `frame`
+/// names which frame it was, when there is more than one.
+fn check_frame_len(
+    len: usize,
+    stride: usize,
+    width: u32,
+    height: u32,
+    frame: Option<usize>,
+) -> Result<(), String> {
+    let expected = stride * height as usize;
+    if len == expected {
+        return Ok(());
+    }
+    let what = match frame {
+        Some(i) => format!("frame {i}"),
+        None => "pixel buffer".to_string(),
+    };
+    Err(format!(
+        "{what} is {len} bytes, expected {expected} for {width} x {height}"
+    ))
+}
+
+/// Filter and deflate one frame's pixels into the zlib stream an `IDAT` or
+/// `fdAT` carries.
+fn frame_zlib(rgba: &[u8], stride: usize, height: usize) -> Vec<u8> {
+    deflate_parallel(&filter_scanlines(rgba, stride, height))
+}
+
+fn write_ihdr(out: &mut Vec<u8>, width: u32, height: u32) {
     let mut ihdr = Vec::with_capacity(13);
     ihdr.extend_from_slice(&width.to_be_bytes());
     ihdr.extend_from_slice(&height.to_be_bytes());
     ihdr.extend_from_slice(&[8, 6, 0, 0, 0]); // 8-bit, RGBA, deflate, adaptive filtering, no interlace
-    write_chunk(&mut out, b"IHDR", &ihdr);
+    write_chunk(out, b"IHDR", &ihdr);
+}
 
+fn write_phys(out: &mut Vec<u8>, ppu: u32) {
     let mut phys = Vec::with_capacity(9);
     phys.extend_from_slice(&ppu.to_be_bytes());
     phys.extend_from_slice(&ppu.to_be_bytes());
     phys.push(1); // unit: metre
-    write_chunk(&mut out, b"pHYs", &phys);
+    write_chunk(out, b"pHYs", &phys);
+}
 
-    write_chunk(&mut out, b"IDAT", &zlib);
-    write_chunk(&mut out, b"IEND", &[]);
-    Ok(out)
+/// Write one frame-control chunk covering the whole canvas.
+///
+/// `dispose_op = 0` (APNG_DISPOSE_OP_NONE) and `blend_op = 0`
+/// (APNG_BLEND_OP_SOURCE) are what full keyframes want - each frame overwrites
+/// the canvas outright, so there is nothing to dispose and nothing to composite
+/// against. They are also what the `png` crate defaulted to, which is why
+/// replacing it leaves the decoded animation identical.
+fn write_fctl(
+    out: &mut Vec<u8>,
+    seq: u32,
+    width: u32,
+    height: u32,
+    delay_num: u16,
+    delay_den: u16,
+) {
+    let mut fctl = Vec::with_capacity(26);
+    fctl.extend_from_slice(&seq.to_be_bytes());
+    fctl.extend_from_slice(&width.to_be_bytes());
+    fctl.extend_from_slice(&height.to_be_bytes());
+    fctl.extend_from_slice(&0u32.to_be_bytes()); // x_offset
+    fctl.extend_from_slice(&0u32.to_be_bytes()); // y_offset
+    fctl.extend_from_slice(&delay_num.to_be_bytes());
+    fctl.extend_from_slice(&delay_den.to_be_bytes());
+    fctl.push(0); // dispose_op: none
+    fctl.push(0); // blend_op: source
+    write_chunk(out, b"fcTL", &fctl);
 }
 
 fn write_chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
@@ -394,6 +531,111 @@ mod tests {
             encode_rgba8(&src, 300, 200, 3780).unwrap(),
             encode_rgba8(&src, 300, 200, 3780).unwrap()
         );
+    }
+
+    /// A frame set where every frame differs from the last, so a decoder that
+    /// mixed up `fdAT` sequence numbers or reused a stream would be caught.
+    fn frames(w: u32, h: u32, n: usize) -> Vec<Vec<u8>> {
+        (0..n)
+            .map(|i| {
+                let mut v = image(w, h);
+                for px in v.chunks_exact_mut(4) {
+                    px[2] = px[2].wrapping_add((i * 37) as u8);
+                }
+                v
+            })
+            .collect()
+    }
+
+    /// Every frame must come back out, in order and pixel-exact, through a
+    /// decoder that is not ours - the whole point of hand-rolling the container.
+    #[test]
+    fn apng_round_trips_through_a_decoder() {
+        for (w, h, n) in [(1u32, 1u32, 1usize), (7, 3, 2), (64, 48, 5), (300, 200, 3)] {
+            let src = frames(w, h, n);
+            let refs: Vec<&[u8]> = src.iter().map(Vec::as_slice).collect();
+            let apng = encode_apng(&refs, w, h, 3780, 1, 20, 0).unwrap();
+
+            let decoder = png::Decoder::new(std::io::Cursor::new(&apng));
+            let mut reader = decoder.read_info().unwrap();
+            let info = reader.info();
+            let actl = info.animation_control.expect("no acTL - not an APNG");
+            assert_eq!(actl.num_frames, n as u32, "{w}x{h}x{n} frame count");
+            assert_eq!(actl.num_plays, 0, "should loop forever");
+            assert_eq!(info.pixel_dims.unwrap().xppu, 3780, "pHYs lost");
+
+            let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+            for (i, want) in src.iter().enumerate() {
+                let frame = reader.next_frame(&mut buf).unwrap();
+                assert_eq!(
+                    &buf[..frame.buffer_size()],
+                    &want[..],
+                    "{w}x{h}x{n} frame {i}"
+                );
+            }
+        }
+    }
+
+    /// `num_plays` reaches the file: 0 loops forever, anything else plays that
+    /// many times. `render_apng` maps its `infinite` flag onto this.
+    #[test]
+    fn apng_records_the_play_count() {
+        let src = frames(8, 8, 2);
+        let refs: Vec<&[u8]> = src.iter().map(Vec::as_slice).collect();
+        for plays in [0u32, 1, 7] {
+            let apng = encode_apng(&refs, 8, 8, 3780, 1, 20, plays).unwrap();
+            let decoder = png::Decoder::new(std::io::Cursor::new(&apng));
+            let reader = decoder.read_info().unwrap();
+            assert_eq!(reader.info().animation_control.unwrap().num_plays, plays);
+        }
+    }
+
+    /// A frame of the wrong size is named rather than silently truncated - the
+    /// asymmetry `render_gif` was hardened against and this path used not to
+    /// have at all.
+    #[test]
+    fn apng_rejects_a_mismatched_frame() {
+        let good = image(8, 8);
+        let short = image(8, 7);
+        let refs: Vec<&[u8]> = vec![&good, &short];
+        let err = encode_apng(&refs, 8, 8, 3780, 1, 20, 0).unwrap_err();
+        assert!(
+            err.contains("frame 1"),
+            "error should name the frame: {err}"
+        );
+        assert!(encode_apng(&[], 8, 8, 3780, 1, 20, 0).is_err());
+    }
+
+    /// The animated container carries the same determinism guarantee as the
+    /// still one, for the same reason: the frames deflate in parallel, and where
+    /// their chunks are cut must not depend on how many cores did the cutting.
+    #[test]
+    fn apng_encoding_does_not_depend_on_core_count() {
+        let src = frames(200, 150, 4);
+        let refs: Vec<&[u8]> = src.iter().map(Vec::as_slice).collect();
+        let expected = encode_apng(&refs, 200, 150, 3780, 1, 20, 0).unwrap();
+        for threads in [1usize, 2, 7, 24] {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(threads)
+                .build()
+                .unwrap();
+            let got = pool.install(|| encode_apng(&refs, 200, 150, 3780, 1, 20, 0).unwrap());
+            assert_eq!(got, expected, "output changed with {threads} threads");
+        }
+    }
+
+    /// A one-frame APNG's pixels must equal what the still encoder writes: both
+    /// go through `frame_zlib`, and this is what pins that they keep doing so.
+    #[test]
+    fn a_single_frame_apng_carries_the_still_encoders_pixels() {
+        let src = image(120, 90);
+        let apng = encode_apng(&[&src], 120, 90, 3780, 1, 20, 0).unwrap();
+        let mut reader = png::Decoder::new(std::io::Cursor::new(&apng))
+            .read_info()
+            .unwrap();
+        let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+        let frame = reader.next_frame(&mut buf).unwrap();
+        assert_eq!(&buf[..frame.buffer_size()], &src[..]);
     }
 
     /// ...and the same bytes on any machine. Where the deflate chunks are cut

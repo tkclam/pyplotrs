@@ -165,6 +165,47 @@ def test_apng_output_is_an_animated_png(tmp_path):
     assert num_frames == 4, f"acTL claims {num_frames} frames"
 
 
+def test_apng_frame_control_chunks_are_correctly_sequenced(tmp_path):
+    """`fcTL` and `fdAT` share one sequence-number space, and a decoder rejects
+    a file whose numbers are not 0, 1, 2, ... in the order the chunks appear.
+    Frame 0 is the default image - an `IDAT` preceded by its own `fcTL` - so it
+    spends one number and every later frame spends two. Nothing else in the
+    suite would notice the container being written by hand rather than by the
+    `png` crate."""
+    out = tmp_path / "seq.apng"
+    n_frames = 4
+    pp.animate(_wave, frames=n_frames, fps=10).save(out)
+    data = out.read_bytes()
+
+    seqs = []
+    for kind in (b"fcTL", b"fdAT"):
+        start = 0
+        while (at := data.find(kind, start)) != -1:
+            (seq,) = struct.unpack(">I", data[at + 4:at + 8])
+            seqs.append((at, seq))
+            start = at + 4
+    seqs.sort()
+    assert [s for _, s in seqs] == list(range(2 * n_frames - 1)), \
+        f"sequence numbers out of order: {[s for _, s in seqs]}"
+    assert data.count(b"fdAT") == n_frames - 1, "frame 0 must be the IDAT"
+    assert data.count(b"IDAT") == 1, "only frame 0 belongs in an IDAT"
+    assert data.index(b"acTL") < data.index(b"IDAT"), "acTL must precede IDAT"
+    assert b"IEND" in data
+
+
+def test_apng_play_count_follows_repeat(tmp_path):
+    """`acTL`'s second field is `num_plays`: 0 loops forever."""
+    for repeat, want in ((True, 0), (False, 1)):
+        out = tmp_path / f"r{repeat}.apng"
+        pp.animate(_wave, frames=3, fps=10, repeat=repeat).save(out)
+        data = out.read_bytes()
+        at = data.index(b"acTL")
+        # Chunk layout is [len][type][payload][crc], and `index` finds the type,
+        # so the payload starts at +4: num_frames, then num_plays.
+        (num_plays,) = struct.unpack(">I", data[at + 8:at + 12])
+        assert num_plays == want, f"repeat={repeat} wrote num_plays={num_plays}"
+
+
 def test_animation_to_bytes_matches_what_save_writes(tmp_path):
     """`save` is a thin wrapper over `to_bytes`; the two must not drift."""
     anim = pp.animate(_wave, frames=3, fps=10)

@@ -1029,6 +1029,11 @@ pub fn render_gif(
 /// `delay_den` give the per-frame delay as a fraction of a second; `infinite`
 /// loops forever (`num_plays = 0`) vs. play-once (`num_plays = 1`). The output
 /// carries a `pHYs` density chunk like the still-PNG path.
+///
+/// Both halves are parallel: the frames rasterize against each other, then
+/// [`png_encode::encode_apng`] filters and deflates them against each other too.
+/// Going through the `png` crate's writer instead left the whole encode on one
+/// thread, which cost more than the rasterization on any ink-heavy animation.
 pub fn render_apng(
     scenes: &[&Scene],
     dpi: f64,
@@ -1050,34 +1055,33 @@ pub fn render_apng(
         .map(|s| render_pixmap(s, dpi / 72.0, false))
         .collect::<Result<_, String>>()?;
     let (w, h) = (pixmaps[0].width(), pixmaps[0].height());
-    let ppu = (dpi / 0.0254).round() as u32;
-
-    let mut out = Vec::new();
+    // The size check `render_gif` carries, which this path used to leave to the
+    // encoder: `encode_apng` would reject a short buffer, but naming the frame
+    // and its size here says what actually went wrong. Python's `Animation`
+    // enforces a uniform figsize, so this only fires through the Rust API or
+    // when a dpi lands two figsizes on different pixel counts.
+    if let Some((i, pm)) = pixmaps
+        .iter()
+        .enumerate()
+        .find(|(_, pm)| (pm.width(), pm.height()) != (w, h))
     {
-        let mut encoder = png::Encoder::new(&mut out, w, h);
-        encoder.set_color(png::ColorType::Rgba);
-        encoder.set_depth(png::BitDepth::Eight);
-        encoder.set_pixel_dims(Some(png::PixelDimensions {
-            xppu: ppu,
-            yppu: ppu,
-            unit: png::Unit::Meter,
-        }));
-        encoder
-            .set_animated(pixmaps.len() as u32, u32::from(!infinite))
-            .map_err(|e| format!("APNG animation control write failed: {e}"))?;
-        encoder
-            .set_frame_delay(delay_num, delay_den)
-            .map_err(|e| format!("APNG frame delay write failed: {e}"))?;
-        let mut writer = encoder
-            .write_header()
-            .map_err(|e| format!("APNG header write failed: {e}"))?;
-        for pm in &pixmaps {
-            writer
-                .write_image_data(pm.data())
-                .map_err(|e| format!("APNG frame write failed: {e}"))?;
-        }
+        return Err(format!(
+            "every animation frame must be {w} x {h} px, got {} x {} at frame {i}",
+            pm.width(),
+            pm.height()
+        ));
     }
-    Ok(out)
+    let ppu = (dpi / 0.0254).round() as u32;
+    let frames: Vec<&[u8]> = pixmaps.iter().map(|pm| pm.data()).collect();
+    png_encode::encode_apng(
+        &frames,
+        w,
+        h,
+        ppu,
+        delay_num,
+        delay_den,
+        u32::from(!infinite),
+    )
 }
 
 #[cfg(test)]

@@ -18,10 +18,17 @@ tiny-skia = "0.12"
 # under semver-for-0.x, so the extension carried both, along with duplicate
 # `read-fonts` and `font-types`. Bump this together with krilla's.
 skrifa = "0.42"
-png = "0.18"
 gif = "0.14"
 rayon = "1.10"
 flate2 = "1.0"
+
+[dev-dependencies]
+# Only the tests read PNGs. Both writers here - the still one and the animated
+# one - are hand-rolled in `png_encode` so that filtering and DEFLATE can run in
+# parallel, which `png`'s writer does not do; keeping it as a dev-dependency is
+# what makes the round-trip tests check our bytes against an implementation that
+# is not our own, without carrying the crate into the wheel.
+png = "0.18"
 
 [lints]
 workspace = true

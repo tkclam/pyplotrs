@@ -162,9 +162,27 @@ All notable changes to pyplotrs are documented here. The format is based on
 
 ### Fixed
 
+- **Animated PNG encoding is 4–8× faster.** `render_apng` rasterized its frames
+  in parallel and then handed them to the `png` crate's writer, which filters
+  and deflates one frame at a time on one thread — that crate has no `rayon`
+  anywhere, so the whole encode was serial no matter how many cores were free.
+  The still-PNG path had had a parallel encoder all along; the animated
+  container (`acTL`/`fcTL`/`fdAT`) is now written alongside it in `png_encode`
+  and the frames deflate against each other. A 30-frame colormapped field goes
+  0.80 s → 0.10 s, a 20k-point scatter 1.68 s → 0.21 s, and the docs' wave
+  0.065 s → 0.016 s; the new path scales where the old one could not (0.96 s on
+  one thread, 0.26 s on four, 0.09 s on twenty). The trade is that a one- or
+  two-core machine sees no gain and pays a little for the extra buffering.
+  Frames stay full keyframes, so the decoded animation is unchanged — verified
+  pixel-exact against the still renders through an independent decoder. Files
+  come out within 1.5% of their old size. `png` is now a dev-dependency,
+  keeping the round-trip tests honest without shipping it in the wheel.
 - **`Animation.save` accepts a `pathlib.Path`.** It sniffed the extension with
   `"." in path`, which raises `TypeError: argument of type 'PosixPath' is not
   iterable` — while `Figure.save` had taken one all along.
+- **An APNG frame of the wrong size is named.** `render_gif` was hardened
+  against a size mismatch; `render_apng` had no such check and left it to the
+  encoder, which could only report a short buffer.
 - **The separator hairline follows the page when the plot area is unset.** The
   chain that keeps histogram-bin and pie-wedge seams reading as "the background
   showing through" stopped at `axes_facecolor` and then jumped to white — so a
