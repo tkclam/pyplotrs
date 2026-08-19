@@ -2823,30 +2823,46 @@ class Axes(_AxesBase):
         if m["uw"] == 0 or m["uh"] == 0:
             return
         x0, x1, y0, y1 = m["extent"]
+        # Same rule as `_draw_image`: an inverted axis is a flip of the grid,
+        # not a negative extent. `contourf`/`pcolormesh`/`hist2d` land here.
         left, right = sx(x0), sx(x1)
-        rx, rw = min(left, right), abs(right - left)
         top, bot = sy(max(y0, y1)), sy(min(y0, y1))
-        scene.add_image(m["img"], m["uw"], m["uh"], rx, top, rw, bot - top)
+        rx, rw = min(left, right), abs(right - left)
+        ry, rh = min(top, bot), abs(bot - top)
+        scene.add_image(m["img"], m["uw"], m["uh"], rx, ry, rw, rh,
+                        right < left, bot < top)
 
     def _draw_image(self, scene, m: dict, sx, sy) -> None:
         x0, x1, y0, y1 = m["extent"]
         w, h = m["w"], m["h"]
         if w == 0 or h == 0:
             return
-        # Device bbox of the extent (y-down, so the larger data-y is the top).
+        # Device bbox of the extent, plus the *direction* each axis runs in.
+        #
+        # Taking abs() of the extents and stopping there is what made an
+        # inverted axis lie: the rect came out right and the pixels came out in
+        # the wrong order. A decreasing projection has to reach the image as a
+        # flip of the grid, never as a negative width or height - the rect says
+        # only where the image goes (see `Scene.add_colormapped_image`).
         left, right = sx(x0), sx(x1)
-        rx, rw = min(left, right), abs(right - left)
         top, bot = sy(max(y0, y1)), sy(min(y0, y1))
-        ry, rh = top, bot - top
+        rx, rw = min(left, right), abs(right - left)
+        ry, rh = min(top, bot), abs(bot - top)
+        flip_x = right < left
+        # `top` is the device y of the *larger* data y, so on an ordinary
+        # (y-up) axis it is the smaller device y. When it is not, the y axis is
+        # inverted and the rows have to be mirrored to match.
+        flip_y = bot < top
 
         # 256-entry RGBA LUT, cached per colormap; the per-pixel lookup (the hot
         # loop) runs in Rust via add_colormapped_image, reading `flat` - already
         # row-major and contiguous from ingest - straight out of its buffer.
         lut = _colormap_lut(m["cmap"], m.get("alpha", 1.0))
         flat = m["flat"]
+        origin_upper = (m["origin"] == "upper") != flip_y
         scene.add_colormapped_image(flat, w, h, m["vmin"], m["vmax"], lut,
-                                    m["origin"] == "upper", rx, ry, rw, rh,
-                                    m.get("norm_code", "linear"))
+                                    origin_upper, rx, ry, rw, rh,
+                                    m.get("norm_code", "linear"), flip_x)
 
     def _draw_errorbar(self, scene, m: dict, proj: "_Proj") -> None:
         """Draw one errorbar mark.

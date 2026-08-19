@@ -213,10 +213,31 @@ impl ImageData {
 /// actually draw first, via [`resample`]. Read that module before touching an
 /// image path in a renderer: handing the source grid straight to a rasterizer
 /// is what makes a tall image alias and a wide one smear.
+///
+/// `rect` is **always normalized** (`x0 <= x1`, `y0 <= y1`) - build one with
+/// [`ImageNode::new`], which does that for you. A denormalized rect is not a
+/// way to request a flip; it is a bug, and one each backend used to answer
+/// differently. An inverted y axis produced `y1 < y0`, and the raster backend
+/// flipped the blit (right picture, by accident) while the PDF backend's
+/// `Size::from_wh` returned `None` and dropped the image entirely and the SVG
+/// backend wrote `height="-174"`, which SVG declares an error - so the same
+/// figure rendered its heatmap in the PNG and omitted it from both vector
+/// formats. Orientation is now decided once, where the pixels are laid out,
+/// and the rect only ever says *where*.
 #[derive(Debug, Clone)]
 pub struct ImageNode {
     pub data: ImageData,
     pub rect: Rect,
+}
+
+impl ImageNode {
+    /// An image filling `rect`, normalized so the two corners are ordered.
+    pub fn new(data: ImageData, rect: Rect) -> Self {
+        Self {
+            data,
+            rect: rect.abs(),
+        }
+    }
 }
 
 /// A reusable marker outline stamped (by pure translation) at many positions -

@@ -1441,3 +1441,102 @@ def test_a_dense_image_is_left_alone_in_vector_output(tmp_path):
         re.search(r"data:image/png;base64,([A-Za-z0-9+/=]+)", svg_path.read_text()).group(1))
     assert struct.unpack(">II", png[16:24]) == (500, 500), (
         "a dense image should be embedded at its own resolution")
+
+
+# -- scientific-accuracy audit ------------------------------------------------
+#
+# One test per finding that had no coverage. Each names the wrong picture the
+# defect produced, not just the code path, because that is what a reader of a
+# published figure would have seen.
+
+def _svg_image(svg: str):
+    """`(width, height, rows)` of the SVG's first embedded `<image>` PNG."""
+    import base64
+    import struct
+    import zlib
+
+    b = base64.b64decode(re.search(r'base64,([^"]+)"/>', svg).group(1))
+    pos, idat = 8, b""
+    w = h = 0
+    while pos < len(b):
+        ln = struct.unpack(">I", b[pos:pos + 4])[0]
+        typ = b[pos + 4:pos + 8]
+        if typ == b"IHDR":
+            w, h = struct.unpack(">II", b[pos + 8:pos + 16])
+        if typ == b"IDAT":
+            idat += b[pos + 8:pos + 8 + ln]
+        pos += 12 + ln
+    dec, rows, stride = zlib.decompress(idat), [], w * 4
+    prev, i = bytearray(stride), 0
+    for _y in range(h):
+        f, i = dec[i], i + 1
+        line, i = bytearray(dec[i:i + stride]), i + stride
+        for x in range(stride):
+            a = line[x - 4] if x >= 4 else 0
+            b2 = prev[x]
+            c = prev[x - 4] if x >= 4 else 0
+            if f == 1:
+                line[x] = (line[x] + a) & 255
+            elif f == 2:
+                line[x] = (line[x] + b2) & 255
+            elif f == 3:
+                line[x] = (line[x] + (a + b2) // 2) & 255
+            elif f == 4:
+                p = a + b2 - c
+                pa, pb, pc = abs(p - a), abs(p - b2), abs(p - c)
+                pr = a if (pa <= pb and pa <= pc) else (b2 if pb <= pc else c)
+                line[x] = (line[x] + pr) & 255
+        rows.append(line)
+        prev = line
+    return w, h, rows
+
+
+@pytest.mark.parametrize("kw,corners", [
+    ({}, ("lo", "mid", "hi", "top")),
+    ({"xinverted": True}, ("mid", "lo", "top", "hi")),
+    ({"yinverted": True}, ("hi", "top", "lo", "mid")),
+    ({"xinverted": True, "yinverted": True}, ("top", "hi", "mid", "lo")),
+])
+def test_an_inverted_axis_flips_the_image_and_not_the_rect(kw, corners, tmp_path):
+    """An inverted axis reached the backends as a *negative* extent.
+
+    The raster backend flipped the blit and got the right picture by accident;
+    the PDF backend's `Size::from_wh` returned `None` and dropped the image
+    without a word, and the SVG backend wrote `height="-174"`, which SVG
+    declares an error. So an inverted-y heatmap rendered in the PNG the author
+    checked and was simply absent from the PDF they submitted. An inverted *x*
+    axis was worse: the rect was normalized, the pixels were not, so the
+    heatmap was drawn mirrored against its own tick labels in all three
+    formats, with nothing to notice.
+    """
+    named = {"lo": 0.0, "mid": 0.33, "hi": 0.66, "top": 1.0}
+    fig, ax = pp.subplots(figsize=(120, 120))
+    ax.imshow([[named["lo"], named["mid"]], [named["hi"], named["top"]]], cmap="viridis")
+    ax.set(**kw)
+    out = tmp_path / "inv.svg"
+    fig.save(str(out))
+    svg = out.read_text()
+
+    m = re.search(r'<image[^>]*width="([-\d.]+)" height="([-\d.]+)"', svg)
+    assert m, "no <image> in the SVG"
+    assert float(m.group(1)) > 0 and float(m.group(2)) > 0, (
+        f"denormalized rect {m.groups()} - PDF drops this and SVG rejects it")
+
+    w, h, rows = _svg_image(svg)
+    got = [tuple(rows[y][x * 4:x * 4 + 3])
+           for x, y in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1))]
+    cmap = pp.get_cmap("viridis")
+    want = [cmap(named[c])[:3] for c in corners]
+    assert got == want, f"{kw or 'plain'}: corners {got} should be {want}"
+
+    # And the PDF must actually carry an image operator for it.
+    pdf = tmp_path / "inv.pdf"
+    fig.save(str(pdf))
+    import zlib
+    ops = []
+    for chunk in re.findall(rb"stream\r?\n(.*?)endstream", pdf.read_bytes(), re.S):
+        try:
+            ops += re.findall(rb"cm/x\d+ Do", zlib.decompress(chunk.strip(b"\r\n")))
+        except zlib.error:
+            continue
+    assert ops, f"{kw or 'plain'}: the PDF has no image at all"

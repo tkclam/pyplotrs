@@ -1533,10 +1533,19 @@ impl Scene {
     /// per-pixel value->color lookup **in Rust**. `values` is the field in
     /// row-major data order (length `width*height`); `lut` is a 256-entry RGBA
     /// table (1024 bytes). Non-finite values become transparent. `origin_upper`
-    /// places data row 0 at the top of the destination rect `(x, y, w, h)`.
+    /// places data row 0 at the top of the destination rect `(x, y, w, h)`;
+    /// `flip_x` mirrors the columns, for an axis whose data runs right-to-left.
+    ///
+    /// Both flips are resolved **here**, into the pixel order, because the
+    /// destination rect cannot carry them: it is normalized before it reaches
+    /// a backend (see [`pyplotrs_core::ImageNode`]). Handing a caller's
+    /// inverted axis down as a negative width or height is what made an
+    /// inverted-y heatmap render in the PNG and vanish from the PDF and SVG,
+    /// and an inverted-x heatmap draw mirrored against its own tick labels in
+    /// all three.
     #[pyo3(signature = (
         values, width, height, vmin, vmax, lut, origin_upper, x, y, w, h,
-        norm="linear",
+        norm="linear", flip_x=false,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn add_colormapped_image(
@@ -1553,6 +1562,7 @@ impl Scene {
         w: f64,
         h: f64,
         norm: &str,
+        flip_x: bool,
     ) {
         let wi = width as usize;
         let hi = height as usize;
@@ -1563,8 +1573,9 @@ impl Scene {
             let src = drow * wi;
             let dst = row * wi * 4;
             for col in 0..wi {
+                let dcol = if flip_x { wi - 1 - col } else { col };
                 // Out-of-domain samples keep RGBA = 0, i.e. transparent.
-                if let Some((r, g, b, a)) = mapper.lookup(values[src + col]) {
+                if let Some((r, g, b, a)) = mapper.lookup(values[src + dcol]) {
                     let o = dst + col * 4;
                     buf[o] = r;
                     buf[o + 1] = g;
@@ -1573,10 +1584,10 @@ impl Scene {
                 }
             }
         }
-        self.push_node(Node::Image(ImageNode {
-            data: ImageData::from_rgba8(buf, width, height),
-            rect: KRect::new(x, y, x + w, y + h),
-        }));
+        self.push_node(Node::Image(ImageNode::new(
+            ImageData::from_rgba8(buf, width, height),
+            KRect::new(x, y, x + w, y + h),
+        )));
     }
 
     /// Add a run of text with its baseline origin at `(x, y)`. `font` selects
@@ -1644,7 +1655,11 @@ impl Scene {
     }
 
     /// Add an RGBA8 image filling the destination rect `(x, y, w, h)`.
-    #[pyo3(signature = (rgba, width, height, x, y, w, h))]
+    ///
+    /// `flip_x`/`flip_y` mirror the pixel grid for an inverted axis. As in
+    /// [`Scene::add_colormapped_image`], orientation is resolved into the
+    /// pixels here rather than being smuggled down as a negative extent.
+    #[pyo3(signature = (rgba, width, height, x, y, w, h, flip_x=false, flip_y=false))]
     #[allow(clippy::too_many_arguments)]
     fn add_image(
         &mut self,
@@ -1655,11 +1670,30 @@ impl Scene {
         y: f64,
         w: f64,
         h: f64,
+        flip_x: bool,
+        flip_y: bool,
     ) {
-        self.push_node(Node::Image(ImageNode {
-            data: ImageData::from_rgba8(rgba, width, height),
-            rect: KRect::new(x, y, x + w, y + h),
-        }));
+        let wi = width as usize;
+        let hi = height as usize;
+        let rgba = if (flip_x || flip_y) && rgba.len() >= wi * hi * 4 {
+            let mut buf = vec![0u8; wi * hi * 4];
+            for row in 0..hi {
+                let srow = if flip_y { hi - 1 - row } else { row };
+                for col in 0..wi {
+                    let scol = if flip_x { wi - 1 - col } else { col };
+                    let s = (srow * wi + scol) * 4;
+                    let d = (row * wi + col) * 4;
+                    buf[d..d + 4].copy_from_slice(&rgba[s..s + 4]);
+                }
+            }
+            buf
+        } else {
+            rgba
+        };
+        self.push_node(Node::Image(ImageNode::new(
+            ImageData::from_rgba8(rgba, width, height),
+            KRect::new(x, y, x + w, y + h),
+        )));
     }
 
     /// Open a group applying the affine matrix `[a b c d e f]` (mapping
@@ -1679,9 +1713,10 @@ impl Scene {
         clip: Option<(f64, f64, f64, f64)>,
         opacity: f32,
     ) {
+        let clip = clip.map(|(x, y, w, h)| ClipPath::rect(KRect::new(x, y, x + w, y + h)));
         self.stack.push(Group {
             transform: Affine::new([a, b, c, d, e, f]),
-            clip: clip.map(|(x, y, w, h)| ClipPath::rect(KRect::new(x, y, x + w, y + h))),
+            clip,
             opacity,
             children: Vec::new(),
         });

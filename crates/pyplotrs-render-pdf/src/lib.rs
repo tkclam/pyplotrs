@@ -223,18 +223,23 @@ impl PdfRenderer {
         // the boundaries hard while ghostscript smeared them across 284 pixels.
         // Resampling per axis here (see [`resample`]) settles it before the
         // viewer gets a say - what it scales is already ~1:1 with the page.
-        let (ex, ey) = resample::device_extent(image.rect, self.transform);
+        // `ImageNode::new` normalizes the rect, but re-normalize here rather
+        // than trust it: `KSize::from_wh` answers a negative extent with
+        // `None`, and the `if let` below would then drop the image without a
+        // word - which is exactly how an inverted-y heatmap used to disappear
+        // from the PDF while still rendering in the PNG. `abs()` makes that
+        // unrepresentable; what remains is a genuinely empty rect, which is
+        // nothing to draw.
+        let rect = image.rect.abs();
+        let (ex, ey) = resample::device_extent(rect, self.transform);
         let resampled = resample::vector_grid(image.data.width, image.data.height, ex, ey)
             .map(|(w, h)| image.data.resampled_to(w, h));
         let data = resampled.as_ref().unwrap_or(&image.data);
         let img = krilla::image::Image::from_rgba8((*data.rgba).clone(), data.width, data.height);
         // `draw_image` covers (0,0)..(w,h) in the current space; translate to
         // the destination rect's top-left and let `size` scale it to fill.
-        surface.push_transform(&Transform::from_translate(
-            image.rect.x0 as f32,
-            image.rect.y0 as f32,
-        ));
-        if let Some(size) = KSize::from_wh(image.rect.width() as f32, image.rect.height() as f32) {
+        surface.push_transform(&Transform::from_translate(rect.x0 as f32, rect.y0 as f32));
+        if let Some(size) = KSize::from_wh(rect.width() as f32, rect.height() as f32) {
             surface.draw_image(img, size);
         }
         surface.pop();

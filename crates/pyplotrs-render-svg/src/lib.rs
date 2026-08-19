@@ -290,7 +290,12 @@ impl SvgWriter<'_> {
         // boundary of a 4-column field over 85 pixels. So the grid is
         // resampled per axis here (see [`resample`]) and what the viewer scales
         // is already ~1:1 with the page.
-        let (ex, ey) = resample::device_extent(im.rect, self.transform);
+        // Normalized before use for the same reason the PDF backend does it: a
+        // negative `width`/`height` on `<image>` is an error per SVG 1.1 and
+        // suppresses the element in SVG 2, so a denormalized rect used to make
+        // an inverted-y heatmap silently absent here while the PNG showed it.
+        let rect = im.rect.abs();
+        let (ex, ey) = resample::device_extent(rect, self.transform);
         let resampled = resample::vector_grid(im.data.width, im.data.height, ex, ey)
             .map(|(w, h)| im.data.resampled_to(w, h));
         let data = resampled.as_ref().unwrap_or(&im.data);
@@ -299,10 +304,10 @@ impl SvgWriter<'_> {
         writeln!(
             self.body,
             r#"<image x="{}" y="{}" width="{}" height="{}" preserveAspectRatio="none" xlink:href="data:image/png;base64,{}"/>"#,
-            fmt_num(im.rect.x0),
-            fmt_num(im.rect.y0),
-            fmt_num(im.rect.width()),
-            fmt_num(im.rect.height()),
+            fmt_num(rect.x0),
+            fmt_num(rect.y0),
+            fmt_num(rect.width()),
+            fmt_num(rect.height()),
             b64
         )
         .unwrap();
