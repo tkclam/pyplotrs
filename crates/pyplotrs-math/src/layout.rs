@@ -6,6 +6,8 @@
 //! *baseline shift* `dy` (positive = lower). Everything is driven by the
 //! OpenType MATH constants exposed by [`crate::font::MathFont`].
 
+use std::cell::RefCell;
+
 use pyplotrs_core::kurbo::{BezPath, PathEl, Point};
 use pyplotrs_core::{Color, FontData, GlyphRun, PositionedGlyph};
 
@@ -339,9 +341,25 @@ pub struct Engine<'a> {
     /// A second math font for glyphs the primary one does not have.
     fallback: Option<(&'a MathFont<'a>, &'a FontData)>,
     chars: Vec<char>,
+    /// Command names this engine did not recognize, in source order.
+    ///
+    /// An unknown macro is *typeset*, not refused - see the fallthrough in
+    /// [`Engine::parse_command`] - because refusing mid-layout would mean
+    /// threading a `Result` through every level of the builder. Recording it
+    /// costs nothing and lets the caller say something, which is the part that
+    /// was missing: `$\sfrac{1}{2}$` silently became the characters
+    /// "sfrac12", so a reader saw the number 12 where the author meant one
+    /// half, and nothing anywhere reported a problem.
+    unknown: RefCell<Vec<String>>,
 }
 
 impl<'a> Engine<'a> {
+    /// Command names this engine did not recognize while laying out, in source
+    /// order. Meaningful only after `layout` has run.
+    pub fn unknown_commands(&self) -> Vec<String> {
+        self.unknown.borrow().clone()
+    }
+
     pub fn new(
         mf: &'a MathFont<'a>,
         fallback: Option<&'a (MathFont<'a>, &'a FontData)>,
@@ -359,6 +377,7 @@ impl<'a> Engine<'a> {
             symbols: fonts.symbol_font().map(wrap),
             fallback: fallback.map(|(f, d)| (f, *d)),
             chars: src.chars().collect(),
+            unknown: RefCell::new(Vec::new()),
         }
     }
 
@@ -965,7 +984,8 @@ impl<'a> Engine<'a> {
                 j,
             );
         }
-        // unknown command: render its name upright
+        // Unknown command: render its name upright, and remember that we did.
+        self.unknown.borrow_mut().push(name.clone());
         (
             Some(Item {
                 class: Class::Ord,

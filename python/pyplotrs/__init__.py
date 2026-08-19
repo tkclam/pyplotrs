@@ -28,7 +28,7 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 
 from . import _pyplotrs_core as _core
-from . import color, colormaps, norms, palettes, scales, text, ticker
+from . import color, colormaps, mathtext, norms, palettes, scales, text, ticker
 from . import theme as themes
 from ._const import DEFAULT_FIGSIZE
 from ._figure import (
@@ -43,6 +43,7 @@ from ._figure import (
 )
 from .animation import Animation, animate
 from .colormaps import Colormap, get_cmap
+from .mathtext import MathTextWarning
 from .text import Span, bold, italic, mark, plain, rich, strike, underline
 from .theme import Theme
 
@@ -179,6 +180,7 @@ __all__ = [
     "subplots", "subplot_mosaic", "figure",
     "colormaps", "Colormap", "get_cmap", "palettes", "color",
     "themes", "Theme", "norms", "scales", "ticker",
+    "mathtext", "MathTextWarning",
     "Animation", "animate",
     "set_font_family", "get_font_family", "resolved_font_name",
     "resolved_font_variants",

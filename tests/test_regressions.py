@@ -1571,6 +1571,31 @@ def test_svg_states_its_size_in_points(tmp_path):
     assert 'viewBox="0 0 200 150"' in head, "the user-unit grid should stay 1:1"
 
 
+def test_an_unknown_tex_command_is_reported():
+    """`$\\sfrac{1}{2}$` is typeset as the letters "sfrac12", so a reader sees
+    the number 12 where the author meant one half - and nothing said so."""
+    import warnings
+
+    pp.mathtext._WARNED.clear()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        fig, ax = pp.subplots()
+        ax.set(title=r"$\sfrac{1}{2}$")
+        fig._build_scene()
+    msgs = [str(w.message) for w in caught
+            if issubclass(w.category, pp.MathTextWarning)]
+    assert any("sfrac" in m for m in msgs), f"no warning for \\sfrac: {msgs}"
+
+    # A command it *does* implement stays quiet.
+    pp.mathtext._WARNED.clear()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        fig, ax = pp.subplots()
+        ax.set(title=r"$\frac{1}{2}$")
+        fig._build_scene()
+    assert not [w for w in caught if issubclass(w.category, pp.MathTextWarning)]
+
+
 def test_a_label_outside_the_body_font_still_draws(tmp_path):
     """Any character the body face lacked was shaped to glyph 0 and drawn as a
     `.notdef` box - `℃` and `⟨x⟩` are ordinary in a physics label - and in the

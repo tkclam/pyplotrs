@@ -1727,6 +1727,41 @@ impl Scene {
         (w as f64, a as f64, d as f64)
     }
 
+    /// Characters in `text` that no available face can draw, after the whole
+    /// fallback chain has been tried.
+    ///
+    /// Each of these is drawn as the font's `.notdef` box - an empty
+    /// rectangle. The Python layer warns on them, because otherwise the only
+    /// notice an author gets is spotting a blank box in the finished figure,
+    /// and the PDF's text layer silently loses all but one of them (they share
+    /// a glyph, so they share a `ToUnicode` entry).
+    #[pyo3(signature = (text, font="body"))]
+    fn missing_glyphs(&self, text: &str, font: &str) -> Vec<String> {
+        let primary = font_for_kind(font);
+        pyplotrs_text::missing_glyphs(&primary, text)
+            .into_iter()
+            .filter(|ch| {
+                let s = ch.to_string();
+                fallback_faces()
+                    .iter()
+                    .all(|f| !pyplotrs_text::missing_glyphs(f, &s).is_empty())
+            })
+            .map(|c| c.to_string())
+            .collect()
+    }
+
+    /// TeX command names in `text` the math engine does not implement.
+    ///
+    /// They are still typeset, as their own letters - so `\sfrac{1}{2}`
+    /// renders "sfrac12" - which is why the Python layer warns on whatever
+    /// this returns rather than leaving the author to spot a wrong-looking
+    /// label in a finished figure.
+    #[pyo3(signature = (text, size, font="body"))]
+    fn math_unknown_commands(&self, text: &str, size: f64, font: &str) -> Vec<String> {
+        let body = body_faces();
+        pyplotrs_math::unknown_commands(&math_fonts(math_font(), &body, font), text, size as f32)
+    }
+
     /// Add an RGBA8 image filling the destination rect `(x, y, w, h)`.
     ///
     /// `flip_x`/`flip_y` mirror the pixel grid for an inverted axis. As in

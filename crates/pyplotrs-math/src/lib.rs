@@ -257,6 +257,33 @@ fn build_layout(fonts: &MathFonts, s: &str, size: f32) -> Layout {
     }
 }
 
+/// TeX command names in `s` that the engine does not implement.
+///
+/// Each is typeset as its own letters (so `\\sfrac{1}{2}` reads "sfrac12"),
+/// which is a plausible-looking wrong label rather than a visible failure.
+/// Reporting them is what lets the Python layer warn instead of leaving the
+/// author to notice a wrong exponent in a published figure.
+pub fn unknown_commands(fonts: &MathFonts, s: &str, size: f32) -> Vec<String> {
+    let mf = MathFont::new(&fonts.math.data[..], fonts.math.index);
+    if !s.contains('$') || mf.is_none() {
+        return Vec::new();
+    }
+    let mf = mf.unwrap();
+    let fallback = fonts
+        .fallback
+        .and_then(|f| MathFont::new(&f.data[..], f.index).map(|face| (face, f)));
+    let mut out = Vec::new();
+    for (is_math, seg) in split_segments(s) {
+        if !is_math || seg.is_empty() {
+            continue;
+        }
+        let engine = layout::Engine::new(&mf, fallback.as_ref(), fonts, &seg);
+        let _ = engine.layout(size);
+        out.extend(engine.unknown_commands());
+    }
+    out
+}
+
 /// Measure `s` at `size`, returning `(width, ascent, depth)` in points.
 pub fn measure(fonts: &MathFonts, s: &str, size: f32) -> (f32, f32, f32) {
     let l = build_layout(fonts, s, size);
