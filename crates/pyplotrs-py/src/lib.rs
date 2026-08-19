@@ -702,9 +702,17 @@ fn histogram(
 /// Bin `values` into `bins` equal-width bins, returning `(edges, counts)`.
 ///
 /// The 1-D counterpart of [`hist2d`], which was already in Rust while this ran
-/// as a `for v in vals:` loop in Python. Semantics match that loop exactly:
-/// values outside `[lo, hi]` are dropped, the top edge is inclusive (it lands in
-/// the last bin), and `density` divides by `n * width`.
+/// as a `for v in vals:` loop in Python. Values outside `[lo, hi]` are dropped,
+/// the top edge is inclusive (it lands in the last bin), and `density` divides
+/// by `binned * width` - `binned`, not `vals.len()`, so the bars integrate to
+/// 1 as a density must. Dividing by the input length made a histogram cropped
+/// with `range=` integrate to the fraction it kept (0.5 for half the data),
+/// which silently misplaces any fitted curve drawn over it.
+///
+/// Non-finite values are dropped rather than binned. `v < lo || v > hi` is
+/// false for NaN, so NaN used to pass the range guard; `(nan) as usize` is a
+/// saturating cast that yields 0, so every NaN landed in the *first bin* and
+/// was drawn as a real measurement at the low end of the distribution.
 ///
 /// `range` is the explicit `(lo, hi)`; when `None` the finite data range is used.
 /// A degenerate range is widened by 1.0, as an all-equal sample otherwise has
@@ -729,15 +737,18 @@ fn histogram_inner(
     let edges: Vec<f64> = (0..=bins).map(|i| lo + width * i as f64).collect();
 
     let mut counts = vec![0.0f64; bins];
+    let mut binned = 0.0f64;
     for &v in vals {
-        if v < lo || v > hi {
+        // `is_finite` first: it is the only one of the three tests NaN fails.
+        if !v.is_finite() || v < lo || v > hi {
             continue;
         }
         let idx = (((v - lo) / width) as usize).min(bins - 1);
         counts[idx] += 1.0;
+        binned += 1.0;
     }
     if density {
-        let total = vals.len() as f64 * width;
+        let total = binned * width;
         if total != 0.0 {
             for c in counts.iter_mut() {
                 *c /= total;

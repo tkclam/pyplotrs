@@ -1608,6 +1608,32 @@ def test_imshow_honors_a_piecewise_norm(tmp_path):
     assert m.norm is n, "the colorbar was handed a different norm than the image"
 
 
+def test_hist_drops_non_finite_and_normalizes_by_what_it_binned():
+    """NaN was counted into the first bin, and `density` divided by the input
+    length rather than the binned count.
+
+    `v < lo || v > hi` is false for NaN, and Rust's saturating float-to-int
+    cast sends NaN to index 0 - so missing data was drawn as a real peak at the
+    low end. And a histogram cropped with `range=` integrated to the fraction
+    it kept, which silently misplaces any fitted curve drawn over it.
+    """
+    from array import array
+
+    from pyplotrs import _pyplotrs_core as _core
+
+    nan = float("nan")
+    _edges, counts = _core.histogram(
+        array("d", [1.0, 2.0, 3.0, 4.0, nan, nan, nan]), 4, None, False)
+    assert list(counts) == [1.0, 1.0, 1.0, 1.0], (
+        f"NaN was binned: {list(counts)}")
+
+    edges, dens = _core.histogram(
+        array("d", [v + 0.5 for v in range(10)]), 5, (0.0, 5.0), True)
+    width = edges[1] - edges[0]
+    assert sum(d * width for d in dens) == pytest.approx(1.0), (
+        "a density histogram must integrate to 1 over its own range")
+
+
 def test_colormapped_scatter_honors_alpha(tmp_path):
     """`scatter(c=..., alpha=...)` dropped the alpha entirely.
 
