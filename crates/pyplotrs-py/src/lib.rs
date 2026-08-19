@@ -1052,42 +1052,84 @@ const SYMLOG_LINTHRESH: f64 = 1.0;
 const SYMLOG_LINSCALE_ADJ: f64 = 1.0 / (1.0 - 1.0 / 10.0);
 const LN10: f64 = std::f64::consts::LN_10;
 
+/// An axis scale resolved from its code string, ready to apply per point.
+///
+/// Resolved **once** per call site rather than per sample: the code is a
+/// string, and `symlog` now carries its linear threshold in it
+/// (`"symlog:0.001"`), which would otherwise mean parsing a float inside the
+/// hot loop. Matching a `&str` per point was never free either.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ScaleFn {
+    Linear,
+    Log,
+    /// Symmetric log with its linear threshold.
+    Symlog(f64),
+    Logit,
+}
+
+impl ScaleFn {
+    /// Parse a scale code. `"symlog"` alone keeps the historical threshold of
+    /// 1.0; `"symlog:<x>"` states one. Anything unknown is the identity, which
+    /// is what an unrecognized code has always meant here.
+    fn parse(code: &str) -> ScaleFn {
+        match code {
+            "log" => ScaleFn::Log,
+            "logit" => ScaleFn::Logit,
+            "symlog" => ScaleFn::Symlog(SYMLOG_LINTHRESH),
+            _ => match code.split_once(':') {
+                Some(("symlog", t)) => ScaleFn::Symlog(
+                    t.parse::<f64>()
+                        .ok()
+                        .filter(|v| v.is_finite() && *v > 0.0)
+                        .unwrap_or(SYMLOG_LINTHRESH),
+                ),
+                _ => ScaleFn::Linear,
+            },
+        }
+    }
+
+    /// Apply the transform to one value. Values outside a scale's domain (e.g.
+    /// `x <= 0` on a log axis) return `NaN`, which the callers already treat as
+    /// a gap/skip. Must stay numerically identical to the matching
+    /// `Scale.transform` in `scales.py`.
+    #[inline]
+    fn apply(self, v: f64) -> f64 {
+        match self {
+            ScaleFn::Linear => v,
+            ScaleFn::Log => {
+                if v > 0.0 {
+                    v.log10()
+                } else {
+                    f64::NAN
+                }
+            }
+            ScaleFn::Symlog(linthresh) => {
+                let a = v.abs();
+                if a <= linthresh {
+                    v * SYMLOG_LINSCALE_ADJ
+                } else {
+                    v.signum() * linthresh * (SYMLOG_LINSCALE_ADJ + (a / linthresh).ln() / LN10)
+                }
+            }
+            ScaleFn::Logit => {
+                if v > 0.0 && v < 1.0 {
+                    (v / (1.0 - v)).log10()
+                } else {
+                    f64::NAN
+                }
+            }
+        }
+    }
+}
+
 /// Apply an axis scale's non-linear transform to a single data value, **in
 /// Rust**, so the polyline/marker fast paths stay off the per-point Python path
-/// (see `scales.py`). The result feeds the affine device map; values outside a
-/// scale's domain (e.g. x<=0 on a log axis) return `NaN`, which the callers
-/// already treat as a gap/skip. Must stay numerically identical to the matching
-/// `Scale.transform` in `scales.py`.
+/// (see `scales.py`). Convenience wrapper over [`ScaleFn`] for the few callers
+/// that transform a single value; anything looping should resolve the code
+/// once with `ScaleFn::parse` and call `apply`.
 #[inline]
 fn apply_scale(code: &str, v: f64) -> f64 {
-    match code {
-        "log" => {
-            if v > 0.0 {
-                v.log10()
-            } else {
-                f64::NAN
-            }
-        }
-        "symlog" => {
-            let a = v.abs();
-            if a <= SYMLOG_LINTHRESH {
-                v * SYMLOG_LINSCALE_ADJ
-            } else {
-                v.signum()
-                    * SYMLOG_LINTHRESH
-                    * (SYMLOG_LINSCALE_ADJ + (a / SYMLOG_LINTHRESH).ln() / LN10)
-            }
-        }
-        "logit" => {
-            if v > 0.0 && v < 1.0 {
-                (v / (1.0 - v)).log10()
-            } else {
-                f64::NAN
-            }
-        }
-        // "linear" and anything unknown: identity.
-        _ => v,
-    }
+    ScaleFn::parse(code).apply(v)
 }
 
 /// Collapse runs of near-collinear vertices in a device-space polyline
@@ -1330,6 +1372,9 @@ impl Scene {
         y_scale: &str,
     ) {
         let n = seq.len().min(lo.len()).min(hi.len());
+        // Resolved once, not per point: the code is a string and symlog
+        // carries its threshold in it.
+        let (xf, yf) = (ScaleFn::parse(x_scale), ScaleFn::parse(y_scale));
         if n < 2 {
             return;
         }
@@ -1343,8 +1388,8 @@ impl Scene {
             } else {
                 (seq[i], lo[i])
             };
-            let dx = ax * apply_scale(x_scale, sx_in) + bx;
-            let dy = ay * apply_scale(y_scale, sy_in) + by;
+            let dx = ax * xf.apply(sx_in) + bx;
+            let dy = ay * yf.apply(sy_in) + by;
             if dx.is_finite() && dy.is_finite() {
                 pts.push(Point::new(dx, dy));
             }
@@ -1354,8 +1399,8 @@ impl Scene {
             } else {
                 (seq[j], hi[j])
             };
-            let dxb = ax * apply_scale(x_scale, bx_in) + bx;
-            let dyb = ay * apply_scale(y_scale, by_in) + by;
+            let dxb = ax * xf.apply(bx_in) + bx;
+            let dyb = ay * yf.apply(by_in) + by;
             if dxb.is_finite() && dyb.is_finite() {
                 back.push(Point::new(dxb, dyb));
             }
@@ -1408,6 +1453,9 @@ impl Scene {
         y_scale: &str,
     ) {
         let n = xs.len().min(ys.len());
+        // Resolved once, not per point: the code is a string and symlog
+        // carries its threshold in it.
+        let (xf, yf) = (ScaleFn::parse(x_scale), ScaleFn::parse(y_scale));
         // Split into maximal runs of finite points: a non-finite (NaN/inf) point
         // breaks the polyline into separate subpaths. This matches matplotlib's
         // treatment of missing data as a gap, and keeps non-finite coordinates -
@@ -1435,8 +1483,8 @@ impl Scene {
         for i in 0..n {
             // Scale transform (identity for linear) then affine device map, both
             // in Rust; a non-finite result (e.g. x<=0 on a log axis) cuts the run.
-            let dx = ax * apply_scale(x_scale, xs[i]) + bx;
-            let dy = ay * apply_scale(y_scale, ys[i]) + by;
+            let dx = ax * xf.apply(xs[i]) + bx;
+            let dy = ay * yf.apply(ys[i]) + by;
             if dx.is_finite() && dy.is_finite() {
                 run.push(Point::new(dx, dy));
             } else {
@@ -1484,6 +1532,9 @@ impl Scene {
         y_scale: &str,
     ) {
         let n = xs.len().min(ys.len());
+        // Resolved once, not per point: the code is a string and symlog
+        // carries its threshold in it.
+        let (xf, yf) = (ScaleFn::parse(x_scale), ScaleFn::parse(y_scale));
         let r = diameter / 2.0;
 
         // Describe the marker outline *once*, centered at the origin; the
@@ -1496,12 +1547,7 @@ impl Scene {
         // the scale transform (identity for linear) runs in Rust before the
         // affine, so out-of-domain points (x<=0 on log) drop out here.
         let positions: Vec<Point> = (0..n)
-            .map(|i| {
-                Point::new(
-                    ax * apply_scale(x_scale, xs[i]) + bx,
-                    ay * apply_scale(y_scale, ys[i]) + by,
-                )
-            })
+            .map(|i| Point::new(ax * xf.apply(xs[i]) + bx, ay * yf.apply(ys[i]) + by))
             .filter(|p| p.x.is_finite() && p.y.is_finite())
             .collect();
 
@@ -1567,6 +1613,9 @@ impl Scene {
         y_scale: &str,
     ) {
         let n = xs.len().min(ys.len()).min(colors.len());
+        // Resolved once, not per point: the code is a string and symlog
+        // carries its threshold in it.
+        let (xf, yf) = (ScaleFn::parse(x_scale), ScaleFn::parse(y_scale));
         let r = diameter / 2.0;
         let mut marker_path = BezPath::new();
         append_marker(&mut marker_path, marker, 0.0, 0.0, r);
@@ -1575,10 +1624,7 @@ impl Scene {
         let mut positions: Vec<Point> = Vec::with_capacity(n);
         let mut pt_colors: Vec<Color> = Vec::with_capacity(n);
         for i in 0..n {
-            let p = Point::new(
-                ax * apply_scale(x_scale, xs[i]) + bx,
-                ay * apply_scale(y_scale, ys[i]) + by,
-            );
+            let p = Point::new(ax * xf.apply(xs[i]) + bx, ay * yf.apply(ys[i]) + by);
             if p.x.is_finite() && p.y.is_finite() {
                 positions.push(p);
                 pt_colors.push(color_from_rgba(colors[i]));

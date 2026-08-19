@@ -31,15 +31,58 @@ def test_transform_inverse_roundtrips(name, value):
 
 
 def test_scale_codes_match_the_rust_fast_path():
-    """``Scale.code`` selects a branch in Rust's ``apply_scale``. A typo here
+    """``Scale.code`` selects a branch in Rust's ``ScaleFn::parse``. A typo here
     would silently fall back to a linear transform and misplace every point -
-    exactly the failure mode behind the errorbar-on-log-axis bug."""
+    exactly the failure mode behind the errorbar-on-log-axis bug.
+
+    ``symlog`` carries its linear threshold in the code (``"symlog:<x>"``),
+    since the transform depends on it and the per-point work runs in Rust; the
+    branch is still selected by the part before the colon."""
     expected = {"linear": "linear", "log": "log", "symlog": "symlog", "logit": "logit"}
-    for name, code in expected.items():
-        assert scales.get(name).code == code
+    for name, branch in expected.items():
+        assert scales.get(name).code.split(":")[0] == branch
+    assert scales.get("symlog").code == "symlog:1.0"
     assert scales.get("linear").is_identity
     for name in ("log", "symlog", "logit"):
         assert not scales.get(name).is_identity
+
+
+@pytest.mark.parametrize("linthresh", [1.0, 1e-6, 25.0])
+def test_symlog_linthresh_reaches_the_rust_transform(linthresh, tmp_path):
+    """The threshold used to be a module constant duplicated in Rust, so a
+    per-axes value could not exist at all. Now it rides the code string - which
+    is only useful if Rust actually reads it, so compare a rendered point
+    against the Python transform of the same value."""
+    import re
+
+    import pyplotrs as pp
+
+    s = scales.SymlogScale(linthresh=linthresh)
+    xs = [-100.0, -1.0, 0.0, 1.0, 100.0]
+    fig, ax = pp.subplots(figsize=(200, 200))
+    # Zigzag in y: a straight line would be collapsed by polyline simplification
+    # before it reached the SVG, leaving nothing to measure.
+    ax.line(xs, [0.0, 1.0, 0.0, 1.0, 0.0])
+    ax.set(xscale=s, xlim=(-100.0, 100.0))
+    out = tmp_path / "symlog.svg"
+    fig.save(str(out))
+
+    # The data polyline is the one with exactly as many vertices as points;
+    # the frame, spines and tick marks all have two.
+    paths = re.findall(r'<path d="(M[^"]+)"', out.read_text())
+    runs = [[float(v) for v in re.findall(r"[ML]([-\d.]+) ", d)] for d in paths]
+    got = next((r for r in runs if len(r) == len(xs)), None)
+    assert got is not None, f"no {len(xs)}-vertex polyline among {len(paths)} paths"
+
+    # Rebuild the same mapping in Python from the two endpoints and check the
+    # interior points land where `s.transform` says they should.
+    t = [s.transform(v) for v in xs]
+    a = (got[-1] - got[0]) / (t[-1] - t[0])
+    b = got[0] - a * t[0]
+    for v, tv, dx in zip(xs, t, got):
+        assert dx == pytest.approx(a * tv + b, abs=0.02), (
+            f"linthresh={linthresh}: {v} drew at {dx}, "
+            f"but transform() puts it at {a * tv + b}")
 
 
 def test_log_scale_drops_nonpositive_data():

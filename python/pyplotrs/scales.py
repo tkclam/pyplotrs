@@ -267,49 +267,129 @@ class LogScale(Scale):
 
 
 class SymlogScale(Scale):
-    """Symmetric log: linear within ``[-1, 1]`` (linthresh) and logarithmic
-    beyond, so zero and negative values are representable."""
+    """Symmetric log: linear within ``[-linthresh, linthresh]`` and logarithmic
+    beyond, so zero and negative values are representable.
+
+    ``linthresh`` is where the axis stops being linear. It has to match the
+    data: the default of 1.0 is right for a signal measured in ones and wrong
+    for one measured in microvolts, where it puts the entire dataset inside the
+    linear region and produces a plain linear axis wearing a symlog label.
+    Setting it is the whole point of the scale, so it is a constructor
+    argument::
+
+        ax.set(yscale=pp.scales.SymlogScale(linthresh=1e-6))
+
+    The threshold travels to the Rust fast paths inside the scale ``code``
+    (``"symlog:1e-06"``), which is what lets the per-point transform stay in
+    Rust while still being this axes' transform rather than a global constant.
+    """
 
     name = "symlog"
-    code = "symlog"
     is_identity = False
+    supports_offset = False
+
+    def __init__(self, linthresh: float = _SYMLOG_LINTHRESH) -> None:
+        linthresh = float(linthresh)
+        if not (math.isfinite(linthresh) and linthresh > 0.0):
+            raise ValueError(
+                f"symlog linthresh must be finite and positive; got {linthresh!r}")
+        self.linthresh = linthresh
+
+    @property
+    def code(self) -> str:
+        return f"symlog:{self.linthresh!r}"
 
     def transform(self, v: float) -> float:
         a = abs(v)
-        if a <= _SYMLOG_LINTHRESH:
+        if a <= self.linthresh:
             return v * _SYMLOG_LINSCALE_ADJ
-        return math.copysign(1.0, v) * _SYMLOG_LINTHRESH * (
-            _SYMLOG_LINSCALE_ADJ + math.log(a / _SYMLOG_LINTHRESH) / _LN10
+        return math.copysign(1.0, v) * self.linthresh * (
+            _SYMLOG_LINSCALE_ADJ + math.log(a / self.linthresh) / _LN10
         )
 
     def inverse(self, t: float) -> float:
         a = abs(t)
-        lin_edge = _SYMLOG_LINTHRESH * _SYMLOG_LINSCALE_ADJ
+        lin_edge = self.linthresh * _SYMLOG_LINSCALE_ADJ
         if a <= lin_edge:
             return t / _SYMLOG_LINSCALE_ADJ
-        return math.copysign(1.0, t) * _SYMLOG_LINTHRESH * 10.0 ** (
-            a / _SYMLOG_LINTHRESH - _SYMLOG_LINSCALE_ADJ
+        return math.copysign(1.0, t) * self.linthresh * 10.0 ** (
+            a / self.linthresh - _SYMLOG_LINSCALE_ADJ
         )
 
     # Symlog represents every real, so it needs no domain clipping; it inherits
     # `clip_bounds`. Only the no-data fallback is its own - a symlog axis is
-    # centered on zero, so an empty one shows (-1, 1) rather than (0, 1).
+    # centered on zero, so an empty one shows (-linthresh, linthresh).
     def empty_range(self) -> tuple[float, float]:
-        return (-1.0, 1.0)
+        return (-self.linthresh, self.linthresh)
+
+    def _decades(self, lo: float, hi: float) -> list[float]:
+        """Signed decade positions at or beyond the threshold, inside the view."""
+        out: list[float] = []
+        for sign in (1.0, -1.0):
+            for k in range(-300, 301):
+                v = sign * 10.0 ** k
+                if abs(v) >= self.linthresh and lo <= v <= hi:
+                    out.append(v)
+        return out
 
     def ticks(self, lo: float, hi: float, max_ticks: int = 7) -> list[Tick]:
-        vals: set[float] = set()
-        if lo <= 0.0 <= hi:
-            vals.add(0.0)
-        for sign in (1.0, -1.0):
-            for k in range(-10, 11):
-                v = sign * 10.0 ** k
-                if abs(v) >= _SYMLOG_LINTHRESH and lo <= v <= hi:
-                    vals.add(v)
+        """Decades outside the linear region, plus the threshold and zero.
+
+        The old version emitted decades and nothing else, so a view like
+        ``[-3, 3]`` at the default threshold got ticks at only -1, 0 and 1 -
+        every one of them inside the middle fifth of the axis, with the outer
+        80% carrying no label at all. The threshold itself was never marked
+        either, so nothing on the axis told a reader where the scale stops
+        being logarithmic. Both are fixed here: `±linthresh` is always a tick
+        when it is in view, and an axis too narrow to hold two decades falls
+        back to plain nice numbers, which is what such an axis actually is.
+        """
+        vals = set(self._decades(lo, hi))
         if len(vals) < 2:
             return nice_ticks(lo, hi, max_ticks)
-        ordered = sorted(vals)
-        return [(v, _fmt_symlog(v)) for v in ordered]
+        # Too few decades in view to carry the axis on their own: subdivide
+        # them, widening the subdivision until there are enough ticks to read
+        # by. `[-3, 3]` at a threshold of 1 has exactly two decades, both
+        # inside the middle fifth - without this the outer 80% of the axis
+        # holds no tick at all.
+        for subs in ((2, 5), (2, 3, 4, 5, 6, 7, 8, 9)):
+            if len(vals) >= max_ticks - 1:
+                break
+            for sign in (1.0, -1.0):
+                for k in range(-300, 301):
+                    base = 10.0 ** k
+                    if base < self.linthresh:
+                        continue
+                    for mult in subs:
+                        v = sign * mult * base
+                        if lo <= v <= hi:
+                            vals.add(v)
+        if lo <= 0.0 <= hi:
+            vals.add(0.0)
+        # Mark the linear/log crossover, on whichever side is in view.
+        for edge in (self.linthresh, -self.linthresh):
+            if lo <= edge <= hi:
+                vals.add(edge)
+        return [(v, _fmt_symlog(v)) for v in sorted(vals)]
+
+    def minor_ticks(self, lo: float, hi: float) -> list[float]:
+        """The 2..9 subdivisions of each decade, as on a log axis.
+
+        A symlog axis had none at all, so between two labeled decades there was
+        no way to read off where a point sat - the one thing minor ticks are
+        for on a logarithmic axis.
+        """
+        out: list[float] = []
+        for sign in (1.0, -1.0):
+            for k in range(-300, 301):
+                base = 10.0 ** k
+                if base < self.linthresh:
+                    continue
+                for mult in range(2, 10):
+                    v = sign * mult * base
+                    if abs(v) >= self.linthresh and lo <= v <= hi:
+                        out.append(v)
+        return out
 
 
 def _fmt_symlog(v: float) -> str:
