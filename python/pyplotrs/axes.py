@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 from array import array
 
+from . import _colorbar, _pie
 from . import _pyplotrs_core as _core
 from . import colormaps as _colormaps
 from . import norms as _norms
@@ -26,10 +27,6 @@ from ._const import (
     _CBAR_WIDTH,
     _DATA_PAD,
     _ELLIPSE_N,
-    _LEGEND_PROBE_POINTS,
-    _PIE_LABEL_R,
-    _PIE_MIN_RADIUS,
-    _PIE_WEDGE_STROKE,
     _SEAM_STROKE,
     _TICK_LABEL_GAP,
     _TICK_LENGTH,
@@ -54,6 +51,7 @@ from ._draw import (
     _tw,
 )
 from ._layout import _layout_cell, _Proj, _Rect
+from ._legend import best_position as _best_legend_position
 from ._util import (
     _NUMERIC_BUFFER_FORMATS,
     _as_seq,
@@ -2189,7 +2187,7 @@ class Axes(_AxesBase):
         # are placed against the rect rather than in data space.
         for m in marks:
             if m["kind"] == "pie":
-                self._draw_pie_labels(scene, m, proj)
+                _pie.draw_labels(self, scene, m, proj)
 
         # Patches and reference lines, clipped, on top of the data.
         if self._patches or self._refs:
@@ -2288,7 +2286,7 @@ class Axes(_AxesBase):
 
         # Colorbar, drawn in its reserved right-hand band (outside the clip).
         if self._colorbar is not None:
-            self._draw_colorbar(scene, layout)
+            _colorbar.draw(self, scene, layout)
 
         # Legend, drawn last so it sits above the data (and outside the clip).
         if self._legend is not None:
@@ -2784,7 +2782,7 @@ class Axes(_AxesBase):
                             sx(x + u * m["scale"]), sy(y + v * m["scale"]),
                             m["color"], m["linewidth"], head_len=6.0, head_w=2.5)
         elif kind == "pie":
-            self._draw_pie(scene, m, proj)
+            _pie.draw(self, scene, m, proj)
 
     def _draw_boxplot(self, scene, m, sx, sy) -> None:
         hw = m["width"] / 2.0
@@ -2829,88 +2827,6 @@ class Axes(_AxesBase):
         rx, rw = min(left, right), abs(right - left)
         top, bot = sy(max(y0, y1)), sy(min(y0, y1))
         scene.add_image(m["img"], m["uw"], m["uh"], rx, top, rw, bot - top)
-
-    def _pie_geometry(self, scene, m, proj):
-        """Device center and radius for a pie, plus its placed slice labels.
-
-        A slice label is a device length (its shaped width) hung off a data
-        length (the rim), so no fixed data-space margin can hold it: it wastes
-        the cell when the labels are short and clips them when they are long.
-        The pie is fitted here instead, where the text can be measured against
-        the rect it has to land in. Each label turns into linear bounds on the
-        radius - the text box has to stay inside that rect on all four sides -
-        and the tightest bound over every label wins. The labels are held to the
-        axes' whole cell, not to the equal-aspect square the wedges live in, so
-        a wide figure spends its horizontal slack on the labels and keeps the
-        pie as large as the cell's height allows.
-
-        Returns ``(cx, cy, r, placed)``, with ``placed`` a list of
-        ``(x, baseline, text)`` ready to draw.
-        """
-        px, py, pw, ph = proj.cell
-        cx, cy = proj.sx(0.0), proj.sy(0.0)
-        # The wedge separators straddle the rim, so keep half of one inside
-        # (and never let that inset drive a `radius=0` pie negative).
-        r = max(0.0, abs(proj.sx(m["radius"]) - cx) - _PIE_WEDGE_STROKE / 2.0)
-        size = self._theme.tick_label_size
-
-        # Measure once: (cos, sin, width, ascent, descent, text) per label.
-        labs = []
-        for wd in m["wedges"]:
-            lab = wd.get("label")
-            if not lab:
-                continue
-            am = (wd["a0"] + wd["a1"]) / 2.0
-            asc, desc = _th(scene, lab, size)
-            labs.append((math.cos(am), math.sin(am), _tw(scene, lab, size),
-                         asc, desc, lab))
-
-        fit = r
-        for c, s, w, asc, desc, _lab in labs:
-            h2 = (asc + desc) / 2.0
-            # The label box, anchored at radius `_PIE_LABEL_R`, slides from
-            # left-aligned on the right of the pie to right-aligned on the left
-            # (centered straight up or down), so it leans away from the rim.
-            # Each side of the box grows as `a*r + b`; only a side that grows
-            # with r (a > 0) can bind.
-            for a, b, avail in (
-                (_PIE_LABEL_R * max(c, 0.0), w * (1.0 + c) / 2.0, px + pw - cx),
-                (_PIE_LABEL_R * max(-c, 0.0), w * (1.0 - c) / 2.0, cx - px),
-                (_PIE_LABEL_R * max(s, 0.0), h2, cy - py),
-                (_PIE_LABEL_R * max(-s, 0.0), h2, py + ph - cy),
-            ):
-                if a > 0.0:
-                    fit = min(fit, (avail - b) / a)
-        r = max(fit, r * _PIE_MIN_RADIUS)
-
-        placed = []
-        for c, s, w, asc, desc, lab in labs:
-            lx = cx + _PIE_LABEL_R * r * c
-            ly = cy - _PIE_LABEL_R * r * s
-            placed.append((lx - w * (1.0 - c) / 2.0, ly + (asc - desc) / 2.0, lab))
-        return cx, cy, r, placed
-
-    def _draw_pie(self, scene, m, proj) -> None:
-        cx, cy, r, _placed = self._pie_geometry(scene, m, proj)
-        for wd in m["wedges"]:
-            a0, a1 = wd["a0"], wd["a1"]
-            n = max(2, int((a1 - a0) / (math.pi / 36)) + 1)
-            pts = [(cx, cy)]
-            for i in range(n + 1):
-                a = a0 + (a1 - a0) * i / n
-                pts.append((cx + r * math.cos(a), cy - r * math.sin(a)))
-            scene.add_path(pts, fill_color=wd["color"], close=True,
-                           stroke_color=self._theme.separator_color,
-                           stroke_width=_PIE_WEDGE_STROKE)
-
-    def _draw_pie_labels(self, scene, m, proj) -> None:
-        """Slice labels, drawn outside the data clip: the fit above keeps them
-        in the rect, but a label too wide to fit at all (`_PIE_MIN_RADIUS`)
-        should overhang whole rather than lose its last glyph to the clip."""
-        _cx, _cy, _r, placed = self._pie_geometry(scene, m, proj)
-        size = self._theme.tick_label_size
-        for x, baseline, lab in placed:
-            _text(scene, x, baseline, lab, size, self._theme.text_color)
 
     def _draw_image(self, scene, m: dict, sx, sy) -> None:
         x0, x1, y0, y1 = m["extent"]
@@ -2971,135 +2887,6 @@ class Axes(_AxesBase):
             scene.add_markers_xform(m["xs"], m["ys"], ax, bx, ay, by, m["marker"],
                                     m["markersize"], color, None, 1.0, xc, yc)
 
-    # -- colorbar -----------------------------------------------------------
-
-    def _draw_colorbar(self, scene, layout) -> None:
-        t = self._theme
-        _TICK_LABEL_SIZE = t.tick_label_size
-        _AXIS_LABEL_SIZE = t.axis_label_size
-        _SPINE = t.spine_color
-        _BLACK = t.text_color
-        cb = self._colorbar
-        cmap = cb["cmap"]
-        vmin, vmax = cb["vmin"], cb["vmax"]
-        plot = layout.plot
-        band = self._cbar_band(layout.cbar)
-        horizontal = cb.get("orientation", "vertical") == "horizontal"
-        shrink = max(0.0, min(1.0, cb.get("shrink", 1.0)))
-
-        if horizontal:
-            self._draw_colorbar_horizontal(scene, cb, plot, band, shrink)
-            return
-
-        # Strip aligned vertically with the plot area, `shrink`ed about its
-        # center so a short bar stays opposite the middle of the data.
-        strip_x = band.x + _CBAR_GAP
-        strip_h = plot.h * shrink
-        strip_y = plot.y + (plot.h - strip_h) / 2.0
-        strip_w = _CBAR_WIDTH
-
-        # Vertical gradient: N rows x 1 col, row 0 = top = vmax.
-        n = 256
-        buf = bytearray(n * 4)
-        denom = n - 1
-        for i in range(n):
-            frac = 1.0 - i / denom
-            r, g, b, a = cmap(frac)
-            o = i * 4
-            buf[o] = r
-            buf[o + 1] = g
-            buf[o + 2] = b
-            buf[o + 3] = a
-        scene.add_image(bytes(buf), 1, n, strip_x, strip_y, strip_w, strip_h)
-
-        # Thin border around the strip.
-        scene.add_path(
-            [(strip_x, strip_y), (strip_x + strip_w, strip_y),
-             (strip_x + strip_w, strip_y + strip_h), (strip_x, strip_y + strip_h)],
-            close=True, stroke_color=_SPINE, stroke_width=0.8,
-        )
-
-        # Ticks + labels to the right of the strip. A norm (e.g. LogNorm) drives
-        # both the tick values and their fractional positions on the strip.
-        t_asc, t_desc, _ = scene.font_vmetrics(_TICK_LABEL_SIZE)
-        span = (vmax - vmin) or 1.0
-        norm = cb.get("norm")
-        for value, label in _colorbar_ticks(cb):
-            frac = norm(value) if norm is not None else (value - vmin) / span
-            ty = strip_y + strip_h - frac * strip_h
-            scene.add_path(
-                [(strip_x + strip_w, ty), (strip_x + strip_w + _CBAR_TICK_LEN, ty)],
-                stroke_color=_SPINE, stroke_width=1.0,
-            )
-            baseline = ty + (t_asc - t_desc) / 2.0
-            _text(scene, strip_x + strip_w + _CBAR_TICK_LEN + _CBAR_TICK_GAP, baseline,
-                           label, _TICK_LABEL_SIZE, _BLACK)
-
-        # Rotated colorbar label at the band's right edge (reads bottom-to-top).
-        if cb["label"]:
-            a, d, _ = scene.font_vmetrics(_AXIS_LABEL_SIZE)
-            tw = _tw(scene, cb["label"], _AXIS_LABEL_SIZE)
-            pivot_x = band.x1 - d - 1.0
-            pivot_y = strip_y + strip_h / 2.0
-            scene.begin_group(0.0, -1.0, 1.0, 0.0, pivot_x, pivot_y)
-            _text(scene, -tw / 2.0, 0.0, cb["label"], _AXIS_LABEL_SIZE, _BLACK)
-            scene.end_group()
-
-    def _draw_colorbar_horizontal(self, scene, cb, plot, band, shrink: float) -> None:
-        """The horizontal variant: strip under the plot, ticks below it, and an
-        upright label under those (no rotation - it reads left-to-right here)."""
-        t = self._theme
-        _TICK_LABEL_SIZE = t.tick_label_size
-        _AXIS_LABEL_SIZE = t.axis_label_size
-        _SPINE = t.spine_color
-        _BLACK = t.text_color
-        cmap = cb["cmap"]
-        vmin, vmax = cb["vmin"], cb["vmax"]
-
-        strip_w = plot.w * shrink
-        strip_x = plot.x + (plot.w - strip_w) / 2.0
-        strip_y = band.y + _CBAR_GAP
-        strip_h = _CBAR_WIDTH
-
-        # Horizontal gradient: 1 row x N cols, col 0 = left = vmin.
-        n = 256
-        buf = bytearray(n * 4)
-        denom = n - 1
-        for i in range(n):
-            r, g, b, a = cmap(i / denom)
-            o = i * 4
-            buf[o] = r
-            buf[o + 1] = g
-            buf[o + 2] = b
-            buf[o + 3] = a
-        scene.add_image(bytes(buf), n, 1, strip_x, strip_y, strip_w, strip_h)
-        scene.add_path(
-            [(strip_x, strip_y), (strip_x + strip_w, strip_y),
-             (strip_x + strip_w, strip_y + strip_h), (strip_x, strip_y + strip_h)],
-            close=True, stroke_color=_SPINE, stroke_width=0.8,
-        )
-
-        t_asc, t_desc, _ = scene.font_vmetrics(_TICK_LABEL_SIZE)
-        span = (vmax - vmin) or 1.0
-        norm = cb.get("norm")
-        tick_bottom = strip_y + strip_h + _CBAR_TICK_LEN
-        for value, label in _colorbar_ticks(cb):
-            frac = norm(value) if norm is not None else (value - vmin) / span
-            tx = strip_x + frac * strip_w
-            scene.add_path([(tx, strip_y + strip_h), (tx, tick_bottom)],
-                           stroke_color=_SPINE, stroke_width=1.0)
-            lw = _tw(scene, label, _TICK_LABEL_SIZE)
-            _text(scene, tx - lw / 2.0, tick_bottom + _CBAR_TICK_GAP + t_asc,
-                  label, _TICK_LABEL_SIZE, _BLACK)
-
-        if cb["label"]:
-            a, _d, _ = scene.font_vmetrics(_AXIS_LABEL_SIZE)
-            lw = _tw(scene, cb["label"], _AXIS_LABEL_SIZE)
-            baseline = (tick_bottom + _CBAR_TICK_GAP + t_asc + t_desc
-                        + _AXIS_LABEL_GAP + a)
-            _text(scene, strip_x + (strip_w - lw) / 2.0, baseline, cb["label"],
-                  _AXIS_LABEL_SIZE, _BLACK)
-
     # -- legend -------------------------------------------------------------
 
     def _legend_entries(self) -> list[dict]:
@@ -3142,59 +2929,7 @@ class Axes(_AxesBase):
             "lower center": (hcenter, bottom),
         }
         if loc == "best":
-            bx, by = self._best_legend_position(positions, box_w, box_h, proj)
+            bx, by = _best_legend_position(self._marks, positions, box_w, box_h, proj)
         else:
             bx, by = positions.get(loc, (right, top))
         _draw_legend_box(scene, entries, bx, by, mt)
-
-    def _best_legend_position(self, positions: dict, box_w: float, box_h: float,
-                              proj: "_Proj | None"):
-        """The candidate corner that covers the least data.
-
-        Scores each corner by how many sampled mark points would fall inside the
-        box and takes the lowest, preferring earlier candidates on a tie so the
-        familiar upper-right stays the default on an empty or symmetric plot.
-
-        The sample is capped (``_LEGEND_PROBE_POINTS`` per mark), so the cost
-        is a few hundred operations per figure no matter how large the data -
-        this runs at draw time, and a legend is not worth an O(n) pass.
-        """
-        order = ["upper right", "upper left", "lower right", "lower left",
-                 "upper center", "lower center"]
-        if proj is None:
-            return positions["upper right"]
-
-        points = self._sample_device_points(proj)
-        if not points:
-            return positions["upper right"]
-
-        best = None
-        for name in order:
-            bx, by = positions[name]
-            x1, y1 = bx + box_w, by + box_h
-            covered = sum(1 for (dx, dy) in points if bx <= dx <= x1 and by <= dy <= y1)
-            if best is None or covered < best[0]:
-                best = (covered, bx, by)
-                if covered == 0:
-                    break  # nothing can beat a clear corner
-        return best[1], best[2]
-
-    def _sample_device_points(self, proj: "_Proj") -> list[tuple[float, float]]:
-        """Up to ``_LEGEND_PROBE_POINTS`` device-space points per mark, as a
-        cheap stand-in for "where the ink is"."""
-        sx, sy = proj.sx, proj.sy
-        out: list[tuple[float, float]] = []
-        for m in self._marks:
-            xs = m.get("xs")
-            ys = m.get("ys")
-            if xs is None or ys is None:
-                continue
-            n = min(len(xs), len(ys))
-            if n == 0:
-                continue
-            step = max(1, n // _LEGEND_PROBE_POINTS)
-            for i in range(0, n, step):
-                x, y = xs[i], ys[i]
-                if math.isfinite(x) and math.isfinite(y):
-                    out.append((sx(x), sy(y)))
-        return out

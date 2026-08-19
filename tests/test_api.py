@@ -227,6 +227,28 @@ def test_2d_legend_entries_keep_their_kind():
 
 # -- legend(loc="best") ------------------------------------------------------
 
+from pyplotrs import _legend
+from pyplotrs._legend import best_position as _best_legend_position
+
+
+#: A unit-square projection onto a 100x100 device rect, so a device coordinate
+#: below 50 is the left/top half.
+class _P:
+    sx = staticmethod(lambda v: v * 100.0)
+    sy = staticmethod(lambda v: 100.0 - v * 100.0)
+    rect = (0.0, 0.0, 100.0, 100.0)
+
+
+#: Inset candidates for a 30x20 box, laid out the way `_draw_legend` lays out
+#: real ones: fully inside the rect, so a box never scores low merely by
+#: hanging off the edge.
+_POSITIONS = {
+    "upper right": (65.0, 5.0), "upper left": (5.0, 5.0),
+    "lower right": (65.0, 75.0), "lower left": (5.0, 75.0),
+    "upper center": (35.0, 5.0), "lower center": (35.0, 75.0),
+}
+
+
 @pytest.mark.parametrize("name,ys,expect_left,expect_top", [
     # A rising line clears the upper left; a falling one clears the upper right.
     ("rising", [i / 20 for i in range(21)], True, True),
@@ -240,17 +262,7 @@ def test_best_picks_a_corner_clear_of_the_data(name, ys, expect_left, expect_top
     ax.line(xs, ys, label=name)
     ax.legend()
 
-    positions = {
-        "upper right": (100.0, 0.0), "upper left": (0.0, 0.0),
-        "lower right": (100.0, 100.0), "lower left": (0.0, 100.0),
-        "upper center": (50.0, 0.0), "lower center": (50.0, 100.0),
-    }
-
-    class _P:
-        sx = staticmethod(lambda v: v * 100.0)
-        sy = staticmethod(lambda v: 100.0 - v * 100.0)
-
-    bx, by = ax._best_legend_position(positions, 30.0, 20.0, _P())
+    bx, by = _best_legend_position(ax._marks, _POSITIONS, 30.0, 20.0, _P())
     assert (bx < 50.0) is expect_left, f"{name}: horizontal choice {bx}"
     assert (by < 50.0) is expect_top, f"{name}: vertical choice {by}"
 
@@ -263,20 +275,55 @@ def test_best_falls_back_without_a_projection():
     positions = {"upper right": (9.0, 9.0), "upper left": (0.0, 0.0),
                  "lower right": (9.0, 0.0), "lower left": (0.0, 9.0),
                  "upper center": (4.0, 0.0), "lower center": (4.0, 9.0)}
-    assert ax._best_legend_position(positions, 1.0, 1.0, None) == (9.0, 9.0)
+    assert _best_legend_position(ax._marks, positions, 1.0, 1.0, None) == (9.0, 9.0)
 
 
 def test_best_probe_is_bounded_regardless_of_data_size():
     """The search runs at draw time, so it must not become an O(n) pass."""
-    fig, ax = pp.subplots()
-    ax.line(list(range(100_000)), list(range(100_000)), label="big")
-
-    class _P:
-        sx = staticmethod(float)
-        sy = staticmethod(float)
-
     from pyplotrs._const import _LEGEND_PROBE_POINTS
-    assert len(ax._sample_device_points(_P())) <= _LEGEND_PROBE_POINTS + 1
+
+    assert len(list(_legend._subsample(100_000))) <= _LEGEND_PROBE_POINTS + 1
+    assert len(list(_legend._subsample(7))) == 7
+    # The occupancy raster is fixed, so the score is bounded by the grid too.
+    assert len(_legend._Occupancy((0.0, 0.0, 100.0, 100.0)).cells) == \
+        _legend._GRID_W * _legend._GRID_H
+
+
+@pytest.mark.parametrize("kind", ["bar", "hist", "fill", "image"])
+def test_best_sees_area_marks_not_just_xs_ys(kind):
+    """The scorer used to read only `xs`/`ys`, which bar, hist, fill and image
+    do not carry - so on those (the chart types where a legend is most used) it
+    saw an empty plot and parked the box on the tallest data."""
+    fig, ax = pp.subplots(figsize=(300, 220))
+    # In every case the ink fills the right half of the unit square, so the
+    # legend belongs on the left.
+    if kind == "bar":
+        ax.bar([0.6, 0.8], [1.0, 1.0], width=0.15, label=kind)
+    elif kind == "hist":
+        ax.hist([0.6, 0.65, 0.7, 0.75, 0.8], bins=4, label=kind)
+    elif kind == "fill":
+        ax.fill_between([0.55, 1.0], [0.0, 0.0], [1.0, 1.0], label=kind)
+    else:
+        ax.imshow([[1.0, 2.0]], extent=(0.55, 1.0, 0.0, 1.0), label=kind)
+
+    grid = _legend._ink(ax._marks, _P())
+    assert any(grid.cells), f"{kind} contributed no ink at all"
+
+    bx, _by = _best_legend_position(ax._marks, _POSITIONS, 30.0, 20.0, _P())
+    assert bx < 50.0, f"{kind}: legend placed at {bx}, on top of the data"
+
+
+def test_best_sees_a_line_between_its_vertices():
+    """Sampling only vertices let a sparse polyline cross a candidate box
+    without the scorer noticing."""
+    fig, ax = pp.subplots(figsize=(300, 220))
+    # Two points only: everything interesting is *between* them.
+    ax.line([0.0, 1.0], [1.0, 0.0], label="sparse")
+
+    grid = _legend._ink(ax._marks, _P())
+    # The diagonal must have stamped cells away from both endpoints.
+    mid = grid._cell(50.0, 50.0)
+    assert mid is not None and grid.cells[mid], "the segment interior left no ink"
 
 
 def test_explicit_loc_is_still_honoured(tmp_path):
