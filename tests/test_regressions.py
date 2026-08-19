@@ -1571,6 +1571,15 @@ def test_svg_states_its_size_in_points(tmp_path):
     assert 'viewBox="0 0 200 150"' in head, "the user-unit grid should stay 1:1"
 
 
+def test_contourf_uses_its_vmin_and_vmax():
+    """Both were accepted and then overwritten with the level extremes, so
+    passing them did nothing - not even a warning - and two panels asked to
+    share a color scale each got their own."""
+    fig, ax = pp.subplots()
+    m = ax.contourf([0, 1], [0, 1], [[0, 1], [2, 3]], vmin=-10, vmax=10)
+    assert (m.vmin, m.vmax) == (-10.0, 10.0)
+
+
 def test_imshow_honors_a_piecewise_norm(tmp_path):
     """`imshow` substituted a plain linear norm for `TwoSlopeNorm`.
 

@@ -1102,8 +1102,14 @@ class Axes(_AxesBase):
         edges = _level_edges(flat, levels)
         nbands = len(edges) - 1
         cm = _colormaps.get_cmap(cmap)
-        nrm = _norms.get(norm, edges[0], edges[-1])
-        nrm.vmin, nrm.vmax = edges[0], edges[-1]
+        # `levels` fixes where the bands *are*; `vmin`/`vmax` fix how the
+        # colormap is stretched across them. Both were accepted and then
+        # overwritten with the level extremes, so passing `vmin`/`vmax` to
+        # `contourf` did nothing at all - not even a warning - and two panels
+        # asked to share a color scale silently each got their own.
+        nrm = _norms.get(norm, vmin, vmax)
+        nrm.vmin = edges[0] if nrm.vmin is None else nrm.vmin
+        nrm.vmax = edges[-1] if nrm.vmax is None else nrm.vmax
         band_lut = bytes(b for k in _irange(nbands)
                          for b in _with_alpha(cm(nrm(0.5 * (edges[k] + edges[k + 1]))), alpha))
         img, uw, uh = _core.contourf_image(flat, w, h, edges, band_lut, upsample)
@@ -1115,7 +1121,8 @@ class Axes(_AxesBase):
             "sticky_x": [min(xc), max(xc)],
             "sticky_y": [min(yc), max(yc)],
         })
-        return Mappable(self, cm, edges[0], edges[-1], norm=nrm)
+        # The colorbar spans the norm, so an explicit vmin/vmax shows there too.
+        return Mappable(self, cm, nrm.vmin, nrm.vmax, norm=nrm)
 
     def pcolor(self, *args, **kwargs) -> "Mappable":
         """Alias of ``pcolormesh``.
