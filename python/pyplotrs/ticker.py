@@ -229,3 +229,125 @@ def get(formatter):
         return FuncFormatter(formatter)
     raise TypeError(f"expected a Formatter, format string, callable, or None; "
                     f"got {type(formatter).__name__}")
+
+
+# -- shared offset / multiplier ---------------------------------------------
+
+#: Extra decimal digits a tick label may carry before an axis is better served
+#: by factoring a common term out of every label. Four is the point at which
+#: "0.0000002" and "1000000.05" stop being readable as numbers.
+_OFFSET_DIGITS = 4
+
+#: Decade range left as plain decimals. Outside it, a common power of ten is
+#: factored out into the axis' corner text. Matches ``ScalarFormatter``'s
+#: default ``power_limits``.
+_POWER_LIMITS = (-5, 6)
+
+
+def _decade(v: float) -> int:
+    """``floor(log10(|v|))``, and 0 for a value with no magnitude to speak of."""
+    v = abs(v)
+    if v == 0.0 or not math.isfinite(v):
+        return 0
+    return int(math.floor(math.log10(v)))
+
+
+def factor_out(values) -> tuple[float, int]:
+    """A shared ``(offset, exponent)`` to lift out of a set of tick values.
+
+    Returns the additive offset and the power of ten that, removed from every
+    tick, leave labels a reader can take in at a glance. ``(0.0, 0)`` means
+    leave them alone, which is the answer for any ordinary axis.
+
+    Two independent decisions:
+
+    * **Offset** - when the ticks are crowded far from zero, so that almost
+      every digit printed is the same on every label. ``1000000.00``,
+      ``1000000.05``, ``1000000.10`` carry two digits of information and eight
+      of noise; factoring out ``1000000`` leaves ``0.00 0.05 0.10`` and puts
+      the constant in the corner once.
+    * **Exponent** - when what remains is very large or very small, so the
+      labels would be a run of zeros either way.
+
+    This is what an axis has always needed and never had. Its absence is why a
+    nanometre axis could only be labelled by printing ten decimal places, and
+    why a long tick label ran off the page instead of being short.
+    """
+    vals = [float(v) for v in values if math.isfinite(v)]
+    if len(vals) < 2:
+        return 0.0, 0
+    lo, hi = min(vals), max(vals)
+    span = hi - lo
+    if span <= 0.0:
+        return 0.0, 0
+
+    offset = 0.0
+    # An offset only helps when every tick sits on the same side of zero: a set
+    # straddling zero already has zero as its natural reference, and shifting
+    # it would make the labels harder to read, not easier.
+    if lo > 0.0 or hi < 0.0:
+        span_dec = _decade(span)
+        far_dec = _decade(max(abs(lo), abs(hi)))
+        if far_dec - span_dec >= _OFFSET_DIGITS:
+            # Round the offset itself to the span's own decade, so the corner
+            # text is a round number and the residual labels stay small.
+            step = 10.0 ** (span_dec + 1)
+            offset = math.floor(lo / step) * step
+
+    residual = max(abs(lo - offset), abs(hi - offset))
+    exponent = _decade(residual)
+    if _POWER_LIMITS[0] <= exponent < _POWER_LIMITS[1]:
+        exponent = 0
+    return offset, exponent
+
+
+def offset_label(offset: float, exponent: int) -> str:
+    """The corner text for a ``(offset, exponent)`` pair, or ``""`` for none.
+
+    Written as math so the exponent is a real superscript and shares the
+    typesetting of a ``$10^{-9}$`` log label. The sign of the offset is
+    explicit - a reader has to know whether to add or subtract it.
+    """
+    parts = []
+    if exponent:
+        parts.append(f"$\\times10^{{{exponent}}}$")
+    if offset:
+        sign = "+" if offset > 0 else MINUS
+        mag = abs(offset)
+        dec = _decade(mag)
+        if _POWER_LIMITS[0] <= dec < _POWER_LIMITS[1]:
+            parts.append(f"{sign}{_fmt_g(mag)}")
+        else:
+            mant = mag / (10.0 ** dec)
+            m = _fmt_g(round(mant, 6))
+            body = f"10^{{{dec}}}" if m == "1" else f"{m}\\times10^{{{dec}}}"
+            parts.append(f"${sign}{body}$")
+    return " ".join(parts)
+
+
+def apply_offset(values, offset: float, exponent: int) -> list[str]:
+    """Label ``values`` with ``offset`` and ``10**exponent`` already removed.
+
+    The residuals share a decimal place count, chosen from the *step* between
+    them, so the column lines up the way a table of numbers should.
+    """
+    scale = 10.0 ** exponent
+    res = [(float(v) - offset) / scale for v in values]
+    if len(res) >= 2:
+        steps = [abs(b - a) for a, b in zip(res, res[1:]) if b != a]
+        step = min(steps) if steps else 0.0
+    else:
+        step = 0.0
+    decimals = 0
+    if step > 0.0:
+        # Enough places to tell one tick from the next, and no more.
+        decimals = max(0, -_decade(step))
+        if round(step, decimals) == 0.0:
+            decimals += 1
+    out = []
+    for v in res:
+        s = f"{v:.{decimals}f}"
+        if s.startswith("-") and all(c in "0." for c in s[1:]):
+            s = s[1:]  # no "-0.00"
+        out.append(fix_minus(s))
+    return out

@@ -90,6 +90,12 @@ class Scale:
     code = "linear"
     #: Whether ``transform`` is the identity (lets the figure skip transforming).
     is_identity = False
+    #: Whether tick labels may have a shared offset/multiplier factored out of
+    #: them (see [`pyplotrs.ticker.factor_out`][pyplotrs.ticker.factor_out]).
+    #: Off by default, and deliberately opt-in: a log axis already labels in
+    #: powers of ten, and a categorical or date axis labels with strings that
+    #: are not numbers at all. Only a plain numeric axis wants it.
+    supports_offset = False
 
     def transform(self, v: float) -> float:
         return v
@@ -147,6 +153,7 @@ class LinearScale(Scale):
     name = "linear"
     code = "linear"
     is_identity = True
+    supports_offset = True
 
     def transform(self, v: float) -> float:
         return v

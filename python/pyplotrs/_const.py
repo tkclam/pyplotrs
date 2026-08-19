@@ -29,6 +29,10 @@ _TICK_LENGTH = 2.5
 _TICK_LABEL_GAP = 2.5
 
 _AXIS_LABEL_GAP = 3.0
+#: Gap between the tick labels and the axis' shared offset/multiplier text
+#: (`ticker.factor_out`). Slightly wider than `_TICK_LABEL_GAP`, so the corner
+#: term reads as a note about the axis rather than as one more tick label.
+_OFFSET_TEXT_GAP = 4.0
 _TITLE_GAP = 4.0
 
 _OUTER_MARGIN = 6.0

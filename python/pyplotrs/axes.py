@@ -27,6 +27,7 @@ from ._const import (
     _CBAR_WIDTH,
     _DATA_PAD,
     _ELLIPSE_N,
+    _OFFSET_TEXT_GAP,
     _SEAM_STROKE,
     _TICK_LABEL_GAP,
     _TICK_LENGTH,
@@ -274,6 +275,11 @@ class Axes(_AxesBase):
         # Descending view without pinning numbers (see ``_ranges``).
         self._xinverted = False
         self._yinverted = False
+        # Shared offset/multiplier lifted out of the tick labels, written once
+        # at the end of the axis. Computed in `_bands` (which always runs
+        # before `_draw`, as the layout depends on it) and rendered there.
+        self._x_offset_text = ""
+        self._y_offset_text = ""
         # Minor ticks. Non-linear scales subdivide on their own; on a linear
         # axis there is no canonical subdivision, so it is opt-in and the count
         # is how many minor intervals fill one major one.
@@ -1735,18 +1741,41 @@ class Axes(_AxesBase):
                        manual, manual_labels, formatter) -> list[tuple[float, str]]:
         """Locate ``(value, label)`` tick pairs honoring manual positions,
         manual labels, and a formatter override. Falls back to the scale's own
-        locator+labels when nothing is overridden (byte-identical to before).
+        locator+labels when nothing is overridden.
 
         Manual positions outside ``lo..hi`` are dropped. A pinned tick has no
         place on the axis to be drawn at, so it used to be placed by the same
         arithmetic anyway and land *outside* the plot rect - a stray label
         floating above or below the panel, over whatever was there."""
+        return self._resolve_ticks_offset(
+            scale, lo, hi, max_n, manual, manual_labels, formatter)[0]
+
+    def _resolve_ticks_offset(self, scale, lo: float, hi: float, max_n: int,
+                              manual, manual_labels, formatter):
+        """``(pairs, offset_text)`` - [`_resolve_ticks`] plus the corner text.
+
+        A numeric axis whose labels would otherwise repeat the same leading
+        digits, or run to a string of zeros, gets a shared term lifted out of
+        every label and written once at the end of the axis instead. Without
+        it a nanometre axis can only be labelled by printing ten decimals, and
+        a `1000000.05`-style label is both unreadable and wide enough to run
+        off the page. An explicit formatter or explicit labels always win -
+        this only fills in for the default.
+        """
         if manual is not None:
             values = manual
         elif manual_labels is not None or formatter is not None:
             values = [v for v, _ in scale.ticks(lo, hi, max_n)]
         else:
-            return scale.ticks(lo, hi, max_n)  # unchanged default path
+            pairs = scale.ticks(lo, hi, max_n)
+            if not getattr(scale, "supports_offset", False) or len(pairs) < 2:
+                return pairs, ""
+            vals = [v for v, _ in pairs]
+            offset, exponent = _ticker.factor_out(vals)
+            if not offset and not exponent:
+                return pairs, ""
+            labels = _ticker.apply_offset(vals, offset, exponent)
+            return list(zip(vals, labels)), _ticker.offset_label(offset, exponent)
         if manual_labels is not None:
             labels = [manual_labels[i] if i < len(manual_labels) else ""
                       for i in range(len(values))]
@@ -1759,7 +1788,7 @@ class Axes(_AxesBase):
         if manual is not None:
             eps = abs(hi - lo) * 1e-9
             pairs = [p for p in pairs if lo - eps <= p[0] <= hi + eps]
-        return pairs
+        return pairs, ""
 
     # -- layout helpers -----------------------------------------------------
 
@@ -1934,16 +1963,27 @@ class Axes(_AxesBase):
         t_asc, t_desc, _ = scene.font_vmetrics(_TICK_LABEL_SIZE)
         tick_label_h = t_asc + t_desc
 
-        xticks = self._resolve_ticks(self._xscale, xr[0], xr[1], 7,
-                                     self._xticks_manual, self._xticklabels_manual,
-                                     self._xformatter)
-        yticks = self._resolve_ticks(self._yscale, yr[0], yr[1], 6,
-                                     self._yticks_manual, self._yticklabels_manual,
-                                     self._yformatter)
+        xticks, self._x_offset_text = self._resolve_ticks_offset(
+            self._xscale, xr[0], xr[1], 7, self._xticks_manual,
+            self._xticklabels_manual, self._xformatter)
+        yticks, self._y_offset_text = self._resolve_ticks_offset(
+            self._yscale, yr[0], yr[1], 6, self._yticks_manual,
+            self._yticklabels_manual, self._yformatter)
 
         x_tick_h = _TICK_LENGTH + _TICK_LABEL_GAP + tick_label_h
         y_label_w = max((_tw(scene, lbl, _TICK_LABEL_SIZE) for _, lbl in yticks), default=0.0)
         y_tick_w = _TICK_LENGTH + _TICK_LABEL_GAP + y_label_w
+
+        # Corner text for a factored-out offset/multiplier. The x one sits on
+        # its own line under the tick labels; the y one rides above the plot,
+        # in the title band, which is the only space already above the axis.
+        if self._x_offset_text and not self._frame_off:
+            a, d = _th(scene, self._x_offset_text, _TICK_LABEL_SIZE, "body", t)
+            x_tick_h += _OFFSET_TEXT_GAP + a + d
+        offset_h = 0.0
+        if self._y_offset_text and not self._frame_off:
+            a, d = _th(scene, self._y_offset_text, _TICK_LABEL_SIZE, "body", t)
+            offset_h = a + d + _OFFSET_TEXT_GAP
 
         # `axis("off")` - which `pie` implies - draws no tick and no tick label,
         # so a reserved tick band is empty by construction: it only pushes the
@@ -1954,7 +1994,7 @@ class Axes(_AxesBase):
         if self._frame_off:
             x_tick_h = y_tick_w = 0.0
 
-        title_h = 0.0
+        title_h = offset_h
         title_font = _font(t.title_weight)
         label_font = _font(t.axis_label_weight)
         if self._title:
@@ -2267,6 +2307,23 @@ class Axes(_AxesBase):
             scene.add_path(
                 [(px + (_MINOR_LEN if inward else -_MINOR_LEN), y), (px, y)],
                 stroke_color=_SPINE, stroke_width=sw)
+
+        # Shared offset/multiplier, written once instead of on every label.
+        # The x term is right-aligned under the end of the axis and the y term
+        # sits above its top-left corner, which is where a reader looks for the
+        # units of the axis they just read.
+        if not self._frame_off and self._x_offset_text:
+            txt = self._x_offset_text
+            a, _d = _th(scene, txt, _TICK_LABEL_SIZE, "body", t)
+            ow = _tw(scene, txt, _TICK_LABEL_SIZE, "body", t)
+            baseline = (py + ph + _TICK_LENGTH + _TICK_LABEL_GAP
+                        + t_asc + t_desc + _OFFSET_TEXT_GAP + a)
+            _text(scene, px + pw - ow, baseline, txt, _TICK_LABEL_SIZE, _BLACK, "body", t)
+        if not self._frame_off and self._y_offset_text:
+            txt = self._y_offset_text
+            _a, d = _th(scene, txt, _TICK_LABEL_SIZE, "body", t)
+            _text(scene, px, py - _OFFSET_TEXT_GAP - d, txt, _TICK_LABEL_SIZE,
+                  _BLACK, "body", t)
 
         # Title, centered over the plot area.
         title_font = _font(t.title_weight)

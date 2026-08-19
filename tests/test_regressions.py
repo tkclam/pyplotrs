@@ -1580,6 +1580,25 @@ def test_contourf_uses_its_vmin_and_vmax():
     assert (m.vmin, m.vmax) == (-10.0, 10.0)
 
 
+def test_a_tiny_axis_span_keeps_its_scale(tmp_path):
+    """Every tick on a sub-microsecond axis used to read "0".
+
+    `decimals_for_step` answered 0 for any step below an absolute 1e-6
+    tolerance, and the tick *values* were then rounded to that - so five ticks
+    landed on the same number and carried the same label. A nanometre or
+    picoamp axis silently stopped saying anything.
+    """
+    fig, ax = pp.subplots(figsize=(280, 180))
+    ax.line([0.0, 1e-9, 2e-9], [0.0, 1.0, 0.5])
+    labels = ax.get_xticklabels()
+    assert len(set(labels)) == len(labels), f"duplicate tick labels: {labels}"
+    values = ax.get_xticks()
+    assert len(set(values)) == len(values), f"ticks collapsed onto {values}"
+    # And the shared exponent is stated once rather than printed per label.
+    fig.save(str(tmp_path / "tiny.png"))
+    assert ax._x_offset_text, "no multiplier drawn for a 1e-9 axis"
+
+
 def test_imshow_honors_a_piecewise_norm(tmp_path):
     """`imshow` substituted a plain linear norm for `TwoSlopeNorm`.
 
