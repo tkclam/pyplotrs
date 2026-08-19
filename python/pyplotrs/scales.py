@@ -158,11 +158,30 @@ class LinearScale(Scale):
         return nice_ticks(lo, hi, max_ticks)
 
 
+#: Below this magnitude a plain decimal cannot be written in the ten places
+#: `_fmt_plain` uses, so it switches to mathtext rather than rounding to zero.
+_PLAIN_MIN = 1e-10
+
+
 def _fmt_plain(v: float) -> str:
     """Format a tick value without an exponent, trimming trailing zeros
-    (e.g. ``2.0 -> "2"``, ``0.005 -> "0.005"``, ``-3.0 -> "−3"``)."""
+    (e.g. ``2.0 -> "2"``, ``0.005 -> "0.005"``, ``-3.0 -> "−3"``).
+
+    A value too small for ten decimal places falls back to a mathtext
+    mantissa/exponent instead. ``f"{1e-11:.10f}"`` is ``"0.0000000000"``,
+    which stripped down to ``"0"`` - so on a log axis spanning less than two
+    decades below 1e-10, where this labels the 1-2-3-5 subdivisions, every tick
+    came out reading ``0``.
+    """
     if v == int(v) and abs(v) < 1e16:
         return fix_minus(str(int(v)))
+    if v == v and 0.0 < abs(v) < _PLAIN_MIN:
+        k = math.floor(math.log10(abs(v)))
+        mant = v / 10.0 ** k
+        # The engine writes its own minus, so the sign stays ASCII here.
+        m = f"{mant:.6f}".rstrip("0").rstrip(".")
+        return _fmt_pow10(k) if m in ("1", "-1") and mant > 0 else \
+            f"${m}\\times10^{{{k}}}$"
     s = f"{v:.10f}".rstrip("0").rstrip(".")
     return fix_minus(s) if s else "0"
 
