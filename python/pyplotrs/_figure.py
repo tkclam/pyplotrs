@@ -41,7 +41,7 @@ from ._draw import (
     _th,
     _tw,
 )
-from ._util import _figsize_to_points, _matplotlib_hint
+from ._util import _figsize_to_points, _matplotlib_hint, _union_ranges
 from .axes import Axes
 from .axes3d import Axes3D
 from .mappable import Mappable
@@ -280,15 +280,23 @@ class Figure:
             )
 
         # Per-axes data ranges, optionally unified for shared axes.
+        #
+        # Through `_union_ranges`, which widens each axes' range to the union
+        # *while keeping the direction that axes asked for*. A plain min/max
+        # over the endpoints does not: it always returns ascending, so an axes
+        # set to `yinverted=True` inside a `sharey` figure was drawn ascending
+        # while `Axes.get_ylim()` - which goes through `_effective_ranges`, and
+        # has always used `_union_ranges` - still reported it descending. The
+        # two paths have to agree, and this is the one that draws.
         ranges = [ax._ranges() for ax in self.axes]
-        if self.sharex and ranges:
-            xlo = min(r[0][0] for r in ranges)
-            xhi = max(r[0][1] for r in ranges)
-            ranges = [((xlo, xhi), r[1]) for r in ranges]
-        if self.sharey and ranges:
-            ylo = min(r[1][0] for r in ranges)
-            yhi = max(r[1][1] for r in ranges)
-            ranges = [(r[0], (ylo, yhi)) for r in ranges]
+        if ranges and (self.sharex or self.sharey):
+            xs_all = [r[0] for r in ranges]
+            ys_all = [r[1] for r in ranges]
+            ranges = [
+                (_union_ranges(xr, xs_all) if self.sharex else xr,
+                 _union_ranges(yr, ys_all) if self.sharey else yr)
+                for xr, yr in ranges
+            ]
 
         # Measure bands + locate ticks for every axes (pre-layout).
         bands, xticks, yticks = [], [], []

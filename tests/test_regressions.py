@@ -1558,6 +1558,23 @@ def test_an_inverted_axis_flips_the_image_and_not_the_rect(kw, corners, tmp_path
     assert ops, f"{kw or 'plain'}: the PDF has no image at all"
 
 
+def test_a_shared_axis_keeps_its_inversion():
+    """`sharey` resolved the union with a plain min/max, which always returns
+    ascending - so an axes set to `yinverted` was drawn ascending while
+    `get_ylim()` still reported it descending."""
+    fig, axs = pp.subplots(1, 2, figsize=(300, 160), sharey=True)
+    axs[0].line([0, 1, 2], [0, 5, 2])
+    axs[1].line([0, 1, 2], [1, 3, 7])
+    axs[0].set(yinverted=True)
+
+    lo, hi = axs[0].get_ylim()
+    assert lo > hi, "get_ylim() no longer reports the inversion"
+    from pyplotrs._util import _union_ranges
+    ys = [ax._ranges()[1] for ax in fig.axes]
+    drawn = _union_ranges(ys[0], ys)
+    assert drawn[0] > drawn[1], f"the renderer drew {drawn}, losing the inversion"
+
+
 def test_long_category_labels_neither_overlap_nor_leave_the_page(tmp_path):
     """Flat tick labels wider than their spacing simply overprinted, and the
     outermost ones ran off the canvas: the x tick band reserves thickness, and
