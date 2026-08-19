@@ -50,6 +50,38 @@ from .text import plain as _plain
 from .theme import Theme
 
 
+def _wrap_to_width(scene, text: str, width: float, size: float, font: str,
+                   theme) -> str:
+    """``text`` broken onto as few lines as fit within ``width``.
+
+    Greedy on words, which is what a title wants: it keeps the break points
+    where a reader expects them and never splits a word. A single word too wide
+    to fit is left alone - hyphenating a species name or a formula would be
+    worse than the overhang, and there is nothing sensible to do with it.
+    Returns the text unchanged when it already fits, so the common case costs
+    one measurement.
+
+    A rich-text `Span` is returned untouched: its words carry per-run styling
+    that splitting on whitespace would drop.
+    """
+    if not isinstance(text, str):
+        return text
+    if width <= 0.0 or _tw(scene, text, size, font, theme) <= width:
+        return text
+    lines: list[str] = []
+    current = ""
+    for word in text.split():
+        trial = word if not current else f"{current} {word}"
+        if current and _tw(scene, trial, size, font, theme) > width:
+            lines.append(current)
+            current = word
+        else:
+            current = trial
+    if current:
+        lines.append(current)
+    return "\n".join(lines)
+
+
 def _css_rgba(c) -> str:
     """An RGBA tuple as a CSS color, dropping a fully opaque alpha."""
     r, g, b = c[0], c[1], c[2]
@@ -309,9 +341,18 @@ class Figure:
         _SUPTITLE_SIZE = self.theme.suptitle_size
         suptitle_h = 0.0
         suptitle_font = _font(self.theme.suptitle_weight)
-        if self.suptitle:
-            a, d = _th(scene, self.suptitle, _SUPTITLE_SIZE, suptitle_font, self.theme)
-            suptitle_h = a + d + _TITLE_GAP * 1.5
+        # A suptitle wider than the figure is wrapped rather than left to run
+        # off both ends. The band reserves height, never length, so an overlong
+        # one used to be drawn centered on a line wider than the page and cut
+        # at both edges - losing the first and last words with nothing said.
+        suptitle = self.suptitle
+        if suptitle:
+            suptitle = _wrap_to_width(
+                scene, suptitle, width - 2.0 * _OUTER_MARGIN,
+                _SUPTITLE_SIZE, suptitle_font, self.theme)
+            lines = suptitle.count("\n") + 1 if isinstance(suptitle, str) else 1
+            a, d = _th(scene, suptitle, _SUPTITLE_SIZE, suptitle_font, self.theme)
+            suptitle_h = (a + d) * lines + _TITLE_GAP * 1.5
 
         # Figure-level legend: measure its box up front so the layout can reserve
         # exactly the right-hand column it needs (never an overlay).
@@ -342,12 +383,14 @@ class Figure:
             if getattr(ax, "_has_extras", lambda: False)():
                 ax._draw_extras(scene, axl, xr, yr)
 
-        if self.suptitle:
-            a, _d = _th(scene, self.suptitle, _SUPTITLE_SIZE, suptitle_font, self.theme)
-            tw = _tw(scene, self.suptitle, _SUPTITLE_SIZE, suptitle_font, self.theme)
+        if suptitle:
+            a, d = _th(scene, suptitle, _SUPTITLE_SIZE, suptitle_font, self.theme)
             st = layout.suptitle
-            _text(scene, st.x + (st.w - tw) / 2.0, st.y + a, self.suptitle,
-                  _SUPTITLE_SIZE, self.theme.text_color, suptitle_font, self.theme)
+            parts = suptitle.split("\n") if isinstance(suptitle, str) else [suptitle]
+            for i, line in enumerate(parts):
+                tw = _tw(scene, line, _SUPTITLE_SIZE, suptitle_font, self.theme)
+                _text(scene, st.x + (st.w - tw) / 2.0, st.y + a + i * (a + d), line,
+                      _SUPTITLE_SIZE, self.theme.text_color, suptitle_font, self.theme)
 
         if legend_mt is not None:
             lr = layout.legend

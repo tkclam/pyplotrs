@@ -1615,6 +1615,22 @@ def test_long_category_labels_neither_overlap_nor_leave_the_page(tmp_path):
         assert a1 >= b0 - 0.5, f"{t0!r} and {t1!r} still overlap"
 
 
+def test_an_overlong_suptitle_wraps_instead_of_being_cut(tmp_path):
+    """The suptitle band reserves height, never length, so a title wider than
+    the page was centered on a line wider than the page and clipped at both
+    ends - losing the first and last words with nothing said."""
+    fig, ax = pp.subplots(figsize=(240, 150))
+    ax.line([0, 1], [0, 1])
+    fig.set(suptitle="An overly long figure suptitle describing the whole experiment")
+    out = tmp_path / "sup.svg"
+    fig.save(str(out))
+
+    texts = [s for _x, _y, s in _parse_texts(out.read_text())]
+    joined = " ".join(texts)
+    assert "An overly" in joined and "experiment" in joined, (
+        f"the suptitle lost words at one end or the other: {texts}")
+
+
 def test_svg_states_its_size_in_points(tmp_path):
     """`width="200"` is 200 CSS px = 2.08 in, while the PDF page is 200 pt =
     2.78 in - so the same figure was published at 75% of its size in SVG, and
