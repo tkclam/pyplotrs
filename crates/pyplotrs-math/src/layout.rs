@@ -1814,15 +1814,35 @@ fn kern_layout(w: f32) -> Layout {
 }
 
 /// A shaped, kerned body-font run (for non-math segments and `\text`).
-pub(crate) fn shaped_text_layout(font: &FontData, s: &str, size: f32) -> Layout {
-    let run = pyplotrs_text::shape_text(font, s, size);
-    let w = pyplotrs_text::run_width(&run);
-    let vm = pyplotrs_text::font_vmetrics(font, size);
+/// A plain (non-math) span, shaped with `font` and whatever of `fallbacks`
+/// is needed for characters `font` cannot draw.
+///
+/// One `Draw` per resulting run. `shape_with_fallback` keeps glyph positions
+/// absolute across the whole span, so every run is placed at the same origin
+/// and the pieces line up without any bookkeeping here. The band is the
+/// deepest of the faces actually used - a fallback face is rarely metrically
+/// compatible with the body one, and sizing the band from the body alone
+/// would clip whatever the fallback drew.
+pub(crate) fn shaped_text_layout(
+    font: &FontData,
+    fallbacks: &[FontData],
+    s: &str,
+    size: f32,
+) -> Layout {
+    let runs = pyplotrs_text::shape_with_fallback(font, fallbacks, s, size);
+    let w = runs.iter().map(pyplotrs_text::run_width).sum::<f32>();
+    let mut ascent = 0.0f32;
+    let mut depth = 0.0f32;
+    for r in &runs {
+        let vm = pyplotrs_text::font_vmetrics(&r.font, size);
+        ascent = ascent.max(vm.ascent);
+        depth = depth.max(vm.descent);
+    }
     Layout {
         width: w,
-        ascent: vm.ascent,
-        depth: vm.descent,
-        draws: vec![Draw::text(0.0, 0.0, run)],
+        ascent,
+        depth,
+        draws: runs.into_iter().map(|r| Draw::text(0.0, 0.0, r)).collect(),
         ..Default::default()
     }
 }

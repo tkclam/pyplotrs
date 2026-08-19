@@ -1569,3 +1569,22 @@ def test_svg_states_its_size_in_points(tmp_path):
     assert 'width="200pt"' in head and 'height="150pt"' in head, (
         f"SVG size is unitless (CSS px), not points: {head[:200]}")
     assert 'viewBox="0 0 200 150"' in head, "the user-unit grid should stay 1:1"
+
+
+def test_a_label_outside_the_body_font_still_draws(tmp_path):
+    """Any character the body face lacked was shaped to glyph 0 and drawn as a
+    `.notdef` box - `℃` and `⟨x⟩` are ordinary in a physics label - and in the
+    PDF they all collapsed onto one `ToUnicode` entry, so copying the label
+    back out lost every one but the first."""
+    label = "℃ and ⟨x⟩"
+    fig, ax = pp.subplots(figsize=(300, 200))
+    ax.set(xlabel=label)
+    out = tmp_path / "uni.svg"
+    fig.save(str(out))
+    svg = out.read_text()
+
+    drawn = "".join(s for _x, _y, s in _parse_texts(svg))
+    for ch in "℃⟨⟩":
+        assert ch in drawn, f"{ch!r} was not drawn at all"
+    # More than one face means the fallback chain actually engaged.
+    assert svg.count("@font-face") >= 2, "no fallback face was embedded"

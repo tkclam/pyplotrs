@@ -323,7 +323,11 @@ fn math_fonts<'a>(math: &'a FontData, body: &'a [FontData; 4], kind: &str) -> Ma
     let fonts = MathFonts::new(math, &body[0], &body[1], &body[2], &body[3])
         .with_symbols(math_symbol_font())
         .with_ambient(FaceStyle::from_selector(kind).into())
-        .with_fontset(set);
+        .with_fontset(set)
+        // Plain runs inside a label - which is most of every label - fall back
+        // per character to whatever the host has, rather than drawing a
+        // `.notdef` box for anything Arial or Liberation Sans lacks.
+        .with_text_fallbacks(fallback_faces());
     // Under `sans` the primary math font is the sans one and STIX backs it for
     // the alphabets and symbols it lacks. Under `stix` there is no fallback:
     // that font set promises one face for the whole span.
@@ -421,6 +425,55 @@ fn font_for_kind(kind: &str) -> FontData {
         "body" => body_font(),
         other => resolve_body(FaceStyle::from_selector(other)).data,
     }
+}
+
+/// Faces to try, in order, for characters the body font cannot draw.
+///
+/// The body font is chosen for the *plot*, not for the alphabet: Arial and
+/// Liberation Sans between them cover Latin, Greek and Cyrillic and nothing
+/// else, so `℃`, `⟨x⟩` or a CJK unit came out as `.notdef` boxes. Rather than
+/// pick a fixed list of families - which would be wrong on every machine that
+/// does not have them - this asks the host database for whatever it has, in
+/// rough order of usefulness for a scientific label: the bundled math and
+/// symbol faces first (they carry most of the technical repertoire), then any
+/// broad-coverage families the host happens to install.
+///
+/// Built once and cached: it is only consulted when a glyph is actually
+/// missing, which for an ordinary figure is never.
+static FALLBACK_FACES: OnceLock<Vec<FontData>> = OnceLock::new();
+
+fn fallback_faces() -> &'static [FontData] {
+    FALLBACK_FACES.get_or_init(|| {
+        let mut out = vec![math_font().clone()];
+        let db = font_db();
+        for fam in [
+            "DejaVu Sans",
+            "Noto Sans Symbols 2",
+            "Noto Sans Symbols",
+            "Noto Sans Math",
+            "Segoe UI Symbol",
+            "Symbola",
+            "FreeSerif",
+            "Noto Sans CJK JP",
+            "Noto Sans",
+            "Arial Unicode MS",
+        ] {
+            let query = Query {
+                families: &[Family::Name(fam)],
+                weight: Weight::NORMAL,
+                stretch: Stretch::Normal,
+                style: Style::Normal,
+            };
+            if let Some(id) = db.query(&query) {
+                if let Some(data) = db.with_face_data(id, |bytes, index| {
+                    FontData::from_bytes(bytes.to_vec(), index)
+                }) {
+                    out.push(data);
+                }
+            }
+        }
+        out
+    })
 }
 
 fn color_from_rgba(rgba: (u8, u8, u8, u8)) -> Color {
@@ -1618,10 +1671,15 @@ impl Scene {
         color: (u8, u8, u8, u8),
         font: &str,
     ) {
-        let run = pyplotrs_text::shape_text(&font_for_kind(font), text, size as f32);
+        let runs = pyplotrs_text::shape_with_fallback(
+            &font_for_kind(font),
+            fallback_faces(),
+            text,
+            size as f32,
+        );
         self.push_node(Node::Text(TextNode {
             origin: Point::new(x, y),
-            runs: vec![run],
+            runs,
             color: color_from_rgba(color),
         }));
     }

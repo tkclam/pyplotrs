@@ -16,6 +16,138 @@ pub fn load_font_file(path: &Path) -> std::io::Result<FontData> {
     Ok(FontData::from_bytes(data, 0))
 }
 
+/// Characters in `text` that `font` has no glyph for.
+///
+/// Shaping such a character yields glyph 0, which every backend faithfully
+/// draws as the font's `.notdef` box - so `℃` or `⟨x⟩` in an axis label comes
+/// out as an empty rectangle, and nothing says so. Worse in the PDF, where
+/// several distinct missing characters share the one glyph and therefore
+/// collapse to a single `ToUnicode` entry, so copying the label out loses all
+/// but one of them.
+pub fn missing_glyphs(font: &FontData, text: &str) -> Vec<char> {
+    let visible = || -> Vec<char> {
+        let mut v: Vec<char> = Vec::new();
+        for ch in text.chars() {
+            if !ch.is_whitespace() && !ch.is_control() && !v.contains(&ch) {
+                v.push(ch);
+            }
+        }
+        v
+    };
+    // A face that will not parse covers *nothing*. Reporting "nothing missing"
+    // here would make every caller believe an unusable font could draw the
+    // text, which is the opposite of what the answer means.
+    let Some(face) = Face::from_slice(&font.data, font.index) else {
+        return visible();
+    };
+    let mut out = Vec::new();
+    for ch in text.chars() {
+        // Whitespace and control characters legitimately have no outline.
+        if ch.is_whitespace() || ch.is_control() {
+            continue;
+        }
+        if face.glyph_index(ch).is_none() && !out.contains(&ch) {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// Whether `font` can draw every (visible) character of `text`.
+fn covers(font: &FontData, text: &str) -> bool {
+    missing_glyphs(font, text).is_empty()
+}
+
+/// Shape `text` into one run per covering face, walking `primary` then each of
+/// `fallbacks` in turn.
+///
+/// Consecutive characters that resolve to the same face are shaped together,
+/// so kerning and ligatures inside a run are unaffected; only a real coverage
+/// boundary splits one. Glyph positions stay **absolute from the text node's
+/// origin** across every run, which is what all three backends already assume.
+///
+/// Characters no face covers stay on the primary and draw as `.notdef`; there
+/// is nothing better to draw, and [`missing_glyphs`] is how a caller finds out
+/// it happened.
+pub fn shape_with_fallback(
+    primary: &FontData,
+    fallbacks: &[FontData],
+    text: &str,
+    size: f32,
+) -> Vec<GlyphRun> {
+    if text.is_empty() || covers(primary, text) {
+        return vec![shape_text(primary, text, size)];
+    }
+    // Which face draws each character, as an index into [primary, fallbacks..].
+    let face_for = |ch: char| -> usize {
+        let s = ch.to_string();
+        if covers(primary, &s) {
+            return 0;
+        }
+        fallbacks
+            .iter()
+            .position(|f| covers(f, &s))
+            .map_or(0, |i| i + 1)
+    };
+    let pick = |i: usize| -> &FontData {
+        if i == 0 {
+            primary
+        } else {
+            &fallbacks[i - 1]
+        }
+    };
+
+    let mut runs = Vec::new();
+    let mut cursor = 0.0f32;
+    let mut start = 0usize;
+    let mut current: Option<usize> = None;
+    // A run break is emitted at every coverage change, plus one at the end.
+    let mut flush = |start: usize, end: usize, which: usize, cursor: &mut f32| {
+        if start >= end {
+            return;
+        }
+        let mut run = shape_text(pick(which), &text[start..end], size);
+        // Only the *positions* are global. `source_text` stays the run's own
+        // slice, with its clusters relative to it, because that is what every
+        // backend reads: the PDF maps each glyph to `source_text[cluster..]`
+        // for its ToUnicode, and the SVG writes `source_text` as the element's
+        // content. Handing each run the whole label instead put the label into
+        // the text layer once per run, so extracting it gave "temperature 温度
+        // test温度 test est".
+        for g in &mut run.glyphs {
+            g.x += *cursor;
+        }
+        *cursor += run.glyphs.iter().map(|g| g.advance).sum::<f32>();
+        runs.push(run);
+    };
+
+    for (i, ch) in text.char_indices() {
+        let which = if ch.is_whitespace() || ch.is_control() {
+            // Neutral: it stays with whatever run it is in rather than
+            // splitting one in two around a space.
+            current.unwrap_or(0)
+        } else {
+            face_for(ch)
+        };
+        match current {
+            Some(c) if c == which => {}
+            Some(c) => {
+                flush(start, i, c, &mut cursor);
+                start = i;
+                current = Some(which);
+            }
+            None => current = Some(which),
+        }
+    }
+    if let Some(c) = current {
+        flush(start, text.len(), c, &mut cursor);
+    }
+    if runs.is_empty() {
+        runs.push(shape_text(primary, text, size));
+    }
+    runs
+}
+
 /// Shape `text` at the given `size` (in points) using `font`, returning a
 /// [`GlyphRun`] with absolute glyph positions/advances scaled to `size`.
 pub fn shape_text(font: &FontData, text: &str, size: f32) -> GlyphRun {

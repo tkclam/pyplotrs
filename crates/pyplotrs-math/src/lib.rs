@@ -71,11 +71,24 @@ pub struct MathFonts<'a> {
     /// A second math font for what the primary one has no glyph for. See
     /// [`Self::with_math_fallback`].
     fallback: Option<&'a FontData>,
+    /// Faces tried, in order, for characters of a *plain* span that the body
+    /// face cannot draw. See [`Self::with_text_fallbacks`].
+    text_fallbacks: &'a [FontData],
     ambient: FaceStyle,
     fontset: FontSet,
 }
 
 impl<'a> MathFonts<'a> {
+    /// Faces to try for characters of a plain span the body face lacks.
+    ///
+    /// Without them a missing character is shaped to glyph 0 and drawn as the
+    /// font's `.notdef` box - so `℃` or a CJK unit in an axis label came out
+    /// as an empty rectangle, in a figure that otherwise looked finished.
+    pub fn with_text_fallbacks(mut self, faces: &'a [FontData]) -> Self {
+        self.text_fallbacks = faces;
+        self
+    }
+
     /// The math font plus the four body faces. `ambient` defaults to regular
     /// and `fontset` to [`FontSet::Sans`]; see [`Self::with_ambient`] and
     /// [`Self::with_fontset`].
@@ -103,6 +116,7 @@ impl<'a> MathFonts<'a> {
             body,
             symbols: None,
             fallback: None,
+            text_fallbacks: &[],
             ambient: FaceStyle::default(),
             fontset: FontSet::default(),
         }
@@ -213,7 +227,7 @@ fn build_layout(fonts: &MathFonts, s: &str, size: f32) -> Layout {
     let segs = split_segments(s);
     // Fast path: no math at all -> one shaped body run (kept kerned/editable).
     if !s.contains('$') || mf.is_none() {
-        return layout::shaped_text_layout(ambient, s, size);
+        return layout::shaped_text_layout(ambient, fonts.text_fallbacks, s, size);
     }
     let mf = mf.unwrap();
     let fallback = fonts
@@ -228,7 +242,12 @@ fn build_layout(fonts: &MathFonts, s: &str, size: f32) -> Layout {
             let engine = layout::Engine::new(&mf, fallback.as_ref(), fonts, &seg);
             parts.push(engine.layout(size));
         } else {
-            parts.push(layout::shaped_text_layout(ambient, &seg, size));
+            parts.push(layout::shaped_text_layout(
+                ambient,
+                fonts.text_fallbacks,
+                &seg,
+                size,
+            ));
         }
     }
     if parts.len() == 1 {
