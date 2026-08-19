@@ -199,9 +199,11 @@ fn render_text(pixmap: &mut PixmapMut, text: &TextNode, transform: Affine, clip:
     }
 }
 
-/// Sub-pixel phases per axis for marker sprite stamping. P=4 keeps every
-/// stamped marker within 0.125px of its true position (sub-pixel, imperceptible)
-/// while avoiding a per-marker path scan-conversion.
+/// Sub-pixel phases per axis for marker sprite stamping. At 8 phases every
+/// stamped marker lands within 1/16 px of its true position - sub-pixel, and
+/// well inside a rasterizer's own antialiasing - while avoiding a per-marker
+/// path scan-conversion. (The comment here used to describe P=4 and a 0.125 px
+/// bound, neither of which matched the value below.)
 const STAMP_PHASES: i32 = 8;
 /// Only stamp when there are enough markers to amortize the per-phase tile
 /// setup, and each marker is small enough that a tile blit beats a path fill.
@@ -570,12 +572,19 @@ fn image_pixmap(im: &ImageNode, grid: (u32, u32)) -> Option<Pixmap> {
     let data = resampled.as_ref().unwrap_or(&im.data);
     let size = IntSize::from_wh(data.width, data.height)?;
     // tiny-skia stores premultiplied RGBA; our IR carries straight RGBA.
+    //
+    // Rounded, not truncated. `c * a / 255` in integers throws away the
+    // remainder, so every semi-transparent image pixel came out up to one
+    // level darker here than the same pixel in the PDF or SVG, where the
+    // viewer does the multiply in floating point. One level is invisible on
+    // its own and is still a difference between backends of the same figure -
+    // and `+ 127` costs nothing.
     let mut px = (*data.rgba).clone();
     for p in px.chunks_exact_mut(4) {
         let a = p[3] as u16;
-        p[0] = (p[0] as u16 * a / 255) as u8;
-        p[1] = (p[1] as u16 * a / 255) as u8;
-        p[2] = (p[2] as u16 * a / 255) as u8;
+        p[0] = ((p[0] as u16 * a + 127) / 255) as u8;
+        p[1] = ((p[1] as u16 * a + 127) / 255) as u8;
+        p[2] = ((p[2] as u16 * a + 127) / 255) as u8;
     }
     Pixmap::from_vec(px, size)
 }

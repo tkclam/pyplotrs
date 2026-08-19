@@ -373,16 +373,139 @@ pub fn resample_rgba(src: &[u8], sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u8> 
     out
 }
 
+/// Resample a normalized colormap-position field and look the result up.
+///
+/// The averaging happens on `t` - the position on the color axis - and the
+/// colormap is applied afterwards, so every output pixel is a color the map
+/// actually assigns to some value. Averaging the RGBA instead produces colors
+/// between two entries of the table, which is to say colors that appear
+/// nowhere on the figure's own colorbar. See [`pyplotrs_core::ColorField`].
+///
+/// Masked samples (`NaN`) contribute nothing. Coverage is tracked alongside
+/// the sum, exactly as premultiplied alpha is in [`resample_rgba`], so a
+/// destination sample straddling the edge of the data comes out partly
+/// transparent rather than dragged toward an arbitrary value.
+pub fn resample_field(
+    t: &[f32],
+    sw: u32,
+    sh: u32,
+    dw: u32,
+    dh: u32,
+    lut: &[u8],
+) -> Option<Vec<u8>> {
+    if sw == 0 || sh == 0 || dw == 0 || dh == 0 {
+        return None;
+    }
+    if t.len() != (sw as usize) * (sh as usize) || lut.len() != 256 * 4 {
+        return None;
+    }
+    // Channel 0 carries `t` weighted by coverage, channel 1 the coverage.
+    let load = |v: f32| -> [f32; 4] {
+        if v.is_finite() {
+            [v, 1.0, 0.0, 0.0]
+        } else {
+            [0.0; 4]
+        }
+    };
+    let xt = AxisTaps::box_filter(sw, dw);
+    let yt = AxisTaps::box_filter(sh, dh);
+    let mut mid = vec![0.0f32; (dw as usize) * (sh as usize) * 4];
+    scale_x(
+        |i| load(t[i]),
+        sw,
+        sh,
+        dw,
+        &xt,
+        |i, p| store_plane(&mut mid, i, p),
+    );
+    let mut out = vec![0u8; (dw as usize) * (dh as usize) * 4];
+    scale_y(
+        |i| plane_pixel(&mid, i),
+        dw,
+        dh,
+        &yt,
+        |i, p| {
+            let cov = p[1];
+            let o = i * 4;
+            if cov <= 0.0 {
+                return; // fully masked: leave it clear
+            }
+            let tv = (p[0] / cov).clamp(0.0, 1.0);
+            let k = ((tv * 255.0).round() as usize).min(255) * 4;
+            out[o] = lut[k];
+            out[o + 1] = lut[k + 1];
+            out[o + 2] = lut[k + 2];
+            out[o + 3] = (f32::from(lut[k + 3]) * cov + 0.5).clamp(0.0, 255.0) as u8;
+        },
+    );
+    Some(out)
+}
+
 impl ImageData {
-    /// This image resampled onto a `w` x `h` grid, per [`resample_rgba`]. Pair
-    /// it with [`target_grid`] or [`vector_grid`] to pick that grid.
+    /// This image resampled onto a `w` x `h` grid. A colormapped image (one
+    /// carrying a [`pyplotrs_core::ColorField`]) resamples its **data** and
+    /// re-applies the colormap; anything else falls back to [`resample_rgba`]
+    /// on the pixels. Pair it with [`target_grid`] or [`vector_grid`] to pick
+    /// that grid.
     pub fn resampled_to(&self, w: u32, h: u32) -> ImageData {
+        if let Some(field) = &self.field {
+            if let Some(rgba) = resample_field(&field.t, self.width, self.height, w, h, &field.lut)
+            {
+                let mut out = ImageData::from_rgba8(rgba, w, h);
+                // The resampled field travels with the pixels, so a second
+                // resample (raster caches one grid, vector another) still
+                // averages data rather than the colors of the first pass.
+                if let Some(t) = resample_field_plane(&field.t, self.width, self.height, w, h) {
+                    out = out.with_field(t, (*field.lut).clone());
+                }
+                return out;
+            }
+        }
         ImageData::from_rgba8(
             resample_rgba(&self.rgba, self.width, self.height, w, h),
             w,
             h,
         )
     }
+}
+
+/// The `t` plane alone, resampled the same way [`resample_field`] does, with
+/// fully-masked destination samples staying `NaN`.
+fn resample_field_plane(t: &[f32], sw: u32, sh: u32, dw: u32, dh: u32) -> Option<Vec<f32>> {
+    if sw == 0 || sh == 0 || dw == 0 || dh == 0 || t.len() != (sw as usize) * (sh as usize) {
+        return None;
+    }
+    let load = |v: f32| -> [f32; 4] {
+        if v.is_finite() {
+            [v, 1.0, 0.0, 0.0]
+        } else {
+            [0.0; 4]
+        }
+    };
+    let xt = AxisTaps::box_filter(sw, dw);
+    let yt = AxisTaps::box_filter(sh, dh);
+    let mut mid = vec![0.0f32; (dw as usize) * (sh as usize) * 4];
+    scale_x(
+        |i| load(t[i]),
+        sw,
+        sh,
+        dw,
+        &xt,
+        |i, p| store_plane(&mut mid, i, p),
+    );
+    let mut out = vec![f32::NAN; (dw as usize) * (dh as usize)];
+    scale_y(
+        |i| plane_pixel(&mid, i),
+        dw,
+        dh,
+        &yt,
+        |i, p| {
+            if p[1] > 0.0 {
+                out[i] = (p[0] / p[1]).clamp(0.0, 1.0);
+            }
+        },
+    );
+    Some(out)
 }
 
 /// The device lengths of `rect`'s own x and y edges under `transform`.
@@ -589,6 +712,90 @@ mod tests {
         // ...but a coarse axis still gets magnified.
         let (w, _) = vector_grid(40, 256, 400.0, 250.0).unwrap();
         assert!(w > 40);
+    }
+
+    /// A viridis-like table: two far-apart entries whose RGB midpoint is not
+    /// itself in the table.
+    fn two_tone_lut() -> Vec<u8> {
+        let mut lut = vec![0u8; 256 * 4];
+        for i in 0..256 {
+            // A hard step at the middle, so an averaged *color* lands on a
+            // gray that the table contains nowhere.
+            let (r, g, b) = if i < 128 {
+                (0u8, 0u8, 255u8)
+            } else {
+                (255, 255, 0)
+            };
+            lut[i * 4] = r;
+            lut[i * 4 + 1] = g;
+            lut[i * 4 + 2] = b;
+            lut[i * 4 + 3] = 255;
+        }
+        lut
+    }
+
+    /// Reducing a colormapped image must produce colors the colormap actually
+    /// assigns. Averaging the RGBA instead gives the mean of two table entries,
+    /// which for a stepped map is a color that appears nowhere on the colorbar
+    /// - so a reader matching a pixel against the bar gets no answer.
+    #[test]
+    fn reducing_a_field_stays_on_the_colormap() {
+        let lut = two_tone_lut();
+        // Two source samples straddling the step, reduced onto one pixel.
+        let t = vec![0.0f32, 1.0];
+        let out = resample_field(&t, 2, 1, 1, 1, &lut).expect("resampled");
+        assert_eq!(out.len(), 4);
+        let px = (out[0], out[1], out[2]);
+        // Mean t = 0.5 -> index 128 -> the upper entry, which is on the map.
+        assert_eq!(
+            px,
+            (255, 255, 0),
+            "resampled pixel {px:?} is not a table entry"
+        );
+
+        // What averaging the *colors* would have given, for contrast.
+        let rgba = [0u8, 0, 255, 255, 255, 255, 0, 255];
+        let naive = resample_rgba(&rgba, 2, 1, 1, 1);
+        assert_eq!(
+            (naive[0], naive[1], naive[2]),
+            (128, 128, 128),
+            "the color-space average is the gray this test exists to avoid"
+        );
+    }
+
+    /// A masked sample lowers coverage instead of pulling its neighbours
+    /// toward an arbitrary value.
+    #[test]
+    fn a_masked_field_sample_only_lowers_coverage() {
+        let lut = two_tone_lut();
+        let t = vec![1.0f32, f32::NAN];
+        let out = resample_field(&t, 2, 1, 1, 1, &lut).expect("resampled");
+        assert_eq!((out[0], out[1], out[2]), (255, 255, 0), "value was dragged");
+        assert!(
+            (120..=134).contains(&out[3]),
+            "half-masked pixel should be about half covered, got alpha {}",
+            out[3]
+        );
+
+        // Fully masked stays clear.
+        let all_nan = vec![f32::NAN; 2];
+        let out = resample_field(&all_nan, 2, 1, 1, 1, &lut).expect("resampled");
+        assert_eq!(out[3], 0, "a fully masked pixel must stay transparent");
+    }
+
+    /// The field travels with the pixels, so a second resample still averages
+    /// data rather than the colors the first pass produced.
+    #[test]
+    fn a_resampled_image_keeps_its_field() {
+        let lut = two_tone_lut();
+        let img =
+            ImageData::from_rgba8(vec![0u8; 4 * 4 * 4], 4, 4).with_field(vec![0.5f32; 16], lut);
+        let once = img.resampled_to(2, 2);
+        assert!(once.field.is_some(), "the field was dropped on resample");
+        let twice = once.resampled_to(1, 1);
+        assert!(twice.field.is_some());
+        let t = twice.field.as_ref().unwrap().t[0];
+        assert!((t - 0.5).abs() < 1e-6, "field drifted to {t}");
     }
 
     #[test]

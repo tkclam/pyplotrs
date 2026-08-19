@@ -719,16 +719,23 @@ impl<'a> ColorMapper<'a> {
         }
     }
 
-    /// RGBA for one value, or `None` when it falls outside the norm's domain
-    /// (a non-positive value on a log scale, or a NaN) and should be left clear.
+    /// The position on the color axis for one value, or `None` when it falls
+    /// outside the norm's domain (a non-positive value on a log scale, or a
+    /// NaN) and should be left clear.
     #[inline]
-    fn lookup(&self, v: f64) -> Option<(u8, u8, u8, u8)> {
+    fn position(&self, v: f64) -> Option<f32> {
         let t = apply_scale(self.norm, v);
         if !t.is_finite() {
             return None;
         }
-        let frac = ((t - self.tmin) / self.span).clamp(0.0, 1.0);
-        let i = ((frac * 255.0).round() as usize) * 4;
+        Some(((t - self.tmin) / self.span).clamp(0.0, 1.0) as f32)
+    }
+
+    /// RGBA for one value, or `None` outside the domain - see [`position`].
+    #[inline]
+    fn lookup(&self, v: f64) -> Option<(u8, u8, u8, u8)> {
+        let frac = self.position(v)?;
+        let i = ((frac * 255.0).round() as usize).min(255) * 4;
         Some((
             self.lut[i],
             self.lut[i + 1],
@@ -1568,24 +1575,32 @@ impl Scene {
         let hi = height as usize;
         let mapper = ColorMapper::new(&lut, norm, vmin, vmax);
         let mut buf = vec![0u8; wi * hi * 4];
+        // The normalized positions are kept beside the pixels so a later
+        // resample can average *these* and colormap the result, instead of
+        // averaging colors into shades the map never assigns. See
+        // `pyplotrs_core::ColorField`.
+        let mut plane = vec![f32::NAN; wi * hi];
         for row in 0..hi {
             let drow = if origin_upper { row } else { hi - 1 - row };
             let src = drow * wi;
             let dst = row * wi * 4;
             for col in 0..wi {
                 let dcol = if flip_x { wi - 1 - col } else { col };
-                // Out-of-domain samples keep RGBA = 0, i.e. transparent.
-                if let Some((r, g, b, a)) = mapper.lookup(values[src + dcol]) {
+                // Out-of-domain samples keep RGBA = 0, i.e. transparent, and
+                // stay NaN in the plane so they mask rather than average in.
+                if let Some(t) = mapper.position(values[src + dcol]) {
+                    plane[row * wi + col] = t;
+                    let i = ((t * 255.0).round() as usize).min(255) * 4;
                     let o = dst + col * 4;
-                    buf[o] = r;
-                    buf[o + 1] = g;
-                    buf[o + 2] = b;
-                    buf[o + 3] = a;
+                    buf[o] = lut[i];
+                    buf[o + 1] = lut[i + 1];
+                    buf[o + 2] = lut[i + 2];
+                    buf[o + 3] = lut[i + 3];
                 }
             }
         }
         self.push_node(Node::Image(ImageNode::new(
-            ImageData::from_rgba8(buf, width, height),
+            ImageData::from_rgba8(buf, width, height).with_field(plane, lut),
             KRect::new(x, y, x + w, y + h),
         )));
     }

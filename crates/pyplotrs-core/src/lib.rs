@@ -181,6 +181,30 @@ pub struct TextNode {
     pub color: Color,
 }
 
+/// The scalar field a colormapped image was built from, kept alongside the
+/// pixels so a resample can average the **data** rather than the colors.
+///
+/// Reducing a heatmap - which every vector export does, and most raster ones -
+/// averages neighbouring samples. Doing that to the RGBA is not the same
+/// operation as doing it to the data and colormapping the result, because a
+/// colormap is not linear: on `viridis` the mean of the colors for 0.0 and 1.0
+/// is a muddy blue-green that the map assigns to no value at all, so a reduced
+/// field showed pixel colors that appear nowhere on its own colorbar, and a
+/// reader matching a color against the bar got no answer. Averaging `t` and
+/// *then* looking up keeps every output pixel on the colormap.
+///
+/// `t` is the already-normalized position on the color axis, not the raw
+/// value, so the norm does not have to be re-run (and a log norm averages in
+/// log space, which is the right mean for one). Non-finite entries are masked:
+/// they contribute nothing and lower the coverage of the samples around them.
+#[derive(Debug, Clone)]
+pub struct ColorField {
+    /// `width * height` normalized positions in `[0, 1]`; NaN = masked.
+    pub t: Arc<Vec<f32>>,
+    /// The 256-entry RGBA lookup table `t` is read through.
+    pub lut: Arc<Vec<u8>>,
+}
+
 /// Raw RGBA8 pixel data for an image, shared by reference.
 #[derive(Debug, Clone)]
 pub struct ImageData {
@@ -188,6 +212,10 @@ pub struct ImageData {
     pub rgba: Arc<Vec<u8>>,
     pub width: u32,
     pub height: u32,
+    /// Present for a colormapped image; see [`ColorField`]. `None` for a raw
+    /// RGBA image (a contour fill, an embedded bitmap), which has no data
+    /// behind its pixels to average instead.
+    pub field: Option<ColorField>,
 }
 
 impl ImageData {
@@ -197,7 +225,19 @@ impl ImageData {
             rgba: Arc::new(rgba),
             width,
             height,
+            field: None,
         }
+    }
+
+    /// Same pixels, plus the field they were colormapped from.
+    pub fn with_field(mut self, t: Vec<f32>, lut: Vec<u8>) -> Self {
+        debug_assert_eq!(t.len(), (self.width as usize) * (self.height as usize));
+        debug_assert_eq!(lut.len(), 256 * 4);
+        self.field = Some(ColorField {
+            t: Arc::new(t),
+            lut: Arc::new(lut),
+        });
+        self
     }
 
     pub fn key(&self) -> *const Vec<u8> {
