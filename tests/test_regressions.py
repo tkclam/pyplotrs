@@ -1571,6 +1571,72 @@ def test_svg_states_its_size_in_points(tmp_path):
     assert 'viewBox="0 0 200 150"' in head, "the user-unit grid should stay 1:1"
 
 
+def test_imshow_honors_a_piecewise_norm(tmp_path):
+    """`imshow` substituted a plain linear norm for `TwoSlopeNorm`.
+
+    It told the colorbar to do the same, so the two agreed with each other and
+    neither agreed with the caller: on a diverging map the neutral color moved
+    off `vcenter`, which inverts the sign a reader assigns to every value
+    between the true center and the substituted one. `scatter` honored the same
+    norm correctly, so one figure could contradict itself.
+    """
+    from pyplotrs import norms
+
+    fig, ax = pp.subplots(figsize=(160, 60))
+    n = norms.TwoSlopeNorm(0.0, -1.0, 4.0)
+    m = ax.imshow([[-1.0, 0.0, 1.0, 4.0]], cmap="coolwarm", norm=n)
+    out = tmp_path / "norm.svg"
+    fig.save(str(out))
+
+    w, _h, rows = _svg_image(out.read_text())
+    row = rows[0]
+    cells = [tuple(row[int(w * (k + 0.5) / 4) * 4:int(w * (k + 0.5) / 4) * 4 + 3])
+             for k in range(4)]
+    cmap = pp.get_cmap("coolwarm")
+    # Value 0.0 is `vcenter`, so it must be the map's midpoint.
+    assert cells[1] == cmap(0.5)[:3], (
+        f"vcenter drew as {cells[1]}, not the neutral {cmap(0.5)[:3]}")
+    assert m.norm is n, "the colorbar was handed a different norm than the image"
+
+
+def test_colormapped_scatter_honors_alpha(tmp_path):
+    """`scatter(c=..., alpha=...)` dropped the alpha entirely.
+
+    `alpha` was folded into the color only on the non-colormapped branch, so
+    the standard way to show density in an overplotted cloud drew fully opaque
+    points - a dense region took the color of whichever point happened to be
+    last rather than a blend.
+    """
+    fig, ax = pp.subplots(figsize=(160, 160))
+    ax.scatter([1, 2, 3], [1, 2, 3], c=[0.0, 0.5, 1.0], cmap="viridis", alpha=0.3)
+    out = tmp_path / "sc.svg"
+    fig.save(str(out))
+    groups = re.findall(r'<g fill="#[0-9a-f]{6}"([^>]*)>', out.read_text())
+    assert any("fill-opacity" in g for g in groups), (
+        "no group carries fill-opacity, so alpha was lost")
+
+
+@pytest.mark.parametrize("norm_name", ["Normalize", "TwoSlopeNorm", "BoundaryNorm"])
+def test_nan_is_transparent_under_every_norm(norm_name):
+    """NaN took the *maximum* color under `TwoSlopeNorm`.
+
+    Norms without a Rust transform fell back to `cmap(norm(v))` in Python,
+    where NaN met `min`/`max` clamping: `TwoSlopeNorm` returned 1.0, so missing
+    data was painted as the strongest positive anomaly on a diverging map - the
+    single most misleading value it could take.
+    """
+    from pyplotrs import _draw, norms
+
+    made = {
+        "Normalize": norms.Normalize(-1.0, 1.0),
+        "TwoSlopeNorm": norms.TwoSlopeNorm(0.0, -1.0, 1.0),
+        "BoundaryNorm": norms.BoundaryNorm([-1, 0, 1]),
+    }[norm_name]
+    out = _draw._rgba_values([-1.0, 0.0, float("nan")], pp.get_cmap("coolwarm"), made)
+    assert tuple(out[2]) == (0, 0, 0, 0), (
+        f"{norm_name} painted NaN as {tuple(out[2])} instead of leaving it clear")
+
+
 def test_an_unknown_tex_command_is_reported():
     """`$\\sfrac{1}{2}$` is typeset as the letters "sfrac12", so a reader sees
     the number 12 where the author meant one half - and nothing said so."""

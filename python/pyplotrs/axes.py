@@ -35,7 +35,6 @@ from ._const import (
 from ._draw import (
     _check_marker,
     _colorbar_ticks,
-    _colormap_lut,
     _dash_for,
     _draw_arrow,
     _draw_hatch,
@@ -44,6 +43,7 @@ from ._draw import (
     _draws_line,
     _font,
     _measure_legend,
+    _norm_lut,
     _place_text,
     _rgba_values,
     _text,
@@ -484,10 +484,17 @@ class Axes(_AxesBase):
             return self
         # Colormapped scatter: precompute one RGBA per point and hand back a
         # mappable so ``fig.colorbar(sc)`` matches the color scale.
+        #
+        # `alpha` goes through here too. It used to be folded in only on the
+        # `c is None` branch above, so `scatter(c=v, alpha=0.3)` - the standard
+        # way to show density in an overplotted cloud - drew fully opaque
+        # points, and a crowded region took the color of whichever point
+        # happened to be drawn last instead of a blend. `hexbin`, `pcolormesh`
+        # and `imshow` all already honored it; this was an omission.
         cvals = _to_f64(c)
         nrm = _norms.get(norm, vmin, vmax).autoscale(cvals)
         cm = _colormaps.get_cmap(cmap)
-        mark["colors"] = _rgba_values(cvals, cm, nrm)
+        mark["colors"] = _rgba_values(cvals, cm, nrm, alpha)
         return Mappable(self, cm, nrm.vmin, nrm.vmax, norm=nrm)
 
     def bar(self, x, height, *, width: float = 0.5, bottom=0.0, color=None,
@@ -800,9 +807,6 @@ class Axes(_AxesBase):
         nrm = _norms.get(norm, vmin, vmax)
         nrm.autoscale(flat)
         lo, hi = nrm.vmin, nrm.vmax
-        # A norm with no Rust transform (TwoSlope, Boundary) can't drive the
-        # per-pixel path; fall back to linear there rather than mis-mapping.
-        norm_code = getattr(nrm, "code", None) or "linear"
         if extent is None:
             extent = (0.0, float(w), 0.0, float(h))
         else:
@@ -816,7 +820,11 @@ class Axes(_AxesBase):
             "cmap": cm,
             "vmin": lo,
             "vmax": hi,
-            "norm_code": norm_code,
+            # The whole norm, not a code: `_draw._norm_lut` decides at draw
+            # time whether Rust can run it directly or has to be handed a
+            # table with the norm already folded in. Keeping only a code here
+            # is what let a `TwoSlopeNorm` be quietly downgraded to linear.
+            "norm": nrm,
             "extent": extent,
             # Covers its extent exactly and stops. Per-mark and per-axis, so a
             # line drawn beyond the image still gets its own margin.
@@ -829,7 +837,10 @@ class Axes(_AxesBase):
             # colormap's midpoint - the one swatch that reads as "this map".
             "color": _with_alpha(cm(0.5), alpha),
         })
-        return Mappable(self, cm, lo, hi, norm=(nrm if norm_code != "linear" else None))
+        # The colorbar gets the real norm unconditionally - it places its ticks
+        # by calling it, so handing it `None` for anything Rust could not run
+        # per-pixel drew a linear scale beside a non-linear image.
+        return Mappable(self, cm, lo, hi, norm=nrm)
 
     # -- step / stair family ------------------------------------------------
 
@@ -2854,15 +2865,17 @@ class Axes(_AxesBase):
         # inverted and the rows have to be mirrored to match.
         flip_y = bot < top
 
-        # 256-entry RGBA LUT, cached per colormap; the per-pixel lookup (the hot
-        # loop) runs in Rust via add_colormapped_image, reading `flat` - already
-        # row-major and contiguous from ingest - straight out of its buffer.
-        lut = _colormap_lut(m["cmap"], m.get("alpha", 1.0))
+        # 256-entry RGBA LUT; the per-pixel lookup (the hot loop) runs in Rust
+        # via add_colormapped_image, reading `flat` - already row-major and
+        # contiguous from ingest - straight out of its buffer. `_norm_lut`
+        # returns the code Rust should run, folding the norm into the table
+        # when there is no code for it.
+        lut, norm_code = _norm_lut(m["cmap"], m["norm"], m.get("alpha", 1.0))
         flat = m["flat"]
         origin_upper = (m["origin"] == "upper") != flip_y
         scene.add_colormapped_image(flat, w, h, m["vmin"], m["vmax"], lut,
                                     origin_upper, rx, ry, rw, rh,
-                                    m.get("norm_code", "linear"), flip_x)
+                                    norm_code, flip_x)
 
     def _draw_errorbar(self, scene, m: dict, proj: "_Proj") -> None:
         """Draw one errorbar mark.

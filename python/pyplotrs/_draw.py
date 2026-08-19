@@ -256,19 +256,65 @@ def _colormap_lut(cmap, alpha: float = 1.0) -> bytes:
     return lut
 
 
-def _rgba_values(values, cmap, norm) -> list[tuple[int, int, int, int]]:
-    """One RGBA per value, through ``norm`` then ``cmap``.
+def _norm_lut(cmap, norm, alpha: float = 1.0) -> tuple[bytes, str]:
+    """``(lut, norm_code)`` for mapping values through ``norm`` then ``cmap``.
 
-    Runs in Rust whenever the norm names a transform Rust knows
-    ([`pyplotrs.norms.Normalize.code`][pyplotrs.norms.Normalize.code]), which covers linear and log - two
-    Python calls per point otherwise, so 200k interpreter round-trips for a
-    100k-point scatter. ``TwoSlopeNorm`` and ``BoundaryNorm`` are piecewise and
-    have no such transform, so they keep the per-value Python path.
+    Every colormapped mark goes through this, so all of them agree.
+
+    A norm that names a Rust transform
+    ([`pyplotrs.norms.Normalize.code`][pyplotrs.norms.Normalize.code] -
+    linear and log) hands back the plain colormap LUT and its own code. A norm
+    that names none - ``TwoSlopeNorm``, ``BoundaryNorm``, anything a user
+    subclasses - is instead **folded into the table**: entry ``i`` becomes
+    ``cmap(norm(v))`` for the value ``v`` that a *linear* ramp puts at ``i``,
+    so the linear Rust path then reproduces the piecewise norm exactly. The
+    composition costs 256 Python calls once per draw rather than two per
+    sample, and it loses nothing: the colormap is a 256-entry table either way,
+    so the norm is resolved at exactly the resolution the color has.
+
+    The two things this replaces were each wrong in their own direction.
+    ``imshow`` used to substitute a plain linear norm for any norm without a
+    code - and told the colorbar to do the same, so image and colorbar agreed
+    with each other and neither agreed with the caller. On a diverging map
+    that silently moved the neutral color off ``vcenter``, which inverts the
+    sign a reader assigns to everything between the two. Meanwhile ``scatter``
+    kept a per-value Python path where NaN met ``min``/``max`` clamping:
+    ``TwoSlopeNorm`` sent it to 1.0 (missing data painted as the *strongest*
+    positive anomaly) and ``BoundaryNorm`` to 0.0. Rust's mapper masks
+    non-finite input to transparent, which is the answer both should have
+    given, and now the only path there is.
     """
     code = getattr(norm, "code", None)
     if code is not None:
-        return _core.map_colors(values, _colormap_lut(cmap), norm.vmin, norm.vmax, code)
-    return [cmap(norm(v)) for v in values]
+        return _colormap_lut(cmap, alpha), code
+
+    lo, hi = norm.vmin, norm.vmax
+    span = (hi - lo) or 1.0
+    a8 = max(0, min(255, int(alpha * 255.0 + 0.5)))
+    buf = bytearray(1024)
+    for i in range(256):
+        r, g, b, _a = cmap(norm(lo + span * (i / 255.0)))
+        o = i * 4
+        buf[o] = r
+        buf[o + 1] = g
+        buf[o + 2] = b
+        buf[o + 3] = a8
+    return bytes(buf), "linear"
+
+
+def _rgba_values(values, cmap, norm, alpha: float = 1.0) -> list[tuple[int, int, int, int]]:
+    """One RGBA per value, through ``norm`` then ``cmap``.
+
+    Always runs in Rust - two Python calls per point otherwise, so 200k
+    interpreter round-trips for a 100k-point scatter - because
+    [`_norm_lut`][pyplotrs._draw._norm_lut] folds any norm Rust does not know
+    into the lookup table instead of falling back to a per-value loop.
+
+    ``alpha`` rides the table, the way it already did for images: a
+    colormapped mark has no single color to fold it into.
+    """
+    lut, code = _norm_lut(cmap, norm, alpha)
+    return _core.map_colors(values, lut, norm.vmin, norm.vmax, code)
 
 
 def _dash_for(style) -> list[float] | None:
