@@ -48,8 +48,8 @@
 
 use crate::ImageData;
 
-/// Resolution embedded images are resampled to in the **vector** backends, in
-/// pixels per inch.
+/// Default resolution embedded images are resampled to in the **vector**
+/// backends, in pixels per inch.
 ///
 /// A vector backend has no device grid to resample onto: the page is
 /// resolution-independent, but the raster it embeds is not, so a resolution
@@ -58,6 +58,12 @@ use crate::ImageData;
 /// screen resolution, which keeps the single pixel of antialiasing at a block
 /// boundary under one device pixel at ordinary zoom - i.e. the short axis
 /// reads as sharp, which is the whole point.
+///
+/// It is only the *default*: `Figure.save(dpi=...)` overrides it, which is
+/// what lets a heatmap meet a journal's 300-600 dpi minimum in the vector
+/// deliverable. Fixing it here meant a PDF's images always carried a third of
+/// a 600-dpi PNG's detail no matter what was asked for, and `dpi` was
+/// documented as simply ignored for PDF and SVG.
 pub const VECTOR_IMAGE_PPI: f64 = 200.0;
 
 /// Largest grid [`vector_grid`] will return, in pixels.
@@ -132,8 +138,8 @@ pub fn target_grid(src_w: u32, src_h: u32, dst_w: f64, dst_h: f64) -> Option<(u3
 
 /// How many samples one axis should carry in a vector backend, for a source of
 /// `src` samples drawn across `dst_pt` points.
-fn vector_axis(src: u32, dst_pt: f64) -> f64 {
-    let grid = dst_pt * VECTOR_IMAGE_PPI / 72.0;
+fn vector_axis(src: u32, dst_pt: f64, ppi: f64) -> f64 {
+    let grid = dst_pt * ppi / 72.0;
     if f64::from(src) > grid {
         // Reducing. Always worth it: it is what stops the viewer decimating,
         // and it makes the embedded image smaller rather than larger.
@@ -158,12 +164,17 @@ fn vector_axis(src: u32, dst_pt: f64) -> f64 {
 /// Each axis decides for itself, so the tall case this module exists for -
 /// hundreds of rows reduced onto a short page span, four columns stretched
 /// across a wide one - reduces one axis and magnifies the other in one pass.
-pub fn vector_grid(src_w: u32, src_h: u32, dst_w: f64, dst_h: f64) -> Option<(u32, u32)> {
+pub fn vector_grid(src_w: u32, src_h: u32, dst_w: f64, dst_h: f64, ppi: f64) -> Option<(u32, u32)> {
+    let ppi = if ppi.is_finite() && ppi > 0.0 {
+        ppi
+    } else {
+        VECTOR_IMAGE_PPI
+    };
     settle(
         src_w,
         src_h,
-        vector_axis(src_w, dst_w),
-        vector_axis(src_h, dst_h),
+        vector_axis(src_w, dst_w, ppi),
+        vector_axis(src_h, dst_h, ppi),
     )
 }
 
@@ -683,9 +694,26 @@ mod tests {
         assert_eq!(target_grid(4, 1000, 592.0, 481.0), Some((4, 481)));
     }
 
+    /// The requested dpi drives the embedded resolution, so a 600-dpi save
+    /// really does put 600-dpi pixels in the PDF rather than the 200-dpi
+    /// default the constant names.
+    #[test]
+    fn a_higher_ppi_asks_for_a_denser_grid() {
+        let at200 = vector_grid(4000, 4000, 200.0, 200.0, 200.0).unwrap();
+        let at600 = vector_grid(4000, 4000, 200.0, 200.0, 600.0).unwrap();
+        assert_eq!(at200.0, (200.0f64 * 200.0 / 72.0).round() as u32);
+        assert_eq!(at600.0, (200.0f64 * 600.0 / 72.0).round() as u32);
+        assert!(at600.0 > at200.0 * 2);
+        // A nonsense ppi falls back to the default rather than producing a
+        // zero-pixel or absurd grid.
+        for bad in [0.0, -10.0, f64::NAN] {
+            assert_eq!(vector_grid(4000, 4000, 200.0, 200.0, bad), Some(at200));
+        }
+    }
+
     #[test]
     fn a_huge_vector_grid_is_capped() {
-        let (w, h) = vector_grid(10, 10, 20_000.0, 20_000.0).unwrap();
+        let (w, h) = vector_grid(10, 10, 20_000.0, 20_000.0, VECTOR_IMAGE_PPI).unwrap();
         assert!(f64::from(w) * f64::from(h) <= MAX_GRID_PIXELS);
         assert_eq!(w, h, "the cap must keep the aspect ratio");
     }
@@ -695,7 +723,7 @@ mod tests {
     /// onto it so they stop aliasing - opposite directions, one pass.
     #[test]
     fn vector_grid_magnifies_a_coarse_axis_and_reduces_a_dense_one() {
-        let (w, h) = vector_grid(4, 1000, 213.0, 173.0).unwrap();
+        let (w, h) = vector_grid(4, 1000, 213.0, 173.0, VECTOR_IMAGE_PPI).unwrap();
         assert_eq!(w, (213.0 * VECTOR_IMAGE_PPI / 72.0).round() as u32);
         assert_eq!(h, (173.0 * VECTOR_IMAGE_PPI / 72.0).round() as u32);
         assert!(w > 4 && h < 1000);
@@ -706,11 +734,11 @@ mod tests {
     /// paying 3x the bytes to shorten it is not a trade worth making.
     #[test]
     fn vector_grid_leaves_a_dense_enough_axis_alone() {
-        assert_eq!(vector_grid(500, 500, 400.0, 300.0), None);
+        assert_eq!(vector_grid(500, 500, 400.0, 300.0, VECTOR_IMAGE_PPI), None);
         // One sample has no neighbor to blend with, so it cannot smear.
-        assert_eq!(vector_grid(1, 256, 10.0, 250.0), None);
+        assert_eq!(vector_grid(1, 256, 10.0, 250.0, VECTOR_IMAGE_PPI), None);
         // ...but a coarse axis still gets magnified.
-        let (w, _) = vector_grid(40, 256, 400.0, 250.0).unwrap();
+        let (w, _) = vector_grid(40, 256, 400.0, 250.0, VECTOR_IMAGE_PPI).unwrap();
         assert!(w > 40);
     }
 

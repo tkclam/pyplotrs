@@ -49,8 +49,7 @@ selectable.
 
 ## Resolution
 
-`dpi` only affects raster (`.png`) output — PDF, SVG and HTML are
-resolution-independent and ignore it. The default of 200 dpi is
+`dpi` sets the resolution of raster (`.png`) output. The default of 200 dpi is
 publication-quality; bump it for print:
 
 ```python
@@ -60,6 +59,16 @@ fig.save("figure.png", dpi=600)
 The value is also written into the PNG's `pHYs` chunk, so the file knows its own
 physical size and lands at the right size in a document rather than at whatever
 the importing application assumes.
+
+A PDF or SVG **page** is resolution-independent, but an image *inside* one —
+`imshow`, `pcolormesh`, `contourf` — is not, and `dpi` sets its resolution too:
+
+```python
+fig.save("figure.pdf", dpi=600)   # the heatmap inside is 600 ppi, not 200
+```
+
+That matters when a journal states a minimum for figures containing raster
+content, which is usually 300 dpi and often 600 for anything with fine detail.
 
 ## Transparent backgrounds
 

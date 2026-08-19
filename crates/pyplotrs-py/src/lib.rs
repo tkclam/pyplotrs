@@ -1784,13 +1784,15 @@ impl Scene {
     /// Render to PDF bytes (real, embedded/subsetted, editable text). When
     /// `tagged` is set, emit a tagged/accessible PDF whose content is one
     /// `Figure` structure element carrying `alt` text, plus document metadata.
-    #[pyo3(signature = (tagged=false, title=None, alt=None))]
+    #[pyo3(signature = (tagged=false, title=None, alt=None,
+                        dpi=pyplotrs_core::resample::VECTOR_IMAGE_PPI))]
     fn to_pdf<'py>(
         &self,
         py: Python<'py>,
         tagged: bool,
         title: Option<&str>,
         alt: Option<&str>,
+        dpi: f64,
     ) -> PyResult<Bound<'py, PyBytes>> {
         // The renderers touch no Python objects, so the GIL is dead weight for
         // the whole of a render - and holding it serializes figures that a
@@ -1798,13 +1800,14 @@ impl Scene {
         let bytes = py
             .detach(|| {
                 if tagged {
-                    pyplotrs_render_pdf::render_pdf_tagged(
+                    pyplotrs_render_pdf::render_pdf_tagged_at(
                         &self.inner,
                         title,
                         alt.unwrap_or("figure"),
+                        dpi,
                     )
                 } else {
-                    pyplotrs_render_pdf::render_pdf(&self.inner)
+                    pyplotrs_render_pdf::render_pdf_at(&self.inner, dpi)
                 }
             })
             .map_err(PyValueError::new_err)?;
@@ -1812,8 +1815,14 @@ impl Scene {
     }
 
     /// Render to an SVG document string (real `<text>` elements).
-    fn to_svg(&self, py: Python<'_>) -> String {
-        py.detach(|| pyplotrs_render_svg::render_svg(&self.inner))
+    ///
+    /// `dpi` sets the resolution of any *embedded raster* - a heatmap or
+    /// contour fill. The page itself is resolution-independent; the bitmap
+    /// inside it is not, and used to be pinned at 200 ppi however high a dpi
+    /// was asked for.
+    #[pyo3(signature = (dpi=pyplotrs_core::resample::VECTOR_IMAGE_PPI))]
+    fn to_svg(&self, py: Python<'_>, dpi: f64) -> String {
+        py.detach(|| pyplotrs_render_svg::render_svg_at(&self.inner, dpi))
     }
 
     /// Render to PNG bytes at `dpi` dots per inch (the PNG carries a `pHYs`

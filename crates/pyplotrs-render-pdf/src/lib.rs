@@ -103,6 +103,8 @@ struct PdfRenderer {
     /// surface keeps its own stack for *placing* geometry; this exists only to
     /// size the pixel grid an image is resampled onto (see `draw_image`).
     transform: Affine,
+    /// Resolution embedded images are resampled to, in pixels per inch.
+    ppi: f64,
 }
 
 impl PdfRenderer {
@@ -232,8 +234,9 @@ impl PdfRenderer {
         // nothing to draw.
         let rect = image.rect.abs();
         let (ex, ey) = resample::device_extent(rect, self.transform);
-        let resampled = resample::vector_grid(image.data.width, image.data.height, ex, ey)
-            .map(|(w, h)| image.data.resampled_to(w, h));
+        let resampled =
+            resample::vector_grid(image.data.width, image.data.height, ex, ey, self.ppi)
+                .map(|(w, h)| image.data.resampled_to(w, h));
         let data = resampled.as_ref().unwrap_or(&image.data);
         let img = krilla::image::Image::from_rgba8((*data.rgba).clone(), data.width, data.height);
         // `draw_image` covers (0,0)..(w,h) in the current space; translate to
@@ -290,8 +293,13 @@ impl PdfRenderer {
 /// exception instead of unwinding across the FFI boundary as a `PanicException`
 /// - which derives from `BaseException` and so escapes `except Exception`.
 pub fn render_pdf(scene: &Scene) -> Result<Vec<u8>, String> {
+    render_pdf_at(scene, resample::VECTOR_IMAGE_PPI)
+}
+
+/// [`render_pdf`], embedding images at `ppi` pixels per inch.
+pub fn render_pdf_at(scene: &Scene, ppi: f64) -> Result<Vec<u8>, String> {
     let mut document = Document::new();
-    render_into(&mut document, scene, None)?;
+    render_into(&mut document, scene, None, ppi)?;
     document
         .finish()
         .map_err(|e| format!("PDF serialization failed: {e:?}"))
@@ -302,8 +310,18 @@ pub fn render_pdf(scene: &Scene) -> Result<Vec<u8>, String> {
 /// the chart), and the document gets a `/Lang` + title in its metadata and a
 /// marked structure tree. `title` defaults the figure's document title.
 pub fn render_pdf_tagged(scene: &Scene, title: Option<&str>, alt: &str) -> Result<Vec<u8>, String> {
+    render_pdf_tagged_at(scene, title, alt, resample::VECTOR_IMAGE_PPI)
+}
+
+/// [`render_pdf_tagged`], embedding images at `ppi` pixels per inch.
+pub fn render_pdf_tagged_at(
+    scene: &Scene,
+    title: Option<&str>,
+    alt: &str,
+    ppi: f64,
+) -> Result<Vec<u8>, String> {
     let mut document = Document::new();
-    render_into(&mut document, scene, Some(alt))?;
+    render_into(&mut document, scene, Some(alt), ppi)?;
 
     let mut meta = Metadata::new()
         .language("en".to_string())
@@ -321,7 +339,12 @@ pub fn render_pdf_tagged(scene: &Scene, title: Option<&str>, alt: &str) -> Resul
 /// single tagged marked-content sequence referenced by a `Figure` struct
 /// element (the whole chart is one accessible figure with alternate text), and a
 /// tag tree is attached to the document.
-fn render_into(document: &mut Document, scene: &Scene, alt: Option<&str>) -> Result<(), String> {
+fn render_into(
+    document: &mut Document,
+    scene: &Scene,
+    alt: Option<&str>,
+    ppi: f64,
+) -> Result<(), String> {
     let settings = PageSettings::from_wh(scene.size.width as f32, scene.size.height as f32)
         .ok_or_else(|| {
             format!(
@@ -335,6 +358,7 @@ fn render_into(document: &mut Document, scene: &Scene, alt: Option<&str>) -> Res
     let mut renderer = PdfRenderer {
         fonts: HashMap::new(),
         transform: Affine::IDENTITY,
+        ppi,
     };
 
     let content_id = alt.map(|_| surface.start_tagged(ContentTag::Other));

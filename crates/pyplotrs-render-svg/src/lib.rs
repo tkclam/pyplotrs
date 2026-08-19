@@ -119,6 +119,8 @@ struct SvgWriter<'a> {
     defs: String,
     clip_counter: usize,
     marker_counter: usize,
+    /// Resolution embedded images are resampled to, in pixels per inch.
+    ppi: f64,
     /// Linear part of the transform accumulated down the group stack. Groups
     /// emit their own `transform` attribute rather than baking it into
     /// coordinates, so this is not needed to *place* anything - only to size
@@ -296,7 +298,7 @@ impl SvgWriter<'_> {
         // an inverted-y heatmap silently absent here while the PNG showed it.
         let rect = im.rect.abs();
         let (ex, ey) = resample::device_extent(rect, self.transform);
-        let resampled = resample::vector_grid(im.data.width, im.data.height, ex, ey)
+        let resampled = resample::vector_grid(im.data.width, im.data.height, ex, ey, self.ppi)
             .map(|(w, h)| im.data.resampled_to(w, h));
         let data = resampled.as_ref().unwrap_or(&im.data);
         let png = rgba_to_png(&data.rgba, data.width, data.height);
@@ -378,7 +380,9 @@ fn opacity_attr_named(name: &str, a: u8) -> String {
 }
 
 /// Render `scene` to a complete SVG document string.
-pub fn render_svg(scene: &Scene) -> String {
+/// Render `scene` to an SVG document, embedding images at `ppi` pixels per
+/// inch (see [`resample::VECTOR_IMAGE_PPI`] for the default).
+pub fn render_svg_at(scene: &Scene, ppi: f64) -> String {
     let w = scene.size.width;
     let h = scene.size.height;
 
@@ -392,6 +396,7 @@ pub fn render_svg(scene: &Scene) -> String {
         defs: String::new(),
         clip_counter: 0,
         marker_counter: 0,
+        ppi,
         transform: Affine::IDENTITY,
     };
     for node in &scene.nodes {
@@ -418,4 +423,9 @@ pub fn render_svg(scene: &Scene) -> String {
     out.push_str(&writer.body);
     out.push_str("</svg>\n");
     out
+}
+
+/// Render `scene` to an SVG document at the default image resolution.
+pub fn render_svg(scene: &Scene) -> String {
+    render_svg_at(scene, resample::VECTOR_IMAGE_PPI)
 }

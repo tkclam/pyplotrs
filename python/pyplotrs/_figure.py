@@ -444,8 +444,13 @@ class Figure:
         Canvas2D viewer you can orbit (drag), zoom (scroll) and pan (shift-drag).
 
         ``dpi`` controls the resolution of raster (``.png``) output and is
-        recorded in the file's physical-size metadata. PDF, SVG and HTML are
-        resolution-independent and ignore it.
+        recorded in the file's physical-size metadata. PDF, SVG and HTML pages
+        are resolution-independent, but any **image** inside one - a heatmap,
+        a filled contour - is not, and ``dpi`` sets its resolution there too.
+        That matters for a journal: an image embedded at the 200 dpi default
+        is below most submission minimums, and pinning it there regardless of
+        what was asked for meant a 600-dpi PDF carried a third of the detail a
+        600-dpi PNG of the same figure did.
 
         ``tagged=True`` (``.pdf`` only) writes a tagged, accessible PDF: the
         whole chart becomes one ``Figure`` structure element with ``alt`` text
@@ -474,7 +479,7 @@ class Figure:
                 # otherwise inline the baked-vector SVG as before.
                 placements: list = []
                 svg = self._build_scene(capture=placements,
-                                        transparent=transparent).to_svg()
+                                        transparent=transparent).to_svg(dpi)
                 if placements:
                     from ._htmlmath import figure_to_math_html
                     doc = figure_to_math_html(svg, placements, self.size_pt,
@@ -491,14 +496,14 @@ class Figure:
         if ext == "pdf":
             if tagged:
                 auto_title, auto_alt = self._accessible_text()
-                data = scene.to_pdf(True, title or auto_title, alt or auto_alt)
+                data = scene.to_pdf(True, title or auto_title, alt or auto_alt, dpi)
             else:
-                data = scene.to_pdf()
+                data = scene.to_pdf(dpi=dpi)
             with open(path_str, "wb") as f:
                 f.write(data)
         elif ext == "svg":
             with open(path_str, "w", encoding="utf-8") as f:
-                f.write(scene.to_svg())
+                f.write(scene.to_svg(dpi))
         elif ext == "png":
             with open(path_str, "wb") as f:
                 f.write(scene.to_png(dpi, transparent))
