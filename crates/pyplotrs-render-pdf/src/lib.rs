@@ -139,36 +139,54 @@ impl PdfRenderer {
         surface.set_stroke(None);
 
         for run in &text.runs {
+            if run.glyphs.is_empty() {
+                continue;
+            }
             let font = self.font_for(&run.font);
-            // Each glyph is drawn at its absolute position, carrying the
-            // slice of `source_text` for its cluster - this keeps the PDF's
-            // ToUnicode/copy-paste text correct without requiring krilla's
-            // pen to re-accumulate advances.
+            // One `draw_glyphs` call for the whole run, so krilla emits one
+            // text object for it.
+            //
+            // This used to be a call per glyph, each with its own absolute
+            // start point, which made krilla write a separate `BT ... Tm ...
+            // Tj ... ET` block per glyph: a 23-character axis title arrived in
+            // Illustrator or Inkscape as 23 separate text frames, so the
+            // "select it and re-type it" workflow the format is chosen for did
+            // not work, and the content stream carried ~90 bytes of operators
+            // per glyph.
+            //
+            // The shaper's positions are absolute offsets from the run origin,
+            // while krilla walks a pen: it advances by `x_advance * size` per
+            // glyph and applies `x_offset`/`y_offset` on top without consuming
+            // them. So each glyph states its own advance, plus whatever
+            // correction reconciles the pen with where the shaper actually put
+            // it - normally zero, and non-zero exactly where the shaper moved
+            // a glyph off the advance line. `y_offset` is negated because the
+            // scene's y grows downward and krilla's offset grows upward.
+            let size = run.size;
+            let mut pen = 0.0f32;
+            let mut kglyphs = Vec::with_capacity(run.glyphs.len());
             for (i, glyph) in run.glyphs.iter().enumerate() {
-                let start = Point::from_xy(
-                    text.origin.x as f32 + glyph.x,
-                    text.origin.y as f32 + glyph.y,
-                );
                 let cluster_start = glyph.cluster as usize;
                 let cluster_end = run
                     .glyphs
                     .get(i + 1)
                     .map(|g| g.cluster as usize)
                     .unwrap_or(run.source_text.len())
-                    .max(cluster_start);
-                let slice = &run.source_text[cluster_start..cluster_end];
-
-                let kglyph = KrillaGlyph::new(
+                    .max(cluster_start)
+                    .min(run.source_text.len());
+                kglyphs.push(KrillaGlyph::new(
                     GlyphId::new(glyph.glyph_id as u32),
-                    glyph.advance / run.size,
+                    glyph.advance / size,
+                    (glyph.x - pen) / size,
+                    -glyph.y / size,
                     0.0,
-                    0.0,
-                    0.0,
-                    0..slice.len(),
+                    cluster_start..cluster_end,
                     None,
-                );
-                surface.draw_glyphs(start, &[kglyph], font.clone(), slice, run.size, false);
+                ));
+                pen += glyph.advance;
             }
+            let start = Point::from_xy(text.origin.x as f32, text.origin.y as f32);
+            surface.draw_glyphs(start, &kglyphs, font, &run.source_text, size, false);
         }
     }
 

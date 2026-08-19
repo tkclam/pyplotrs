@@ -180,16 +180,50 @@ impl SvgWriter<'_> {
         writeln!(self.body, "/>").unwrap();
     }
 
+    /// Emit one `<text>` per run, carrying the run's source text *and* the
+    /// position the shaper gave every glyph in it.
+    ///
+    /// SVG's `x`/`y` accept a list, one entry per character, and using it is
+    /// what makes this backend agree with the other two. Before, a run was
+    /// placed by a single `x` and the viewer re-shaped the string itself, so
+    /// the geometry the layout solver had already solved was thrown away and
+    /// re-derived by whatever font the viewer happened to resolve. That is
+    /// fine while the embedded `@font-face` loads and wrong the moment it does
+    /// not - and plenty of things that open an SVG (Inkscape imports,
+    /// librsvg, converters) do not honor an embedded face. Pinning each glyph
+    /// means a substituted font changes how the labels *look* but not where
+    /// they sit, so a centered label stays centered and a measured tick column
+    /// still lines up. The family also names a real fallback now, so a
+    /// substitution lands on a sans-serif rather than on the UA default.
+    ///
+    /// `xml:space="preserve"` keeps runs of spaces, which SVG otherwise
+    /// collapses - the layout measured the string with them.
     fn render_text(&mut self, t: &TextNode) {
-        let mut x = t.origin.x;
-        let y = t.origin.y;
         for run in &t.runs {
+            if run.glyphs.is_empty() {
+                continue;
+            }
             let family = self.family_for(run.font.key()).to_string();
+            // One coordinate per *character* of `source_text`, which is what
+            // SVG indexes by. Glyphs and characters correspond one-to-one for
+            // the text this renders; where a cluster covers several
+            // characters, the extra ones inherit the last position emitted,
+            // which is also what a renderer does with a short list.
+            let mut xs = String::new();
+            let mut ys = String::new();
+            for (i, g) in run.glyphs.iter().enumerate() {
+                if i > 0 {
+                    xs.push(' ');
+                    ys.push(' ');
+                }
+                write!(xs, "{:.3}", t.origin.x + g.x as f64).unwrap();
+                write!(ys, "{:.3}", t.origin.y + g.y as f64).unwrap();
+            }
             writeln!(
                 self.body,
-                r#"<text x="{}" y="{}" font-family="{}" font-size="{}" fill="{}"{}>{}</text>"#,
-                fmt_num(x),
-                fmt_num(y),
+                r#"<text x="{}" y="{}" font-family="'{}', sans-serif" font-size="{}" fill="{}"{} xml:space="preserve">{}</text>"#,
+                xs,
+                ys,
                 family,
                 run.size,
                 color_hex(t.color),
@@ -197,7 +231,6 @@ impl SvgWriter<'_> {
                 escape_xml(&run.source_text)
             )
             .unwrap();
-            x += run.glyphs.iter().map(|g| g.advance as f64).sum::<f64>();
         }
     }
 

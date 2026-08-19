@@ -504,14 +504,30 @@ def _page_texts(fig, tmp_path, name):
     Coordinates are page coordinates *except* inside a `<g transform=...>`
     group, where they are group-local - which is how rotated axis labels are
     drawn - so callers checking bounds must skip the grouped ones.
+
+    `<text>` carries one coordinate per glyph (the SVG backend pins every
+    glyph where the shaper put it, rather than letting the viewer re-shape the
+    string), so the reported `(x, y)` is the *first* pair - the run's origin,
+    which is what these callers mean by "where the label starts".
     """
     out = tmp_path / f"{name}.svg"
     fig.save(str(out))
     svg = out.read_text()
     body = re.sub(r"<g transform[^>]*>.*?</g>", "", svg, flags=re.S)
-    found = re.findall(
-        r'<text[^>]*x="([-\d.]+)"[^>]*y="([-\d.]+)"[^>]*>([^<]*)</text>', body)
-    return [(float(x), float(y), s) for x, y, s in found], svg
+    return _parse_texts(body), svg
+
+
+#: `<text>` with its glyph-position lists, capturing both lists and the string.
+_TEXT_RE = re.compile(
+    r'<text[^>]*\bx="([-\d.\s]+)"[^>]*\by="([-\d.\s]+)"[^>]*>([^<]*)</text>')
+
+
+def _parse_texts(svg):
+    """`(first_x, first_y, string)` for every `<text>` in `svg`."""
+    out = []
+    for xs, ys, s in _TEXT_RE.findall(svg):
+        out.append((float(xs.split()[0]), float(ys.split()[0]), s))
+    return out
 
 
 @pytest.mark.parametrize("method,loc", _SEC_SIDES)
@@ -646,7 +662,7 @@ def test_secondary_y_does_not_displace_a_colorbar_label(tmp_path):
     # The secondary's tick labels are the round hundreds, drawn ungrouped.
     body = re.sub(r"<g transform[^>]*>.*?</g>", "", svg, flags=re.S)
     ticks = [float(x) for x, _, s in
-             re.findall(r'<text[^>]*x="([-\d.]+)"[^>]*y="([-\d.]+)"[^>]*>([^<]*)</text>',
+             _parse_texts(
                         body)
              if s in ("200", "400", "600", "800")]
     assert ticks, "secondary tick labels not drawn"
@@ -1100,10 +1116,9 @@ def test_pie_grows_until_a_label_reaches_the_cell_edge(tmp_path):
     ax, svg, pie, square = draw(names, "pie_labelled")
     size = ax._theme.tick_label_size
     scene = _core.Scene(w, h)
-    texts = re.findall(
-        r'<text[^>]*x="([-\d.]+)"[^>]*y="([-\d.]+)"[^>]*>([^<]*)</text>', svg)
+    texts = _parse_texts(svg)
     boxes = []
-    for x, y, s in ((float(x), float(y), s) for x, y, s in texts):
+    for x, y, s in texts:
         if s not in names:
             continue
         asc, desc = _th(scene, s, size)
