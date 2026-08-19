@@ -70,6 +70,23 @@ fig.save("figure.pdf", dpi=600)   # the heatmap inside is 600 ppi, not 200
 That matters when a journal states a minimum for figures containing raster
 content, which is usually 300 dpi and often 600 for anything with fine detail.
 
+## Line widths thinner than half a point
+
+A stroke below about 0.5 pt is not WYSIWYG in a PDF viewer. Viewers enforce a
+minimum rendered width of one device pixel, so a 0.2 pt rule that measures 0.2 pt
+in the PNG is drawn as a full pixel on screen — visibly heavier, and heavier by a
+different amount at each zoom level. The line is *correct* in the file, and a
+press rendering at its own resolution will print it at 0.2 pt; only the preview
+lies.
+
+Most journals set a minimum line width anyway (commonly 0.25 pt, sometimes
+0.5 pt), so the practical advice is the same either way: keep rules at 0.5 pt or
+above unless you have a reason not to.
+
+```python
+mine = pp.themes.default.with_(line_width=0.8, spine_width=0.6)
+```
+
 ## Transparent backgrounds
 
 `transparent=True` drops the white page fill from `.png` output in favor of an

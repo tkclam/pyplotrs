@@ -130,6 +130,13 @@ The set covers matplotlib's `tab*`, the ColorBrewer qualitative sets, seaborn's
 named palettes (`sns_*`), and colorcet's `glasbey` family for many-category
 data. The theme default is Okabe-Ito, colorblind-safe by construction.
 
+Colorblind-safe is not the same as grayscale-safe, and Okabe-Ito is only the
+first. Its C1 (orange) and C2 (sky blue) sit at L\* 70.6 and 69.8 — under a
+point apart, so a monochrome press cannot tell them from each other however
+well they separate in color. Past two series, either pair color with
+`linestyle` so the distinction survives the loss of hue, or switch to
+`theme="grayscale"`, which is built to separate on lightness alone.
+
 ## Custom colormaps
 
 Build a [`Colormap`][pyplotrs.colormaps.Colormap] from a short list of
@@ -167,7 +174,7 @@ from pyplotrs import color
 from pyplotrs.colormaps import get_cmap
 
 color.cvd_safe_report(get_cmap("viridis"))   # per-CVD-kind distinguishability
-color.perceptual_uniformity(warm)            # 1.0 = perfectly even steps
+color.perceptual_uniformity(warm)            # 0.0 = perfectly even steps; lower is better
 color.simulate_cvd((214, 39, 40), "deuteranopia")
 color.distance((0, 0, 0), (10, 10, 10))      # perceptual ΔE
 ```

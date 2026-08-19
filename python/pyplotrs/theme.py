@@ -45,6 +45,16 @@ RGBA = tuple[int, int, int, int]
 # being designed for filled regions rather than hairlines, and it is the price
 # of using the published order. Reach past it (`color="C5"`) or reorder the
 # palette in a derived theme if a fifth *line* is what you need.
+#
+# The second thing to know is that colorblind-safe is not grayscale-safe. The
+# palette separates on hue, and its lightnesses are not spread out: C1 (orange,
+# L* 70.6) and C2 (sky blue, L* 69.8) are 0.8 L* apart, which is under any
+# printing system's discrimination threshold. Two series are fine - C0 black
+# against anything is the widest contrast in the set - but a three-line figure
+# printed in monochrome is black plus two identical grays. Where a mono press
+# is a possibility, pair the color cycle with a linestyle cycle so the
+# distinction does not live in hue alone, or use the `grayscale` theme, which
+# separates on lightness by construction.
 _OKABE_ITO: tuple[RGBA, ...] = (
     (0, 0, 0, 255),        # C0 black
     (230, 159, 0, 255),    # C1 orange

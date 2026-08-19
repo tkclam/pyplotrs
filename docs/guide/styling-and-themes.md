@@ -154,6 +154,24 @@ order Okabe and Ito published it. Two things follow from that order:
   palette has one weak line. Skip past it with an explicit `color="C5"`, or
   reorder the palette in a derived theme.
 
+!!! warning "Colorblind-safe is not grayscale-safe"
+
+    Okabe-Ito separates on **hue**, and its lightnesses are close together:
+    `C1` (orange) and `C2` (sky blue) are 0.8 L\* apart, below what any
+    printing system can resolve. Two series are fine — `C0` black against
+    anything is the widest contrast in the set — but a three-line figure sent
+    to a monochrome press comes out as black plus two identical grays.
+
+    Where mono printing is a possibility, either give the series distinct
+    dashes so the distinction does not live in hue alone:
+
+    ```python
+    for ys, style in zip(series, ["solid", "dashed", "dotted"]):
+        ax.line(xs, ys, linestyle=style)
+    ```
+
+    or use the `grayscale` theme, which is built to separate on lightness.
+
 Swap in any of the
 [built-in palettes](colormaps-and-images.md#categorical-palettes):
 
