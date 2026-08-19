@@ -633,3 +633,46 @@ def _draw_legend_glyph(scene, m: dict, x0: float, x1: float, cy: float,
         if m.get("marker"):
             _draw_marker(scene, cx, cy, m.get("markersize", 5.0), m["marker"],
                          facecolor=color)
+
+
+# -- rotated tick labels -----------------------------------------------------
+
+def tick_rotation_geometry(width: float, ascent: float, depth: float,
+                           deg: float) -> tuple[float, float, float]:
+    """Device extents of one x tick label rotated ``deg`` counter-clockwise.
+
+    Returns ``(below, left, right)``: how far the label's ink reaches below the
+    anchor point, and to either side of it. The anchor is the tick position;
+    the label hangs from it with its right end nearest the tick, which is the
+    reading that keeps a rotated label pointing at what it labels.
+
+    At ``deg == 0`` this is the old geometry - half the width either side,
+    ``ascent + depth`` below - so an unrotated axis is unchanged.
+    """
+    if deg == 0.0:
+        h = ascent + depth
+        return h, width / 2.0, width / 2.0
+    th = math.radians(deg)
+    ct, st = abs(math.cos(th)), abs(math.sin(th))
+    h = ascent + depth
+    return width * st + h * ct, width * ct + h * st, h * st
+
+
+def draw_rotated_tick_label(scene, x: float, y: float, label: str, size: float,
+                            color, deg: float, theme=None) -> None:
+    """Draw one x tick label rotated ``deg`` CCW about ``(x, y)``.
+
+    ``(x, y)`` is the tick's position on the top edge of the tick band. The
+    label is right-aligned to the anchor and hangs below it, so the end of the
+    text sits under the tick it belongs to.
+    """
+    th = math.radians(deg)
+    ct, st = math.cos(th), math.sin(th)
+    a, _d = _th(scene, label, size, "body", theme)
+    w = _tw(scene, label, size, "body", theme)
+    # Screen y grows downward, so a counter-clockwise rotation is
+    # (a, b, c, d) = (cos, -sin, sin, cos) - the same convention the y-axis
+    # label group already uses at 90 degrees.
+    scene.begin_group(ct, -st, st, ct, x, y)
+    _text(scene, -w, a, label, size, color, "body", theme)
+    scene.end_group()

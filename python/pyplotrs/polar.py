@@ -168,7 +168,7 @@ class PolarAxes(_AxesBase):
         if self._title:
             a, d = _th(scene, self._title, self._theme.title_size)
             title_h = a + d + _TITLE_GAP
-        return (title_h, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), [], []
+        return (title_h, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), [], []
 
     def _draw(self, scene, layout, xr, yr, xticks, yticks) -> None:
         t = self._theme

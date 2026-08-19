@@ -48,6 +48,18 @@ pub struct AxesBands {
     pub ylabel_w: f64,
     /// Height reserved below the plot for x tick marks + tick labels.
     pub x_tick_h: f64,
+    /// Horizontal room the first and last x tick labels need *beside* the plot
+    /// area, being centered on ticks that sit at its very edges.
+    ///
+    /// The x tick band reserves thickness but has no length of its own - it is
+    /// as wide as the plot - so a tick label centered on the last tick hangs
+    /// half its width past the plot's right edge. Inside a grid that lands on
+    /// the neighbouring cell; on the outermost column it lands off the page,
+    /// and the label was simply cut there, silently, mid-glyph. These two say
+    /// how far the overhang reaches so the plot can be inset enough to keep it
+    /// on the canvas.
+    pub x_tick_overhang_l: f64,
+    pub x_tick_overhang_r: f64,
     /// Width reserved at the left (right of the y-axis label) for y tick
     /// marks + tick labels.
     pub y_tick_w: f64,
@@ -238,9 +250,14 @@ fn layout_cell(cell: Rect, b: &AxesBands) -> AxesLayout {
     let title = Rect::new(cell.x, cell.y, cell.w, b.title_h);
 
     // Plot area is what remains after all bands.
-    let plot_x = y_tick_x + b.y_tick_w;
+    //
+    // The left overhang is usually swallowed by the y tick band, which is
+    // wider than half an x tick label whenever there are y labels at all -
+    // only the part that sticks out beyond it costs anything.
+    let left_pad = (b.x_tick_overhang_l - b.y_tick_w).max(0.0);
+    let plot_x = y_tick_x + b.y_tick_w + left_pad;
     let plot_y = cell.y + b.title_h;
-    let plot_w = (cell.x1() - b.cbar_w - plot_x).max(0.0);
+    let plot_w = (cell.x1() - b.cbar_w - b.x_tick_overhang_r - plot_x).max(0.0);
     let plot_h = (cell.y1() - b.xlabel_h - b.x_tick_h - b.cbar_h - plot_y).max(0.0);
     let plot = Rect::new(plot_x, plot_y, plot_w, plot_h);
 
@@ -300,6 +317,8 @@ mod tests {
                 ylabel_w: 12.0,
                 x_tick_h: 14.0,
                 y_tick_w: 24.0,
+                x_tick_overhang_l: 0.0,
+                x_tick_overhang_r: 0.0,
                 cbar_w: 0.0,
                 cbar_h: 0.0,
             }],

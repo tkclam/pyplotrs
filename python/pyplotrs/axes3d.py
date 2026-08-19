@@ -344,7 +344,7 @@ class Axes3D(_AxesBase):
         if self._title:
             a, d = _th(scene, self._title, self._theme.title_size)
             title_h = a + d + _TITLE_GAP
-        return (title_h, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), [], []
+        return (title_h, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), [], []
 
     def _limits(self):
         xs: list[float] = []

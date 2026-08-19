@@ -137,3 +137,14 @@ _ELLIPSE_N = 72  # polygon segments approximating an ellipse/circle patch
 _LEGEND_SWATCH_KINDS = ("bar", "barh", "hist", "fill", "broken_barh",
                         "boxplot", "violin", "image", "hexbin", "quadmesh",
                         "contourf", "pie")
+
+#: Fraction of the space between two x ticks that a flat tick label may fill
+#: before the axis rotates them. Below 1.0 so labels get some air rather than
+#: touching exactly at the threshold.
+_TICK_LABEL_FIT = 0.92
+#: Tick spacing (points) below which even 45-degree labels crowd, so the axis
+#: goes upright instead.
+_TICK_LABEL_MIN45 = 8.0
+#: Cell width assumed when choosing a tick angle, before the layout is solved.
+#: Only the "do these labels nearly touch" decision depends on it.
+_DEFAULT_CELL_W = 230.0

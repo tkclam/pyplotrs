@@ -1557,6 +1557,46 @@ def test_an_inverted_axis_flips_the_image_and_not_the_rect(kw, corners, tmp_path
     assert ops, f"{kw or 'plain'}: the PDF has no image at all"
 
 
+def test_long_category_labels_neither_overlap_nor_leave_the_page(tmp_path):
+    """Flat tick labels wider than their spacing simply overprinted, and the
+    outermost ones ran off the canvas: the x tick band reserves thickness, and
+    used to reserve no length at all."""
+    from pyplotrs import _pyplotrs_core as _core
+    from pyplotrs._draw import _tw
+
+    width = 300.0
+    fig, ax = pp.subplots(figsize=(width, 200))
+    ax.bar(["Escherichia coli", "Bacillus subtilis",
+            "Staphylococcus aureus", "Pseudomonas putida"], [3, 5, 2, 4])
+    out = tmp_path / "cats.svg"
+    fig.save(str(out))
+
+    assert ax._x_tick_deg != 0.0, "labels this long should have been rotated"
+
+    # A rotated label lives inside a `<g transform=matrix(...)>`, so its own
+    # coordinates are group-local; the page position needs the matrix applied.
+    svg = out.read_text()
+    scene = _core.Scene(width, 200.0)
+    size = ax._theme.tick_label_size
+    spans = []
+    for grp in re.finditer(
+            r'<g transform="matrix\(([-\d.,\s]+)\)">(.*?)</g>', svg, re.S):
+        a, b, c, d, e, f = (float(v) for v in re.split(r"[,\s]+", grp.group(1).strip()))
+        for lx, ly, text in _parse_texts(grp.group(2)):
+            w = _tw(scene, text, size)
+            xs = [a * px + c * ly + e for px in (lx, lx + w)]
+            spans.append((text, min(xs), max(xs)))
+    assert len(spans) >= 4, f"expected the four rotated category labels, got {spans}"
+    for text, x0, x1 in spans:
+        assert -0.5 <= x0 and x1 <= width + 0.5, (
+            f"label {text!r} spans {x0:.1f}..{x1:.1f} on a {width:.0f} pt canvas")
+
+    # Rotated far enough apart that they no longer overprint each other.
+    spans.sort(key=lambda t: t[1])
+    for (t0, _a0, b0), (t1, a1, _b1) in zip(spans, spans[1:]):
+        assert a1 >= b0 - 0.5, f"{t0!r} and {t1!r} still overlap"
+
+
 def test_svg_states_its_size_in_points(tmp_path):
     """`width="200"` is 200 CSS px = 2.08 in, while the PDF page is 200 pt =
     2.78 in - so the same figure was published at 75% of its size in SVG, and

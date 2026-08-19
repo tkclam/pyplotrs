@@ -80,13 +80,15 @@ class _AxLayout:
 def _layout_cell(cell: _Rect, bands: tuple) -> _AxLayout:
     """Python port of the Rust ``layout_cell``: reserve the axis bands within
     ``cell`` and return the plot area + band rects."""
-    title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w, cbar_h = bands
+    (title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w, cbar_h,
+     oh_l, oh_r) = bands
     ylabel = _Rect(cell.x, cell.y, ylabel_w, cell.h)
     y_tick_x = cell.x + ylabel_w
     title = _Rect(cell.x, cell.y, cell.w, title_h)
-    plot_x = y_tick_x + y_tick_w
+    # Room for the first/last x tick label's overhang, as the Rust solver does.
+    plot_x = y_tick_x + y_tick_w + max(oh_l - y_tick_w, 0.0)
     plot_y = cell.y + title_h
-    plot_w = max(cell.x1 - cbar_w - plot_x, 0.0)
+    plot_w = max(cell.x1 - cbar_w - oh_r - plot_x, 0.0)
     plot_h = max(cell.y1 - xlabel_h - x_tick_h - cbar_h - plot_y, 0.0)
     plot = _Rect(plot_x, plot_y, plot_w, plot_h)
     y_tick = _Rect(y_tick_x, plot_y, y_tick_w, plot_h)

@@ -209,8 +209,9 @@ def test_removed_helpers_are_gone():
 
 def _cell_sizes(n, *, vertical=False, ratios=None, gap=12.0):
     """Cell extents from the Rust solver for a 1xN (or Nx1) grid."""
-    # (title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w, cbar_h)
-    bands = [(0.0,) * 7] * n
+    # (title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w, cbar_h,
+    #  x_tick_overhang_l, x_tick_overhang_r)
+    bands = [(0.0,) * 9] * n
     kwargs = {"height_ratios": ratios} if vertical else {"width_ratios": ratios}
     layout = _core.solve_layout(
         200.0 if vertical else 600.0,

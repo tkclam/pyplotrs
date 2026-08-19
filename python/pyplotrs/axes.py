@@ -26,10 +26,13 @@ from ._const import (
     _CBAR_TICK_LEN,
     _CBAR_WIDTH,
     _DATA_PAD,
+    _DEFAULT_CELL_W,
     _ELLIPSE_N,
     _OFFSET_TEXT_GAP,
     _SEAM_STROKE,
+    _TICK_LABEL_FIT,
     _TICK_LABEL_GAP,
+    _TICK_LABEL_MIN45,
     _TICK_LENGTH,
     _TITLE_GAP,
 )
@@ -50,6 +53,12 @@ from ._draw import (
     _text,
     _th,
     _tw,
+)
+from ._draw import (
+    draw_rotated_tick_label as _draw_rotated_tick_label,
+)
+from ._draw import (
+    tick_rotation_geometry as _tick_rotation_geometry,
 )
 from ._layout import _layout_cell, _Proj, _Rect
 from ._legend import best_position as _best_legend_position
@@ -275,6 +284,10 @@ class Axes(_AxesBase):
         # Descending view without pinning numbers (see ``_ranges``).
         self._xinverted = False
         self._yinverted = False
+        # X tick label angle: "auto" rotates only on a collision (see
+        # `_x_tick_angle`), a number forces it, 0 forces flat.
+        self._xtickrotation = "auto"
+        self._x_tick_deg = 0.0
         # Shared offset/multiplier lifted out of the tick labels, written once
         # at the end of the axis. Computed in `_bands` (which always runs
         # before `_draw`, as the layout depends on it) and rendered there.
@@ -1574,7 +1587,7 @@ class Axes(_AxesBase):
             xticklabels=None, yticklabels=None, xformatter=None, yformatter=None,
             grid=None, aspect=None, xmargin=None, ymargin=None, margin=None,
             xinverted=None, yinverted=None, xminor=None, yminor=None, minor=None,
-            tick_direction=None, tick_length=None) -> "Axes":
+            tick_direction=None, tick_length=None, xtickrotation=None) -> "Axes":
         """Set any combination of title, axis labels, view limits, axis scales,
         and tick/grid/aspect/margin controls.
 
@@ -1598,7 +1611,14 @@ class Axes(_AxesBase):
         intervals inside each major one - non-linear scales already subdivide
         themselves, so this is for linear axes. ``tick_direction`` is ``"out"``
         (default) or ``"in"``, and ``tick_length`` overrides the tick mark
-        length in points."""
+        length in points.
+
+        ``xtickrotation`` is an angle in degrees for the x tick labels, or
+        ``"auto"`` (the default) to rotate only when the labels would otherwise
+        collide, or ``0`` to force them flat and accept the overlap. Long
+        category names on a bar chart are the case this exists for: drawn flat
+        they overprint each other, and the axis stops saying which bar is
+        which."""
         if title is not None:
             self._title = title
         if xlabel is not None:
@@ -1654,6 +1674,9 @@ class Axes(_AxesBase):
             self._tick_direction = tick_direction
         if tick_length is not None:
             self._tick_length = float(tick_length)
+        if xtickrotation is not None:
+            self._xtickrotation = ("auto" if xtickrotation == "auto"
+                                   else float(xtickrotation))
         return self
 
     # -- reading an axes back -----------------------------------------------
@@ -1943,14 +1966,46 @@ class Axes(_AxesBase):
             yr = (yr[1], yr[0])
         return xr, yr
 
+    def _x_tick_angle(self, scene, xticks, xr) -> float:
+        """The angle to set the x tick labels at, in degrees CCW.
+
+        An explicit ``xtickrotation`` wins. ``"auto"`` rotates only when the
+        labels cannot fit flat: the widest one is compared against the space
+        between two ticks, and if it does not fit the labels go to 45 degrees,
+        or to 90 if even that leaves them overlapping. Flat labels that do not
+        fit used to simply overprint each other - on a bar chart of species or
+        condition names, which is where a legend-free categorical axis is most
+        common, the reader could not tell which bar was which.
+
+        The comparison uses the *cell* width rather than the plot width, which
+        is not yet solved when this runs; it is within a few percent, and the
+        decision only has to be right about whether the labels are close to
+        touching.
+        """
+        rot = self._xtickrotation
+        if rot != "auto":
+            return float(rot)
+        if len(xticks) < 2 or self._frame_off:
+            return 0.0
+        size = self._theme.tick_label_size
+        widest = max(_tw(scene, lbl, size) for _, lbl in xticks)
+        # Device points per tick interval, estimated from this axes' cell.
+        cell_w = getattr(self, "_cell_w_hint", None) or _DEFAULT_CELL_W
+        spacing = cell_w / max(1, len(xticks) - 1)
+        if widest <= spacing * _TICK_LABEL_FIT:
+            return 0.0
+        # At 45 degrees a label needs only its own height of horizontal room
+        # per tick; past that, upright is the only thing that always fits.
+        return 45.0 if spacing >= _TICK_LABEL_MIN45 else 90.0
+
     def _bands(self, scene: "_core.Scene", xr, yr) -> tuple[
-        tuple[float, float, float, float, float, float],
+        tuple[float, float, float, float, float, float, float, float, float],
         list[tuple[float, str]],
         list[tuple[float, str]],
     ]:
         """Measure the reserved band sizes for this axes and locate ticks.
 
-        Returns ``(bands, xticks, yticks)`` where ``bands`` is the 6-tuple
+        Returns ``(bands, xticks, yticks)`` where ``bands`` is the 9-tuple
         ``solve_layout`` expects and ticks are ``(value, label)`` lists.
         """
         # Theme type scale - locals shadow the module defaults so every size
@@ -1970,7 +2025,14 @@ class Axes(_AxesBase):
             self._yscale, yr[0], yr[1], 6, self._yticks_manual,
             self._yticklabels_manual, self._yformatter)
 
-        x_tick_h = _TICK_LENGTH + _TICK_LABEL_GAP + tick_label_h
+        # X tick label angle, and the band it needs at that angle. `_bands`
+        # runs before `_draw`, so the angle chosen here is the one drawn.
+        self._x_tick_deg = self._x_tick_angle(scene, xticks, xr)
+        x_label_w = max((_tw(scene, lbl, _TICK_LABEL_SIZE) for _, lbl in xticks),
+                        default=0.0)
+        x_below, _l, _r = _tick_rotation_geometry(
+            x_label_w, t_asc, t_desc, self._x_tick_deg)
+        x_tick_h = _TICK_LENGTH + _TICK_LABEL_GAP + x_below
         y_label_w = max((_tw(scene, lbl, _TICK_LABEL_SIZE) for _, lbl in yticks), default=0.0)
         y_tick_w = _TICK_LENGTH + _TICK_LABEL_GAP + y_label_w
 
@@ -2088,7 +2150,29 @@ class Axes(_AxesBase):
         cbar_w += added["right"]
         self._sec_right_w = added["right"]
 
-        bands = (title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w, cbar_h)
+        # Horizontal room for the first and last x tick labels. Each is drawn
+        # centered on its tick, and the outermost ticks sit on the plot's own
+        # edges, so half of each label hangs outside the plot rect - past the
+        # canvas on an outer column, where it used to be cut mid-glyph with
+        # nothing said. The x tick band cannot hold this: it is exactly as wide
+        # as the plot. So it is reserved beside the plot instead (see
+        # `AxesBands::x_tick_overhang_l`).
+        oh_l = oh_r = 0.0
+        if xticks and not self._frame_off:
+            _b, oh_l, _r = _tick_rotation_geometry(
+                _tw(scene, xticks[0][1], _TICK_LABEL_SIZE), t_asc, t_desc,
+                self._x_tick_deg)
+            _b, _l, oh_r = _tick_rotation_geometry(
+                _tw(scene, xticks[-1][1], _TICK_LABEL_SIZE), t_asc, t_desc,
+                self._x_tick_deg)
+        # The offset/multiplier is right-aligned at the plot's end, so it
+        # overhangs nothing - but it does have to fit, and it is drawn on the
+        # same side as the last tick label.
+        if self._x_offset_text and not self._frame_off:
+            oh_r = max(oh_r, 0.0)
+
+        bands = (title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w, cbar_h,
+                 oh_l, oh_r)
         return bands, xticks, yticks
 
     # -- drawing ------------------------------------------------------------
@@ -2278,9 +2362,13 @@ class Axes(_AxesBase):
                 stroke_color=_SPINE,
                 stroke_width=sw,
             )
-            tw = _tw(scene, label, _TICK_LABEL_SIZE)
-            baseline = py + ph + _TICK_LENGTH + _TICK_LABEL_GAP + t_asc
-            _text(scene, x - tw / 2.0, baseline, label, _TICK_LABEL_SIZE, _BLACK)
+            top = py + ph + _TICK_LENGTH + _TICK_LABEL_GAP
+            if self._x_tick_deg:
+                _draw_rotated_tick_label(scene, x, top, label, _TICK_LABEL_SIZE,
+                                         _BLACK, self._x_tick_deg, t)
+            else:
+                tw = _tw(scene, label, _TICK_LABEL_SIZE)
+                _text(scene, x - tw / 2.0, top + t_asc, label, _TICK_LABEL_SIZE, _BLACK)
 
         # Shorter, unlabeled minor tick marks (log subdivisions etc.).
         _MINOR_LEN = tlen * 0.6

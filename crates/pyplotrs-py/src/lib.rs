@@ -2140,6 +2140,11 @@ fn nice_ticks(vmin: f64, vmax: f64, max_ticks: usize) -> Vec<(f64, String)> {
         .collect()
 }
 
+/// One axes' reserved band sizes as the Python layer sends them, in the order
+/// [`AxesBands`] declares: title, xlabel, ylabel, x ticks, y ticks, colorbar
+/// width, colorbar height, and the two x-tick-label overhangs.
+type CellBands = (f64, f64, f64, f64, f64, f64, f64, f64, f64);
+
 /// Solve a figure layout in one pass. `cells` is a row-major list of
 /// `(title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w, cbar_h)` band
 /// sizes (points); `cbar_h` reserves a *horizontal* colorbar beneath the plot
@@ -2158,7 +2163,7 @@ fn solve_layout(
     height: f64,
     nrows: usize,
     ncols: usize,
-    cells: Vec<(f64, f64, f64, f64, f64, f64, f64)>,
+    cells: Vec<CellBands>,
     outer_margin: f64,
     hspace: f64,
     wspace: f64,
@@ -2184,7 +2189,7 @@ fn solve_layout(
         cells: cells
             .into_iter()
             .map(
-                |(title_h, xlabel_h, ylabel_w, x_tick_h, y_tick_w, cbar_w, cbar_h)| AxesBands {
+                |(
                     title_h,
                     xlabel_h,
                     ylabel_w,
@@ -2192,6 +2197,18 @@ fn solve_layout(
                     y_tick_w,
                     cbar_w,
                     cbar_h,
+                    x_tick_overhang_l,
+                    x_tick_overhang_r,
+                )| AxesBands {
+                    title_h,
+                    xlabel_h,
+                    ylabel_w,
+                    x_tick_h,
+                    y_tick_w,
+                    cbar_w,
+                    cbar_h,
+                    x_tick_overhang_l,
+                    x_tick_overhang_r,
                 },
             )
             .collect(),
