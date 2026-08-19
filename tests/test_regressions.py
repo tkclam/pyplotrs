@@ -7,6 +7,7 @@ so a future failure reads as "this exact thing broke again".
 
 from __future__ import annotations
 
+import math
 import re
 
 import pyplotrs as pp
@@ -1729,6 +1730,22 @@ def test_nan_is_transparent_under_every_norm(norm_name):
     out = _draw._rgba_values([-1.0, 0.0, float("nan")], pp.get_cmap("coolwarm"), made)
     assert tuple(out[2]) == (0, 0, 0, 0), (
         f"{norm_name} painted NaN as {tuple(out[2])} instead of leaving it clear")
+
+
+def test_polar_marks_are_clipped_to_the_dial(tmp_path):
+    """A radius past `rmax` was drawn outside the rim - over the theta tick
+    labels, and off the canvas for a large enough r."""
+    width = 220.0
+    fig, ax = pp.subplots(figsize=(width, width), projection="polar")
+    ax.plot([0.0, math.pi / 2, math.pi], [1.0, 50.0, 1.0])
+    ax.set(rmin=0, rmax=2)
+    out = tmp_path / "polar.svg"
+    fig.save(str(out))
+    svg = out.read_text()
+    assert "<clipPath" in svg, "the data was drawn unclipped"
+    xs = [float(v) for v in re.findall(r"[ML]([-\d.]+) ", svg)]
+    assert min(xs) >= -1.0 and max(xs) <= width + 1.0, (
+        f"geometry spans {min(xs):.1f}..{max(xs):.1f} on a {width:.0f} pt canvas")
 
 
 def test_an_unknown_tex_command_is_reported():

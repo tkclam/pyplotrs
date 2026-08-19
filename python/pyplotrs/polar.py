@@ -249,7 +249,16 @@ class PolarAxes(_AxesBase):
             ly = cy - rr * math.sin(ra)
             _text(scene, lx, ly, lab, t.tick_label_size, t.text_color)
 
-        # 6. Data marks, projected through the polar map.
+        # 6. Data marks, projected through the polar map, clipped to the dial.
+        #
+        # A radius past `rmax` maps outside the rim, and without a clip it was
+        # simply drawn there - over the theta tick labels, and off the canvas
+        # for a large enough r. The dial is a disc, so the clip is a circle
+        # rather than the plot rect: a rectangular clip would still let an
+        # out-of-range point show in the corners, outside the axes a reader
+        # sees.
+        scene.begin_group(1.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+                          clip_circle=(cx, cy, R + t.spine_width))
         for m in self._ordered_marks():
             dev = [to_dev(th, rv) for th, rv in zip(m["theta"], m["r"])]
             if m["kind"] == "line":
@@ -264,6 +273,7 @@ class PolarAxes(_AxesBase):
                 for x, y in dev:
                     _draw_marker(scene, x, y, d, m["marker"], m["color"],
                                  edgecolor=m["edgecolor"])
+        scene.end_group()
 
         # 7. Title in its reserved band.
         if self._title:

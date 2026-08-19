@@ -1862,10 +1862,18 @@ impl Scene {
     }
 
     /// Open a group applying the affine matrix `[a b c d e f]` (mapping
-    /// `(x, y) -> (a·x + c·y + e, b·x + d·y + f)`), an optional rectangular
-    /// clip `(x, y, w, h)` in the group's local space, and `opacity`.
-    /// Subsequent draw calls go into this group until [`Scene::end_group`].
-    #[pyo3(signature = (a, b, c, d, e, f, clip=None, opacity=1.0))]
+    /// `(x, y) -> (a·x + c·y + e, b·x + d·y + f)`), an optional clip in the
+    /// group's local space, and `opacity`. Subsequent draw calls go into this
+    /// group until [`Scene::end_group`].
+    ///
+    /// The clip is either rectangular - `clip=(x, y, w, h)`, what a cartesian
+    /// plot rect needs - or circular: `clip_circle=(cx, cy, r)`, which is what
+    /// a polar dial needs, its data region being a disc. `ClipPath` has always
+    /// held a general path; only this binding was rectangle-only, so polar
+    /// marks were drawn unclipped and a radius past `rmax` ran out over the
+    /// tick labels and off the page. Passing both intersects them, as nested
+    /// clips do.
+    #[pyo3(signature = (a, b, c, d, e, f, clip=None, opacity=1.0, clip_circle=None))]
     #[allow(clippy::too_many_arguments)]
     fn begin_group(
         &mut self,
@@ -1877,8 +1885,16 @@ impl Scene {
         f: f64,
         clip: Option<(f64, f64, f64, f64)>,
         opacity: f32,
+        clip_circle: Option<(f64, f64, f64)>,
     ) {
-        let clip = clip.map(|(x, y, w, h)| ClipPath::rect(KRect::new(x, y, x + w, y + h)));
+        let clip = match (clip, clip_circle) {
+            (_, Some((cx, cy, r))) => Some(ClipPath {
+                geometry: Circle::new(Point::new(cx, cy), r).to_path(0.05),
+                rule: pyplotrs_core::FillRule::NonZero,
+            }),
+            (Some((x, y, w, h)), None) => Some(ClipPath::rect(KRect::new(x, y, x + w, y + h))),
+            (None, None) => None,
+        };
         self.stack.push(Group {
             transform: Affine::new([a, b, c, d, e, f]),
             clip,

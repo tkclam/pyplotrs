@@ -70,9 +70,11 @@ class _MathCapture:
     def __getattr__(self, name):  # forward every untouched method/attr
         return getattr(self._real, name)
 
-    def begin_group(self, a, b, c, d, e, f, clip=None, opacity=1.0):
+    def begin_group(self, a, b, c, d, e, f, clip=None, opacity=1.0,
+                    clip_circle=None):
         self._xf.append(_compose(self._xf[-1], (a, b, c, d, e, f)))
-        self._real.begin_group(a, b, c, d, e, f, clip=clip, opacity=opacity)
+        self._real.begin_group(a, b, c, d, e, f, clip=clip, opacity=opacity,
+                               clip_circle=clip_circle)
 
     def end_group(self):
         self._xf.pop()
