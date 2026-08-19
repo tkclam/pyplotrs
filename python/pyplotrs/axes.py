@@ -2081,7 +2081,14 @@ class Axes(_AxesBase):
                 cbar_h = _CBAR_GAP + _CBAR_WIDTH + _CBAR_TICK_LEN + _CBAR_TICK_GAP
                 cbar_h += tick_label_h
                 if cb["label"]:
-                    a, d, _ = scene.font_vmetrics(_AXIS_LABEL_SIZE)
+                    # Measured with `_th` on the *actual* label, not with the
+                    # font's global line height: a label containing math has
+                    # its own ascent and depth (a nested fraction is far taller
+                    # than a line of text), and reserving `font_vmetrics` for
+                    # it under-reserves the band the rotated label is then
+                    # centered in - so its ink lands past the band's edge,
+                    # which on an outermost band is the page edge.
+                    a, d = _th(scene, cb["label"], _AXIS_LABEL_SIZE, label_font, t)
                     cbar_h += a + d + _AXIS_LABEL_GAP
             else:
                 max_lbl = max(
@@ -2090,7 +2097,7 @@ class Axes(_AxesBase):
                 )
                 cbar_w = _CBAR_GAP + _CBAR_WIDTH + _CBAR_TICK_LEN + _CBAR_TICK_GAP + max_lbl
                 if cb["label"]:
-                    a, d, _ = scene.font_vmetrics(_AXIS_LABEL_SIZE)
+                    a, d = _th(scene, cb["label"], _AXIS_LABEL_SIZE, label_font, t)
                     cbar_w += a + d + _AXIS_LABEL_GAP
 
         # A twinx reserves right-side space for its y ticks/labels (shares the
@@ -2101,7 +2108,7 @@ class Axes(_AxesBase):
             tlw = max((_tw(scene, lbl, _TICK_LABEL_SIZE) for _, lbl in tyt), default=0.0)
             cbar_w = _TICK_LENGTH + _TICK_LABEL_GAP + tlw
             if self._twinx._ylabel:
-                a, d, _ = scene.font_vmetrics(_AXIS_LABEL_SIZE)
+                a, d = _th(scene, self._twinx._ylabel, _AXIS_LABEL_SIZE, label_font, t)
                 cbar_w += a + d + _AXIS_LABEL_GAP
         if self._twiny is not None:
             t_asc2, t_desc2, _ = scene.font_vmetrics(_TICK_LABEL_SIZE)
@@ -2139,7 +2146,7 @@ class Axes(_AxesBase):
                 # it sits beyond, one to the primary's own axis label beyond
                 # it. Without the outer gap the two collide, because the
                 # primary label's glyph box overhangs its band.
-                a, d, _ = scene.font_vmetrics(_AXIS_LABEL_SIZE)
+                a, d = _th(scene, spec["label"], _AXIS_LABEL_SIZE, label_font, t)
                 thick += _AXIS_LABEL_GAP + (a + d) + _AXIS_LABEL_GAP
             spec["_offset"] = outward[side]
             outward[side] += thick
@@ -2433,7 +2440,10 @@ class Axes(_AxesBase):
 
         # Y-axis label, rotated 90deg CCW, centered on the plot area's height.
         if self._ylabel:
-            a, d, _ = scene.font_vmetrics(_AXIS_LABEL_SIZE)
+            # `_th`, not `font_vmetrics`: the band was reserved from the label's
+            # own extents, so the pivot has to be computed from the same ones or
+            # the label is centered against a box it does not have.
+            a, d = _th(scene, self._ylabel, _AXIS_LABEL_SIZE, label_font, t)
             tw = _tw(scene, self._ylabel, _AXIS_LABEL_SIZE, label_font, t)
             band = layout.ylabel
             pivot_x = band.x + band.w / 2.0 - (d - a) / 2.0
@@ -2587,8 +2597,8 @@ class Axes(_AxesBase):
         (matching the primary y label)."""
         t = self._theme
         size = t.axis_label_size
-        a, d, _ = scene.font_vmetrics(size)
-        tw = _tw(scene, text, size)
+        a, d = _th(scene, text, size, _font(t.axis_label_weight), t)
+        tw = _tw(scene, text, size, _font(t.axis_label_weight), t)
         pivot_x = band.x + band.w - (a + d) / 2.0 if right else band.x + (a + d) / 2.0
         pivot_y = plot.y + plot.h / 2.0
         if right:
