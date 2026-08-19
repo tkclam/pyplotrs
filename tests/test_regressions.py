@@ -1555,3 +1555,17 @@ def test_an_inverted_axis_flips_the_image_and_not_the_rect(kw, corners, tmp_path
         except zlib.error:
             continue
     assert ops, f"{kw or 'plain'}: the PDF has no image at all"
+
+
+def test_svg_states_its_size_in_points(tmp_path):
+    """`width="200"` is 200 CSS px = 2.08 in, while the PDF page is 200 pt =
+    2.78 in - so the same figure was published at 75% of its size in SVG, and
+    8 pt type came out at 6 pt."""
+    fig, ax = pp.subplots(figsize=(200, 150))
+    ax.line([0, 1], [0, 1])
+    out = tmp_path / "size.svg"
+    fig.save(str(out))
+    head = out.read_text()[:400]
+    assert 'width="200pt"' in head and 'height="150pt"' in head, (
+        f"SVG size is unitless (CSS px), not points: {head[:200]}")
+    assert 'viewBox="0 0 200 150"' in head, "the user-unit grid should stay 1:1"

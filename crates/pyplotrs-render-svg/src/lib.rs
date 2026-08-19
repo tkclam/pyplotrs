@@ -437,10 +437,19 @@ pub fn render_svg_at(scene: &Scene, ppi: f64) -> String {
     }
 
     let mut out = String::new();
+    // `width`/`height` carry an explicit `pt`, and only the `viewBox` is left
+    // unitless. A scene coordinate is a PostScript point - the PDF page is
+    // sized in them and the PNG's dpi is derived from them - but an unqualified
+    // SVG length is a CSS pixel, i.e. 1/96 inch against a point's 1/72. Writing
+    // the number bare therefore published the same figure at 75% of its size in
+    // SVG, turning 8 pt type into 6 pt: under most journals' minimum, and a
+    // quarter off any width a caption promised. (matplotlib writes `pt` here
+    // for the same reason.) The `viewBox` keeps the user-unit grid at 1:1 with
+    // the scene, so nothing inside has to change.
     writeln!(
         out,
         r#"<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{w}" height="{h}" viewBox="0 0 {w} {h}">"#
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{w}pt" height="{h}pt" viewBox="0 0 {w} {h}">"#
     )
     .unwrap();
 

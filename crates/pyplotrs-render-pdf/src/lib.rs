@@ -304,6 +304,23 @@ impl PdfRenderer {
     }
 }
 
+/// A document that states the color space its numbers are in.
+///
+/// `no_device_cs` makes krilla embed the sRGB ICC profile and tag RGB colors
+/// against it, rather than emitting bare `DeviceRGB`. Untagged `DeviceRGB` has
+/// no defined meaning: it is whatever the output device makes of the numbers,
+/// so a color-managed print pipeline is free to read (68, 1, 84) as something
+/// other than the viridis endpoint the figure encoded. For a plot that is only
+/// ever read on a screen it makes no visible difference; for one going to a
+/// journal's press it is the difference between a specified color and a hint.
+/// The cost is one embedded profile per document, a few KB.
+fn new_document() -> Document {
+    Document::new_with(krilla::SerializeSettings {
+        no_device_cs: true,
+        ..Default::default()
+    })
+}
+
 /// Render `scene` to PDF bytes.
 ///
 /// Fails rather than panics on a degenerate scene (a zero or negative figure
@@ -316,7 +333,7 @@ pub fn render_pdf(scene: &Scene) -> Result<Vec<u8>, String> {
 
 /// [`render_pdf`], embedding images at `ppi` pixels per inch.
 pub fn render_pdf_at(scene: &Scene, ppi: f64) -> Result<Vec<u8>, String> {
-    let mut document = Document::new();
+    let mut document = new_document();
     render_into(&mut document, scene, None, ppi)?;
     document
         .finish()
@@ -338,7 +355,7 @@ pub fn render_pdf_tagged_at(
     alt: &str,
     ppi: f64,
 ) -> Result<Vec<u8>, String> {
-    let mut document = Document::new();
+    let mut document = new_document();
     render_into(&mut document, scene, Some(alt), ppi)?;
 
     let mut meta = Metadata::new()
