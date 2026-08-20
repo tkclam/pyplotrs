@@ -239,9 +239,9 @@ def test_color_space_round_trips(space, forward, back, rgb):
 def test_lightness_is_ordered_the_way_a_reader_sees_it():
     """A conversion can round-trip perfectly and still have the axes swapped."""
     black = color.to_oklab((0, 0, 0))[0]
-    grey = color.to_oklab((128, 128, 128))[0]
+    gray = color.to_oklab((128, 128, 128))[0]
     white = color.to_oklab((255, 255, 255))[0]
-    assert black < grey < white, (black, grey, white)
+    assert black < gray < white, (black, gray, white)
     assert abs(black) < 1e-6 and abs(white - 1.0) < 1e-3
 
 
@@ -263,9 +263,9 @@ def test_perceptual_distance_is_a_metric():
 def test_cvd_simulation_moves_the_confusable_axis(kind):
     """Simulating a deficiency has to change the colors it should confuse and
     leave grays alone - otherwise `cvd_safe_report` is scoring noise."""
-    grey = (128, 128, 128)
+    gray = (128, 128, 128)
     assert max(abs(a - b) for a, b in
-               zip(color.simulate_cvd(grey, kind), grey)) <= 2
+               zip(color.simulate_cvd(gray, kind), gray)) <= 2
 
     red, green = (220, 30, 30), (30, 180, 30)
     before = color.distance(red, green)
