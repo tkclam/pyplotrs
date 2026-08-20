@@ -158,7 +158,6 @@ addopts = "-m 'not packaging'"
 # far above any real test here (the whole suite is ~25s) and leaves room for the
 # emulated armv7/s390x/ppc64le legs, which run everything under QEMU.
 faulthandler_timeout = 600
-faulthandler_exit_on_timeout = true
 
 [tool.maturin]
 module-name = "pyplotrs._pyplotrs_core"

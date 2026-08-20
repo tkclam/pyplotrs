@@ -75,7 +75,8 @@ def test_every_gallery_image_is_shown_on_the_gallery_page():
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=[s.stem for s in SCRIPTS])
-def test_example_output_matches_the_committed_gallery_image(script, tmp_path, monkeypatch):
+def test_example_output_matches_the_committed_gallery_image(
+        script, tmp_path, monkeypatch, needs_bundled_body_font):
     """The picture on the gallery page is what the code beside it produces.
 
     Compared with a tolerance rather than byte-for-byte, for the reason

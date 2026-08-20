@@ -271,6 +271,26 @@ def test_third_party_notices_are_up_to_date():
     adding or bumping a dependency must regenerate it."""
     if shutil.which("cargo") is None:
         pytest.skip("cargo not available")
+    # `cargo` on PATH does not mean `cargo` can resolve *this* workspace. The
+    # wheel-verification jobs never set up a toolchain - maturin builds the
+    # extension inside a container - so they run against whatever cargo the
+    # runner image happens to preinstall, where `cargo metadata` exited 101 and
+    # the generator surfaced it as "a dependency may carry a license outside the
+    # allowed set". That reads as a licensing problem and was an environment
+    # problem. Resolve the graph first and separate the two: an environment that
+    # cannot resolve it skips, and only a generator that fails on a graph it
+    # *could* read is a real finding.
+    probe = subprocess.run(
+        ["cargo", "metadata", "--format-version", "1", "--all-features",
+         "--manifest-path", str(ROOT / "Cargo.toml")],
+        capture_output=True, text=True,
+    )
+    if probe.returncode != 0:
+        pytest.skip(
+            "`cargo metadata` cannot resolve this workspace here "
+            f"(exit {probe.returncode}), so the notices cannot be regenerated "
+            f"to compare against:\n{probe.stderr.strip()[:400]}"
+        )
     committed = (ROOT / "THIRD-PARTY-NOTICES.md").read_text(encoding="utf-8")
     result = subprocess.run(
         [sys.executable, "tools/gen_third_party_notices.py"],

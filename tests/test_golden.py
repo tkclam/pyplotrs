@@ -112,7 +112,7 @@ CASES["emphasis"] = _emphasis_case
 
 
 @pytest.mark.parametrize("name", sorted(CASES))
-def test_golden(name, tmp_path):
+def test_golden(needs_bundled_body_font, name, tmp_path):
     fig = CASES[name]()
     out = tmp_path / f"{name}.png"
     fig.save(str(out))
