@@ -52,8 +52,8 @@ fig.save("hello.html")  # self-contained, selectable text
   rendering and the compute kernels, so a thread pool over figures actually
   parallelizes. See
   [benchmarks](https://tkclam.github.io/pyplotrs/guide/performance/) for the
-  measured table, the machine it came from, and the one case that is *slower*
-  than matplotlib.
+  measured table, the caveats that come with it, and the one case where export
+  is *slow* — a polyline whose consecutive points jump across the panel.
 - **Portable output** — the chosen font is **embedded into every saved file**
   (PDF/SVG/PNG/HTML), so a figure looks identical on any machine, regardless of
   the fonts installed there.
@@ -102,15 +102,17 @@ Full docs live at **<https://tkclam.github.io/pyplotrs/>**:
   figure
 - [Tutorial](https://tkclam.github.io/pyplotrs/tutorial/) — one publication
   figure, built step by step
-- [Notebooks](docs/notebooks/) — eight runnable notebooks, committed with their
-  output: [quickstart](docs/notebooks/01_quickstart.ipynb),
-  [coming from matplotlib](docs/notebooks/02_from_matplotlib.ipynb) (rendered
-  side by side against it), [plot types](docs/notebooks/03_plot_types.ipynb),
-  [layout](docs/notebooks/04_layout_and_composition.ipynb),
-  [styling and color](docs/notebooks/05_styling_and_color.ipynb),
-  [text and math](docs/notebooks/06_text_and_math.ipynb),
-  [animation](docs/notebooks/07_animation.ipynb), and
-  [output and performance](docs/notebooks/08_output_and_performance.ipynb)
+- [Notebooks](https://github.com/tkclam/pyplotrs/tree/main/docs/notebooks) —
+  eight runnable notebooks, committed with their output:
+  [quickstart](https://github.com/tkclam/pyplotrs/blob/main/docs/notebooks/01_quickstart.ipynb),
+  [coming from matplotlib](https://github.com/tkclam/pyplotrs/blob/main/docs/notebooks/02_from_matplotlib.ipynb)
+  (rendered side by side against it),
+  [plot types](https://github.com/tkclam/pyplotrs/blob/main/docs/notebooks/03_plot_types.ipynb),
+  [layout](https://github.com/tkclam/pyplotrs/blob/main/docs/notebooks/04_layout_and_composition.ipynb),
+  [styling and color](https://github.com/tkclam/pyplotrs/blob/main/docs/notebooks/05_styling_and_color.ipynb),
+  [text and math](https://github.com/tkclam/pyplotrs/blob/main/docs/notebooks/06_text_and_math.ipynb),
+  [animation](https://github.com/tkclam/pyplotrs/blob/main/docs/notebooks/07_animation.ipynb), and
+  [output and performance](https://github.com/tkclam/pyplotrs/blob/main/docs/notebooks/08_output_and_performance.ipynb)
 - [Coming from matplotlib](https://tkclam.github.io/pyplotrs/migrating-from-matplotlib/)
   — the differences, with a translation table
 - [User guide](https://tkclam.github.io/pyplotrs/guide/figure-and-axes/) —
@@ -132,12 +134,15 @@ Licensed under the **MIT license**
 ([LICENSE](https://github.com/tkclam/pyplotrs/blob/main/LICENSE)).
 
 pyplotrs redistributes a few third-party assets, each under a permissive
-license, and ships every license text in the wheel under
-`pyplotrs-<version>.dist-info/licenses/`:
+license. Every bundled asset's license text ships in the wheel under
+`pyplotrs-<version>.dist-info/licenses/`, alongside `THIRD-PARTY-NOTICES.md`,
+which names each of the compiled-in Rust crates and the license it is taken
+under:
 
 | Asset | License |
 |---|---|
-| Liberation Sans, STIX Two Math (bundled fonts) | SIL Open Font License 1.1 |
+| Liberation Sans, Fira Math, STIX Two Math (bundled fonts) | SIL Open Font License 1.1 |
+| DejaVu Sans subset (bundled math symbols) | Bitstream Vera license |
 | `viridis`/`plasma`/`inferno`/`magma`/`cividis` | CC0 1.0 (public domain) |
 | colorcet colormaps (`cet_*`) | **CC-BY 4.0 — attribution required** |
 | cmocean (`cmo_*`) · seaborn (`sns_*`) | MIT · BSD-3-Clause |
