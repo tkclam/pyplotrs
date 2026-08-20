@@ -56,7 +56,7 @@ The version lives in **one** place: `[workspace.package].version` in
    git push origin v0.1.0
    ```
 
-   The tag pattern is `v[0-9]+.[0-9]+.[0-9]+`; anything else does not trigger
+   The tag pattern is `v[0-9]+.[0-9]+.[0-9]+*`; anything else does not trigger
    a release. The `release` job asserts the tag matches the package version and
    that a matching wheel exists **before** uploading, because a wrong version
    on PyPI can be yanked but never replaced.

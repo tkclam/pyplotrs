@@ -17,9 +17,16 @@ on:
     # version happened to be in the metadata to PyPI - which, on a repository
     # sitting at 0.0.1, means tagging `v0.1.0` publishes `0.0.1` and burns both
     # names. The release job now also asserts the tag matches the metadata.
+    #
+    # These are GitHub filter patterns, not regexes, and GitHub validates them
+    # when it loads the file: the previous second pattern ended `[ab-]*`, whose
+    # trailing `-` is an unterminated range, so GitHub rejected the *whole
+    # workflow* with "push event contained invalid tags patterns". Not one job
+    # ran - no tests, no wheels, and no release was reachable by any tag.
+    # The trailing `*` matches zero or more characters, so one pattern covers
+    # both `v0.1.0` and a prerelease like `v0.1.0rc1`.
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
-      - 'v[0-9]+.[0-9]+.[0-9]+[ab-]*'
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
   pull_request:
   workflow_dispatch:
 
