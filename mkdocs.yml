@@ -133,6 +133,16 @@ markdown_extensions:
   - pymdownx.snippets:
       base_path: ["."]
       check_paths: true
+  # What turns `:material-arrow-right:` into an icon. Without it the shortcodes
+  # are not markup at all, just text, so the home page shipped buttons reading
+  # "Get started :material-arrow-right:" and six feature cards that opened with
+  # a literal `:material-vector-square:`. Material documents the icon syntax but
+  # the extension that implements it is not on by default; `attr_list` was
+  # already here, so the `{ .lg .middle }` half of the card syntax worked and
+  # made the omission look like a typo rather than a missing extension.
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
 
 extra:
   social:
