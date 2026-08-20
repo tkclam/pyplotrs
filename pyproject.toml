@@ -150,6 +150,15 @@ markers = [
     "packaging: builds and resolves the sdist; slow, needs maturin + cargo",
 ]
 addopts = "-m 'not packaging'"
+# Dump every thread's stack and abort if one test runs this long, instead of
+# letting the job sit until GitHub's 60-minute timeout kills it with no output
+# at all. That is exactly what the `linux (x86_64)` wheel leg did: it printed a
+# progress line and then went silent for 43 minutes, and the log said only "The
+# operation was canceled" - no test name, no stack, nothing to act on. 600s is
+# far above any real test here (the whole suite is ~25s) and leaves room for the
+# emulated armv7/s390x/ppc64le legs, which run everything under QEMU.
+faulthandler_timeout = 600
+faulthandler_exit_on_timeout = true
 
 [tool.maturin]
 module-name = "pyplotrs._pyplotrs_core"

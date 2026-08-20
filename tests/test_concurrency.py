@@ -26,6 +26,7 @@ from __future__ import annotations
 import functools
 import hashlib
 import math
+import random
 import threading
 import time
 from array import array
@@ -84,16 +85,14 @@ def _build(seed: int):
 
 # -- the GIL is actually released --------------------------------------------
 
-#: The measurement window. The watchdog below ticks every 1 ms, so a window of
-#: `w` seconds offers at most `w * 1000` scheduling opportunities - and the
-#: ratio being asserted is only as trustworthy as that count. A single 35 ms
-#: `hist2d` offers 35, and on a macOS runner it landed 1, which is
-#: indistinguishable from "the GIL was held" no matter which is true. 250 ms
-#: gives ~250, enough that noise cannot swing the ratio past the bar.
+#: The measurement window a kernel is repeated into. Long enough that the
+#: watchdog's count is a rate rather than an accident: a single `hist2d` runs in
+#: 35 ms on a macOS runner, and one call that short gave a count of 1, which is
+#: indistinguishable from "the GIL was held" no matter which is true.
 _MEASURE_SECONDS = 0.25
 
 
-def _watchdog_steps_during(call) -> tuple[int, float]:
+def _watchdog_steps_during(call, fill_window: bool = True) -> tuple[int, float]:
     """Run ``call`` while a second thread counts how often it is scheduled.
 
     Returns ``(steps, elapsed)``. A thread that never runs during a call of
@@ -111,10 +110,17 @@ def _watchdog_steps_during(call) -> tuple[int, float]:
     stop = threading.Event()
 
     def tick():
+        # No sleep. A `time.sleep(0.001)` here caps the count at 1000/s in
+        # theory and at whatever the platform's timer actually delivers in
+        # practice - on a macOS runner that was ~40/s, so both the kernel and
+        # the GIL-holding control measured within a factor of two of each other
+        # and the ratio between them stopped meaning anything. A bare spin is
+        # not timer-bound: this loop advances exactly when it can take the GIL,
+        # which is the property under test, and it separates the two cases by
+        # four orders of magnitude instead of by 74%.
         nonlocal steps
         while not stop.is_set():
             steps += 1
-            time.sleep(0.001)
 
     watcher = threading.Thread(target=tick, daemon=True)
     watcher.start()
@@ -123,7 +129,7 @@ def _watchdog_steps_during(call) -> tuple[int, float]:
         while True:
             call()
             elapsed = time.perf_counter() - started
-            if elapsed >= _MEASURE_SECONDS:
+            if not fill_window or elapsed >= _MEASURE_SECONDS:
                 break
     finally:
         stop.set()
@@ -143,9 +149,20 @@ def _gil_held_rate() -> float:
     It is not zero. A watchdog started just before the call and stopped just
     after gets a step or two in at each edge, which is exactly why this test
     cannot simply assert `steps > 0` - a fully GIL-bound call still scored 3.
+
+    The list is **shuffled**, and that is load-bearing. It used to be
+    `list(range(4_000_000))[::-1]`, which is Timsort's best case: the descending
+    run is detected and reversed in one pass, so the "long GIL-held call" took
+    39 ms rather than the ~950 ms a real sort of this size costs. Short enough
+    that the measurement loop ran it six times over, and every boundary between
+    those runs is a point where the interpreter happily hands the GIL to the
+    watchdog - so the floor was measuring the gaps between the control calls
+    instead of the inside of one. Sorted once, unsorted, it is a single
+    uninterrupted C call, which is what a floor has to be.
     """
-    reversed_ints = list(range(4_000_000))[::-1]
-    steps, elapsed = _watchdog_steps_during(lambda: sorted(reversed_ints))
+    shuffled = list(range(4_000_000))
+    random.Random(0).shuffle(shuffled)
+    steps, elapsed = _watchdog_steps_during(lambda: sorted(shuffled), fill_window=False)
     return steps / max(elapsed * 1000.0, 1e-9)
 
 

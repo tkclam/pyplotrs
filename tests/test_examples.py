@@ -17,6 +17,7 @@ import runpy
 from pathlib import Path
 
 import pytest
+from conftest import GOLDEN_FRAC_TOL, GOLDEN_MEAN_TOL, image_diff, read_png
 
 EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
 SCRIPTS = sorted(EXAMPLES.glob("*.py"))
@@ -60,7 +61,7 @@ def test_every_gallery_image_is_shown_on_the_gallery_page():
     Matched against the page rather than against script names: one script can
     produce several images (`themes.py` renders every built-in theme), so
     stem-for-stem is the wrong pairing. That an image is *reproducible* is
-    covered by the byte comparison above.
+    covered by the tolerance comparison below.
     """
     images = EXAMPLES.parent / "docs" / "gallery" / "images"
     gallery = (EXAMPLES.parent / "docs" / "gallery" / "index.md").read_text(encoding="utf-8")
@@ -77,25 +78,55 @@ def test_every_gallery_image_is_shown_on_the_gallery_page():
 def test_example_output_matches_the_committed_gallery_image(script, tmp_path, monkeypatch):
     """The picture on the gallery page is what the code beside it produces.
 
-    Byte comparison, not a tolerance: both sides come from the same renderer on
-    the same machine, so any difference means the image was not regenerated
-    after a change. Skipped rather than failed when the committed image is
-    absent — adding an example before its image is a normal intermediate state.
+    Compared with a tolerance rather than byte-for-byte, for the reason
+    ``conftest`` already gives for the golden tests: rendering is
+    byte-deterministic for one build of the extension, not across builds. This
+    was a `read_bytes() == read_bytes()`, which held here and on the job that
+    compiles the extension on the runner, and broke on the wheel-verification
+    job, where the artifact comes out of a manylinux container built by a
+    different toolchain - five images differing in their last bits, reported as
+    if the gallery had gone stale. The check that actually matters is that the
+    picture has not *moved*, and a tolerance says that portably while still
+    failing loudly on a real regeneration miss.
+
+    Skipped rather than failed when the committed image is absent - adding an
+    example before its image is a normal intermediate state.
     """
     committed = EXAMPLES.parent / "docs" / "gallery" / "images"
     monkeypatch.chdir(tmp_path)
     runpy.run_path(str(script), run_name="__main__")
 
+    stale = (
+        "If the change is intentional, re-run "
+        "`python tools/build_gallery_images.py` and commit the result."
+    )
     compared = 0
     for produced in sorted(tmp_path.iterdir()):
         reference = committed / produced.name
         if not reference.is_file():
             continue
         compared += 1
-        assert produced.read_bytes() == reference.read_bytes(), (
-            f"{produced.name} differs from the committed gallery image. If the "
-            f"change is intentional, re-run `python examples/{script.name}` "
-            f"from {committed} and commit the result."
+        if produced.suffix != ".png":
+            # The one non-PNG in the gallery is `animation_wave.gif`, and there
+            # is no dependency-free GIF decoder here the way `read_png` is a
+            # dependency-free PNG one. Size is the coarse stand-in: a stale
+            # animation moves it by far more than a rebuild does.
+            grew = abs(produced.stat().st_size - reference.stat().st_size)
+            assert grew <= reference.stat().st_size * 0.05, (
+                f"{produced.name} is {produced.stat().st_size} bytes against a "
+                f"committed {reference.stat().st_size}. {stale}"
+            )
+            continue
+        gw, gh, gold = read_png(reference)
+        rw, rh, got = read_png(produced)
+        assert (rw, rh) == (gw, gh), (
+            f"{produced.name} is {(rw, rh)} against a committed {(gw, gh)}. {stale}"
+        )
+        mean, frac, worst = image_diff(gold, got)
+        assert mean <= GOLDEN_MEAN_TOL and frac <= GOLDEN_FRAC_TOL, (
+            f"{produced.name} differs from the committed gallery image - mean "
+            f"{mean:.5f} (limit {GOLDEN_MEAN_TOL}), {frac * 100:.4f}% of channels "
+            f"off by >4 (limit {GOLDEN_FRAC_TOL * 100:.4f}%), worst {worst}. {stale}"
         )
     if compared == 0:
         pytest.skip(f"no committed gallery image for {script.name} yet")

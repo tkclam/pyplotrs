@@ -277,8 +277,15 @@ jobs:
             set -e
             python3 -m virtualenv .venv
             source .venv/bin/activate
+            # Bare `pytest`, not `pyplotrs[test]` - the same reason the linux
+            # job gives, and this job needed it just as much. numpy publishes no
+            # musllinux armv7 wheel, so the extra resolved to a 20 MB
+            # numpy-2.5.2.tar.gz and tried to build it under emulation on an
+            # Alpine image with no compiler: "Detecting compiler via `cc` ->
+            # No such file or directory", and the leg failed before running a
+            # single test. The tests that want numpy skip themselves one by one.
+            pip install pytest
             pip install pyplotrs --no-index --no-deps --find-links dist --force-reinstall
-            pip install "pyplotrs[test]"
             pytest
 
   windows:
