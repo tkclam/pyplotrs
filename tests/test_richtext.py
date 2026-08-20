@@ -12,6 +12,7 @@ from, and the text a PDF still hands back to `pdftotext`.
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 
 import pyplotrs as pp
@@ -285,6 +286,8 @@ def test_a_math_span_inside_rich_text_reaches_the_mathjax_html(tmp_path):
 
 
 def test_a_pdf_still_extracts_the_whole_label_in_order(tmp_path):
+    if shutil.which("pdftotext") is None:
+        pytest.skip("pdftotext not available")
     fig, ax = pp.subplots(figsize=(400, 260))
     ax.line([0, 1, 2], [0, 1, 4])
     ax.set(title=pp.rich("Growth ", pp.bold("+42%"), " over ", pp.italic("6 months")))

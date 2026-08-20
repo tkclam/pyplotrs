@@ -271,7 +271,8 @@ def test_the_bundled_symbol_font_is_symbols_only():
     digits, so it can never win a lookup that the body family or the math
     font's own alphabets should have answered.
     """
-    from fontTools.ttLib import TTFont
+    ttLib = pytest.importorskip("fontTools.ttLib")
+    TTFont = ttLib.TTFont
 
     path = Path(__file__).parent.parent / "assets" / "fonts" / "DejaVuSans-MathSymbols.ttf"
     font = TTFont(path, fontNumber=0)

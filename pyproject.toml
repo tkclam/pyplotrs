@@ -104,14 +104,20 @@ docs = [
 # zero-runtime-dependency stance, and every test that needs more is skipped
 # individually rather than at module scope - a module-level `importorskip`
 # silently disabled 26 tests in CI and hid a crash for months.
-#   numpy  - the array-ingest tests; the fast path exists for it, so it has to
-#            be exercised somewhere, and CI is that somewhere.
-#   tomli  - `tomllib` backport for 3.9/3.10, used by the packaging tests.
+#   numpy      - the array-ingest tests; the fast path exists for it, so it has
+#                to be exercised somewhere, and CI is that somewhere.
+#   tomli      - `tomllib` backport for 3.9/3.10, used by the packaging tests.
+#   fonttools  - reads the bundled DejaVu subset back and asserts it is symbols
+#                only, with no MATH table and no letters. The test skips itself
+#                without it, and a skipped test proves nothing, so CI installs
+#                it. (`pdftotext`, which the PDF-text tests need, is a binary
+#                rather than a wheel - CI.yml installs poppler-utils.)
 test = [
     "pytest>=8",
     "pytest-cov>=5",
     "numpy>=1.24",
     "tomli>=2; python_version<'3.11'",
+    "fonttools>=4.40",
 ]
 # Benchmark-only: `benchmarks/benchmark.py` times pyplotrs head-to-head against matplotlib.
 # Not a runtime dependency of pyplotrs itself. Install with `pip install -e .[bench]`.

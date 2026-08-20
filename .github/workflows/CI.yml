@@ -88,6 +88,12 @@ jobs:
         # bare `pytest` over a checkout with no tests exits 5, which used to
         # look like a failure while asserting nothing.
         run: |
+          # poppler-utils supplies `pdftotext`. Without it the tests that read
+          # a saved PDF back and assert the label is still extractable text
+          # skip themselves - and those are the ones covering the library's
+          # headline promise, so the gate would be green while never checking
+          # it. Cheap to install, so it is not optional here.
+          sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
           python -m pip install ".[test]"
           pytest -q --strict-markers \
             --cov=pyplotrs --cov-report=term-missing --cov-fail-under=90

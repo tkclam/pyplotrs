@@ -14,6 +14,7 @@ SVG. That is the whole premise of the library, so it is asserted here.
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 
 import pyplotrs as pp
@@ -57,7 +58,7 @@ def test_rotated_text_is_a_group_transform_in_svg(tmp_path):
 
 def test_rotated_text_stays_selectable_in_pdf(tmp_path):
     """The point of the group-transform approach rather than outlining."""
-    if not subprocess.run(["which", "pdftotext"], capture_output=True).stdout:
+    if shutil.which("pdftotext") is None:
         pytest.skip("pdftotext not available")
     fig, ax = pp.subplots(figsize=(300, 220))
     ax.line([0, 1], [0, 1])
