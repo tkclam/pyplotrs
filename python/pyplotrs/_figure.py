@@ -573,10 +573,10 @@ def subplots(nrows: int = 1, ncols: int = 1, *, figsize: tuple[float, float] = D
     ``figsize`` is the canvas ``(width, height)`` in **points** by default, so a
     plot is sized directly against its font scale; pass ``units="in"``, ``"cm"``
     or ``"mm"`` for another unit. ``projection="3d"`` makes every axes an
-    [`Axes3D`]. ``theme`` is a [`Theme`] (or preset name like ``"nature"``); it
-    flows to every axes. Returns ``(fig, ax)`` for a 1x1 grid,
-    ``(fig, [ax, ...])`` when one dimension is 1, and ``(fig, [[ax, ...], ...])``
-    otherwise (row-major).
+    [`Axes3D`]. ``theme`` is a [`Theme`] (or a preset name — ``"default"``,
+    ``"dark"``, ``"grayscale"``); it flows to every axes. Returns
+    ``(fig, ax)`` for a 1x1 grid, ``(fig, [ax, ...])`` when one dimension is 1,
+    and ``(fig, [[ax, ...], ...])`` otherwise (row-major).
 
     ``width_ratios`` / ``height_ratios`` give relative column widths and row
     heights, e.g. ``width_ratios=[2, 1]`` for a wide panel beside a narrow one.
