@@ -127,7 +127,7 @@ def test_weight_and_style_reach_the_output(tmp_path):
         ax.text(0.1, 0.8, "Handgloves", **kw)
         out = tmp_path / "t.svg"
         fig.save(str(out))
-        return out.read_text()
+        return out.read_text(encoding="utf-8")
 
     plain = widths()
     bold = widths(weight="bold")

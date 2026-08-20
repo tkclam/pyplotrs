@@ -83,7 +83,7 @@ def test_get_xticklabels_matches_the_rendered_svg(tmp_path):
     ax.line([0, 1, 2, 3], [0, 5, 3, 9])
     out = tmp_path / "ticks.svg"
     fig.save(str(out))
-    drawn = re.findall(r"<text[^>]*>([^<]+)</text>", out.read_text())
+    drawn = re.findall(r"<text[^>]*>([^<]+)</text>", out.read_text(encoding="utf-8"))
     for label in ax.get_xticklabels():
         assert label in drawn, f"getter reported tick {label!r}, not in the SVG"
 

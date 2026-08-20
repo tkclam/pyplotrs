@@ -70,13 +70,13 @@ def _patch_paths() -> list[str]:
     """Local paths the root workspace patches crates.io with."""
     if tomllib is None:  # pragma: no cover - collection-time on 3.9/3.10
         return []
-    cargo = tomllib.loads((ROOT / "Cargo.toml").read_text())
+    cargo = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
     patched = cargo.get("patch", {}).get("crates-io", {})
     return [spec["path"] for spec in patched.values() if "path" in spec]
 
 
 def _pyproject() -> dict:
-    return tomllib.loads((ROOT / "pyproject.toml").read_text())
+    return tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
 
 def _sdist_include_globs() -> list[str]:
@@ -338,7 +338,7 @@ def test_the_python_version_comes_from_cargo():
     the release job's tag check would validate only one of them."""
     import pyplotrs
 
-    cargo = tomllib.loads((ROOT / "Cargo.toml").read_text())
+    cargo = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))
     workspace_version = cargo["workspace"]["package"]["version"]
     assert pyplotrs.__version__ == workspace_version, (
         f"pyplotrs.__version__ is {pyplotrs.__version__!r} but "
@@ -358,10 +358,10 @@ def test_every_crate_inherits_the_workspace_msrv():
     null for all ten and cargo enforces nothing, which is how the declaration
     came to be wrong by twelve minor versions without anyone noticing."""
     declared = tomllib.loads(
-        (ROOT / "Cargo.toml").read_text())["workspace"]["package"]["rust-version"]
+        (ROOT / "Cargo.toml").read_text(encoding="utf-8"))["workspace"]["package"]["rust-version"]
     missing = []
     for manifest in sorted((ROOT / "crates").glob("*/Cargo.toml")):
-        text = manifest.read_text()
+        text = manifest.read_text(encoding="utf-8")
         if "rust-version.workspace = true" not in text:
             missing.append(manifest.parent.name)
     assert not missing, (
@@ -372,8 +372,8 @@ def test_every_crate_inherits_the_workspace_msrv():
 @requires_toml
 def test_the_documented_msrv_matches_the_declared_one():
     declared = tomllib.loads(
-        (ROOT / "Cargo.toml").read_text())["workspace"]["package"]["rust-version"]
-    install_doc = (ROOT / "docs" / "installation.md").read_text()
+        (ROOT / "Cargo.toml").read_text(encoding="utf-8"))["workspace"]["package"]["rust-version"]
+    install_doc = (ROOT / "docs" / "installation.md").read_text(encoding="utf-8")
     assert declared in install_doc, (
         f"docs/installation.md does not mention the declared MSRV {declared!r}"
     )
@@ -384,6 +384,6 @@ def test_no_crate_can_be_published_to_crates_io():
     """They depend on each other by path and the root patches crates.io with a
     vendored krilla, so a published copy could not resolve for anyone."""
     for manifest in sorted((ROOT / "crates").glob("*/Cargo.toml")):
-        assert "publish = false" in manifest.read_text(), (
+        assert "publish = false" in manifest.read_text(encoding="utf-8"), (
             f"{manifest.parent.name} is missing `publish = false`"
         )

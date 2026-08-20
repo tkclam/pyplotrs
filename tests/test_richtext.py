@@ -279,7 +279,7 @@ def test_a_math_span_inside_rich_text_reaches_the_mathjax_html(tmp_path):
     ax.set(title=pp.rich("rate ", pp.bold(r"$\alpha$")))
     out = tmp_path / "m.html"
     fig.save(str(out))
-    assert out.read_text().count('class="fxmath"') >= 1
+    assert out.read_text(encoding="utf-8").count('class="fxmath"') >= 1
 
 
 # -- the promises a partial style must not break ----------------------------

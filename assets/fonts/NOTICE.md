@@ -114,12 +114,28 @@ guarantee that a saved figure looks the same everywhere.
 
 ### Saved figures view consistently across machines
 
-Whichever font is chosen, it is **embedded into the saved figure**: PDF and SVG
-carry a subset/`@font-face` copy of the exact glyphs, PNG bakes them into
-pixels, and HTML inlines the font. So a figure saved on one machine looks
-identical when opened on any other, independent of what fonts the viewer has
-installed — the body-font choice only affects how that one rendering looks, not
-its portability.
+Whichever font is chosen, it is **embedded into the saved figure**, so a figure
+saved on one machine looks identical when opened on any other, independent of
+what fonts the viewer has installed. *How* it is embedded differs by format,
+and the difference matters:
+
+- **`.pdf`** carries a true subset — only the glyphs the figure actually uses.
+- **`.svg`** and **`.html`** inline the font **whole**, as a base64
+  `@font-face` rule. Not a subset: the entire face, byte for byte as it sits on
+  disk. A plain figure comes to ~370 KB here, and more on a host whose Arial or
+  Helvetica is a larger file.
+- **`.png`** bakes the glyphs into pixels, so nothing is embedded.
+
+Two consequences of the SVG/HTML behavior are worth stating plainly. It is the
+dominant term in those files' size. And if the resolved body font is a
+**proprietary** one — Arial and Helvetica both are, and both are preferred over
+the bundled fallback when present — then the file you save contains a complete
+copy of it. pyplotrs does not redistribute those fonts (see above), but a
+figure you publish would, and a desktop font license frequently permits subset
+embedding for viewing while prohibiting exactly this. If that matters for how
+you intend to distribute a figure, pin the bundled, freely redistributable
+fallback with `pyplotrs.set_font_family(["Liberation Sans"])`, or export `.pdf`,
+which subsets.
 
 STIX Fonts™ is a trademark of the Institute of Electrical and Electronics
 Engineers, Inc.; the font is used here under the OFL and the "STIX" name is not

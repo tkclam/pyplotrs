@@ -84,11 +84,28 @@ def _build(seed: int):
 
 # -- the GIL is actually released --------------------------------------------
 
+#: The measurement window. The watchdog below ticks every 1 ms, so a window of
+#: `w` seconds offers at most `w * 1000` scheduling opportunities - and the
+#: ratio being asserted is only as trustworthy as that count. A single 35 ms
+#: `hist2d` offers 35, and on a macOS runner it landed 1, which is
+#: indistinguishable from "the GIL was held" no matter which is true. 250 ms
+#: gives ~250, enough that noise cannot swing the ratio past the bar.
+_MEASURE_SECONDS = 0.25
+
+
 def _watchdog_steps_during(call) -> tuple[int, float]:
     """Run ``call`` while a second thread counts how often it is scheduled.
 
     Returns ``(steps, elapsed)``. A thread that never runs during a call of
     non-trivial duration means the GIL was held throughout.
+
+    ``call`` is repeated until ``_MEASURE_SECONDS`` has passed rather than run
+    once, because "long enough to measure" is a property of the machine, not of
+    the workload. Sizing each kernel to take 30-500 ms *here* is what put the
+    fast ones below the resolution floor on hardware that is quicker at them -
+    and enlarging the inputs to suit the fastest runner would slow the suite on
+    every other. Looping costs nothing on a slow machine, where the first call
+    already fills the window.
     """
     steps = 0
     stop = threading.Event()
@@ -103,8 +120,11 @@ def _watchdog_steps_during(call) -> tuple[int, float]:
     watcher.start()
     try:
         started = time.perf_counter()
-        call()
-        elapsed = time.perf_counter() - started
+        while True:
+            call()
+            elapsed = time.perf_counter() - started
+            if elapsed >= _MEASURE_SECONDS:
+                break
     finally:
         stop.set()
         watcher.join(timeout=1.0)
@@ -150,21 +170,21 @@ def _rough_grid(n: int) -> array:
 def test_compute_kernels_release_the_gil(name):
     """Each kernel must let another thread run while it works.
 
-    Every case is sized to take roughly 30-500 ms: long enough that a watchdog
-    thread would be scheduled many times over, short enough not to slow the
-    suite.
-
     The bar is a *ratio* against the control, and the boundary the ratio has to
     separate is 1.0: a kernel that never drops the GIL schedules the watchdog
     exactly as often as a call known to hold it. Anything comfortably above 1.0
     is the property. 2x is that, with room to spare.
 
-    It was 3x, chosen from a 20-core workstation where the kernels score
-    0.33-0.89 steps per ms against 0.05 for the control. Neither number
-    survives contact with a 2-core shared runner: the first CI run measured
-    0.22 against 0.08 - a ratio of 2.5, still proving the kernel releases the
-    GIL, and still under a bar calibrated on hardware no CI job has. The bar
-    now reflects the property rather than one machine's headroom.
+    Both numbers in that ratio used to come from a single call, and both were
+    calibrated on a 20-core workstation where the kernels score 0.33-0.89 steps
+    per ms against 0.05 for the control. Neither survived other hardware. A
+    2-core Linux runner measured 0.22 against 0.08 - the property holding
+    plainly, at a ratio of 2.5, under a 3x bar. A macOS runner ran `hist2d` in
+    35 ms and caught *one* watchdog step, which is not evidence of anything;
+    `hist2d` demonstrably releases the GIL (`py.detach` in the binding), the
+    window was simply too short to see it. So the bar is 2x, and the window is
+    fixed at `_MEASURE_SECONDS` rather than at whatever one call happens to
+    take here.
     """
     n = 420
     grid = _rough_grid(n)
@@ -182,9 +202,6 @@ def test_compute_kernels_release_the_gil(name):
     }
 
     steps, elapsed = _watchdog_steps_during(calls[name])
-    if elapsed < 0.02:  # pragma: no cover - only on a machine far faster than any CI runner
-        pytest.skip(f"{name} finished in {elapsed * 1000:.1f} ms - too fast to observe")
-
     rate = steps / (elapsed * 1000.0)
     control = _gil_held_rate()
     assert rate > control * 2.0, (

@@ -46,7 +46,7 @@ def test_example_is_included_in_the_gallery(script):
     snippet path that no longer exists fails the docs build with
     `check_paths: true` — but only for the direction that is already checked.
     """
-    gallery = (EXAMPLES.parent / "docs" / "gallery" / "index.md").read_text()
+    gallery = (EXAMPLES.parent / "docs" / "gallery" / "index.md").read_text(encoding="utf-8")
     rel = f"examples/{script.name}"
     assert rel in gallery, (
         f"{script.name} is not included in docs/gallery/index.md, so it is "
@@ -63,7 +63,7 @@ def test_every_gallery_image_is_shown_on_the_gallery_page():
     covered by the byte comparison above.
     """
     images = EXAMPLES.parent / "docs" / "gallery" / "images"
-    gallery = (EXAMPLES.parent / "docs" / "gallery" / "index.md").read_text()
+    gallery = (EXAMPLES.parent / "docs" / "gallery" / "index.md").read_text(encoding="utf-8")
     orphans = sorted(
         p.name for p in images.iterdir()
         if p.suffix in (".png", ".gif") and p.name not in gallery
@@ -106,7 +106,7 @@ def test_examples_write_only_relative_paths():
     directory, would write into the user's tree when they copy-paste it."""
     offenders = []
     for script in SCRIPTS:
-        for line in script.read_text().splitlines():
+        for line in script.read_text(encoding="utf-8").splitlines():
             if ".save(" not in line:
                 continue
             if '"/' in line or "'/" in line or ".." in line or "os.path" in line:
@@ -122,7 +122,7 @@ def test_no_example_needs_a_third_party_import():
     offenders = [
         f"{s.name}: {line.strip()}"
         for s in SCRIPTS
-        for line in s.read_text().splitlines()
+        for line in s.read_text(encoding="utf-8").splitlines()
         if any(line.strip().startswith(b) for b in banned)
     ]
     assert not offenders, (

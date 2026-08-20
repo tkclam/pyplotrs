@@ -151,7 +151,7 @@ def test_alpha_reaches_the_svg(tmp_path):
     ax.line([0, 1], [0, 1], alpha=0.4, linewidth=6)
     out = tmp_path / "a.svg"
     fig.save(str(out))
-    assert "stroke-opacity" in out.read_text()
+    assert "stroke-opacity" in out.read_text(encoding="utf-8")
 
 
 # -- the shared axes base ----------------------------------------------------
@@ -361,7 +361,7 @@ def test_polar_rim_follows_the_theme(tmp_path):
     ax.plot([0, 1, 2, 3], [1, 2, 1, 2])
     out = tmp_path / "p.svg"
     fig.save(str(out))
-    svg = out.read_text().lower()
+    svg = out.read_text(encoding="utf-8").lower()
     assert "#c81e1e" in svg, "polar rim ignored the theme's spine color"
 
 

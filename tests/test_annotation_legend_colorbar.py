@@ -42,7 +42,7 @@ def test_unrotated_text_emits_no_transform(tmp_path):
     ax.text(0.5, 0.5, "hello")
     out = tmp_path / "flat.svg"
     fig.save(str(out))
-    svg = out.read_text()
+    svg = out.read_text(encoding="utf-8")
     assert "hello" in svg
     assert 'transform="matrix(1,0,0,1' not in svg
 
@@ -53,7 +53,7 @@ def test_rotated_text_is_a_group_transform_in_svg(tmp_path):
     ax.text(0.5, 0.5, "hello", rotation=90)
     svg = (tmp_path / "r.svg")
     fig.save(str(svg))
-    assert re.search(r'transform="matrix\(', svg.read_text())
+    assert re.search(r'transform="matrix\(', svg.read_text(encoding="utf-8"))
 
 
 def test_rotated_text_stays_selectable_in_pdf(tmp_path):
@@ -121,7 +121,7 @@ def test_frameon_false_drops_the_box(tmp_path):
         ax.legend(frameon=frameon)
         out = tmp_path / f"{name}.svg"
         fig.save(str(out))
-        return out.read_text()
+        return out.read_text(encoding="utf-8")
 
     framed, bare = render("framed", True), render("bare", False)
     assert framed != bare
@@ -188,7 +188,7 @@ def test_shrink_changes_the_output(tmp_path):
         fig.colorbar(m, **kw)
         out = tmp_path / f"{name}.svg"
         fig.save(str(out))
-        return out.read_text()
+        return out.read_text(encoding="utf-8")
 
     assert render("full") != render("short", shrink=0.5)
 

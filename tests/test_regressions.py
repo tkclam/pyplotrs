@@ -102,7 +102,7 @@ def test_errorbar_draws_line_and_markers_on_a_log_axis(tmp_path):
         ax.set(yscale=scale, xscale=scale)
         out = tmp_path / f"err_{scale}.svg"
         fig.save(str(out))
-        svg = out.read_text()
+        svg = out.read_text(encoding="utf-8")
         return svg.count("<path"), svg.count("<use")
 
     lin_paths, lin_uses = count_marks("linear")
@@ -125,7 +125,7 @@ def test_errorbar_respects_log_positions(tmp_path):
     ax.set(xscale="log", yscale="log")
     out = tmp_path / "logpos.svg"
     fig.save(str(out))
-    assert "<path" in out.read_text()
+    assert "<path" in out.read_text(encoding="utf-8")
 
 
 # -- theming leaks -----------------------------------------------------------
@@ -138,7 +138,7 @@ def test_hist_bar_edges_follow_the_theme(tmp_path):
     ax.hist([1, 2, 2, 3, 3, 3, 4], bins=4)
     out = tmp_path / "hist_dark.svg"
     fig.save(str(out))
-    svg = out.read_text()
+    svg = out.read_text(encoding="utf-8")
     assert "#ffffff" not in svg.lower(), (
         "hist still emits hardcoded white edges under a dark theme"
     )
@@ -160,7 +160,7 @@ def test_separator_falls_through_to_the_page_when_the_plot_area_is_unset(tmp_pat
     ax.hist([1, 2, 2, 3, 3, 3, 4], bins=4)
     out = tmp_path / "hist_dark_page.svg"
     fig.save(str(out))
-    assert "#ffffff" not in out.read_text().lower()
+    assert "#ffffff" not in out.read_text(encoding="utf-8").lower()
 
 
 # -- a theme that states its own page ---------------------------------------
@@ -180,14 +180,14 @@ def test_a_dark_theme_paints_its_page_into_every_format(tmp_path):
 
     svg = (tmp_path / "d.svg")
     fig.save(str(svg))
-    body = svg.read_text()
+    body = svg.read_text(encoding="utf-8")
     # the page rect is drawn first, before any of the data
     first = body.index("<path")
     assert "#121212" in body[first:first + 200], body[first:first + 200]
 
     html = (tmp_path / "d.html")
     fig.save(str(html))
-    assert "#121212" in html.read_text()
+    assert "#121212" in html.read_text(encoding="utf-8")
 
     png = (tmp_path / "d.png")
     fig.save(str(png))
@@ -319,7 +319,7 @@ def _marker_xy(fig, tmp_path, name):
     out = tmp_path / f"{name}.svg"
     fig.save(str(out))
     return [(float(x), float(y)) for x, y in
-            re.findall(r'<use[^>]*x="([-\d.]+)"\s+y="([-\d.]+)"', out.read_text())]
+            re.findall(r'<use[^>]*x="([-\d.]+)"\s+y="([-\d.]+)"', out.read_text(encoding="utf-8"))]
 
 
 def test_equal_aspect_does_not_mirror_an_inverted_axis(tmp_path):
@@ -513,7 +513,7 @@ def _page_texts(fig, tmp_path, name):
     """
     out = tmp_path / f"{name}.svg"
     fig.save(str(out))
-    svg = out.read_text()
+    svg = out.read_text(encoding="utf-8")
     body = re.sub(r"<g transform[^>]*>.*?</g>", "", svg, flags=re.S)
     return _parse_texts(body), svg
 
@@ -651,7 +651,7 @@ def test_secondary_y_does_not_displace_a_colorbar_label(tmp_path):
     ax.secondary_yaxis("right", functions=_SEC_FN, label="percent")
     out = tmp_path / "cbar_secondary.svg"
     fig.save(str(out))
-    svg = out.read_text()
+    svg = out.read_text(encoding="utf-8")
 
     # The rotated colorbar label: the group whose text is exactly "c". Its
     # x translation is the 5th matrix component.
@@ -1061,7 +1061,7 @@ def test_pie_slice_labels_are_not_clipped(tmp_path):
 
     out = tmp_path / "pie_labels.svg"
     fig.save(str(out))
-    svg = out.read_text()
+    svg = out.read_text(encoding="utf-8")
     clipped, _ = _clipped_group(svg)
     assert "<text" not in clipped, (
         "a slice label is inside the plot clip - the clip is what ate the last "
@@ -1105,7 +1105,7 @@ def test_pie_grows_until_a_label_reaches_the_cell_edge(tmp_path):
         ax.pie([35, 25, 22, 18], labels=labels)
         out = tmp_path / f"{name}.svg"
         fig.save(str(out))
-        svg = out.read_text()
+        svg = out.read_text(encoding="utf-8")
         clipped, square = _clipped_group(svg)
         return ax, svg, _path_bbox(clipped), square
 
@@ -1158,7 +1158,7 @@ def test_frame_off_reserves_no_tick_band(tmp_path):
     ax.set(title="Pie")
     out = tmp_path / "pie_off.svg"
     fig.save(str(out))
-    clipped, _square = _clipped_group(out.read_text())
+    clipped, _square = _clipped_group(out.read_text(encoding="utf-8"))
     x0, _y0, x1, _y1 = _path_bbox(clipped)
 
     assert (x0 + x1) / 2.0 == pytest.approx(w / 2.0, abs=1.0), (
@@ -1230,7 +1230,7 @@ def _chrome_lines(fig, tmp_path, name, width):
     fig.save(str(out))
     found = []
     for d, w in re.findall(r'<path[^>]*d="([^"]*)"[^>]*stroke-width="([\d.]+)"',
-                           out.read_text()):
+                           out.read_text(encoding="utf-8")):
         nums = [float(v) for v in re.findall(r"-?\d+(?:\.\d+)?", d)]
         if len(nums) == 4 and float(w) == pytest.approx(width):
             found.append(tuple(nums))
@@ -1427,7 +1427,7 @@ def test_vector_output_is_as_sharp_as_the_raster(tmp_path):
     svg_path = tmp_path / "cols.svg"
     fig.save(str(svg_path))
 
-    embedded = re.search(r"data:image/png;base64,([A-Za-z0-9+/=]+)", svg_path.read_text())
+    embedded = re.search(r"data:image/png;base64,([A-Za-z0-9+/=]+)", svg_path.read_text(encoding="utf-8"))
     assert embedded, "the SVG carries no embedded image"
     png = base64.b64decode(embedded.group(1))
     width, height = struct.unpack(">II", png[16:24])
@@ -1454,7 +1454,7 @@ def test_a_dense_image_is_left_alone_in_vector_output(tmp_path):
     fig.save(str(svg_path))
 
     png = base64.b64decode(
-        re.search(r"data:image/png;base64,([A-Za-z0-9+/=]+)", svg_path.read_text()).group(1))
+        re.search(r"data:image/png;base64,([A-Za-z0-9+/=]+)", svg_path.read_text(encoding="utf-8")).group(1))
     assert struct.unpack(">II", png[16:24]) == (500, 500), (
         "a dense image should be embedded at its own resolution")
 
@@ -1531,7 +1531,7 @@ def test_an_inverted_axis_flips_the_image_and_not_the_rect(kw, corners, tmp_path
     ax.set(**kw)
     out = tmp_path / "inv.svg"
     fig.save(str(out))
-    svg = out.read_text()
+    svg = out.read_text(encoding="utf-8")
 
     m = re.search(r'<image[^>]*width="([-\d.]+)" height="([-\d.]+)"', svg)
     assert m, "no <image> in the SVG"
@@ -1594,7 +1594,7 @@ def test_imshow_honors_a_piecewise_norm(tmp_path):
     out = tmp_path / "norm.svg"
     fig.save(str(out))
 
-    w, _h, rows = _svg_image(out.read_text())
+    w, _h, rows = _svg_image(out.read_text(encoding="utf-8"))
     row = rows[0]
     cells = [tuple(row[int(w * (k + 0.5) / 4) * 4:int(w * (k + 0.5) / 4) * 4 + 3])
              for k in range(4)]
@@ -1643,7 +1643,7 @@ def test_colormapped_scatter_honors_alpha(tmp_path):
     ax.scatter([1, 2, 3], [1, 2, 3], c=[0.0, 0.5, 1.0], cmap="viridis", alpha=0.3)
     out = tmp_path / "sc.svg"
     fig.save(str(out))
-    groups = re.findall(r'<g fill="#[0-9a-f]{6}"([^>]*)>', out.read_text())
+    groups = re.findall(r'<g fill="#[0-9a-f]{6}"([^>]*)>', out.read_text(encoding="utf-8"))
     assert any("fill-opacity" in g for g in groups), (
         "no group carries fill-opacity, so alpha was lost")
 
@@ -1704,7 +1704,7 @@ def test_long_category_labels_neither_overlap_nor_leave_the_page(tmp_path):
 
     # A rotated label lives inside a `<g transform=matrix(...)>`, so its own
     # coordinates are group-local; the page position needs the matrix applied.
-    svg = out.read_text()
+    svg = out.read_text(encoding="utf-8")
     scene = _core.Scene(width, 200.0)
     size = ax._theme.tick_label_size
     spans = []
@@ -1736,7 +1736,7 @@ def test_an_overlong_suptitle_wraps_instead_of_being_cut(tmp_path):
     out = tmp_path / "sup.svg"
     fig.save(str(out))
 
-    texts = [s for _x, _y, s in _parse_texts(out.read_text())]
+    texts = [s for _x, _y, s in _parse_texts(out.read_text(encoding="utf-8"))]
     joined = " ".join(texts)
     assert "An overly" in joined and "experiment" in joined, (
         f"the suptitle lost words at one end or the other: {texts}")
@@ -1750,7 +1750,7 @@ def test_svg_states_its_size_in_points(tmp_path):
     ax.line([0, 1], [0, 1])
     out = tmp_path / "size.svg"
     fig.save(str(out))
-    head = out.read_text()[:400]
+    head = out.read_text(encoding="utf-8")[:400]
     assert 'width="200pt"' in head and 'height="150pt"' in head, (
         f"SVG size is unitless (CSS px), not points: {head[:200]}")
     assert 'viewBox="0 0 200 150"' in head, "the user-unit grid should stay 1:1"
@@ -1774,7 +1774,7 @@ def test_polar_marks_are_clipped_to_the_dial(tmp_path):
     ax.set(rmin=0, rmax=2)
     out = tmp_path / "polar.svg"
     fig.save(str(out))
-    svg = out.read_text()
+    svg = out.read_text(encoding="utf-8")
     assert "<clipPath" in svg, "the data was drawn unclipped"
     xs = [float(v) for v in re.findall(r"[ML]([-\d.]+) ", svg)]
     assert min(xs) >= -1.0 and max(xs) <= width + 1.0, (
@@ -1816,7 +1816,7 @@ def test_a_label_outside_the_body_font_still_draws(tmp_path):
     ax.set(xlabel=label)
     out = tmp_path / "uni.svg"
     fig.save(str(out))
-    svg = out.read_text()
+    svg = out.read_text(encoding="utf-8")
 
     drawn = "".join(s for _x, _y, s in _parse_texts(svg))
     for ch in "℃⟨⟩":

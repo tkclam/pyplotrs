@@ -96,10 +96,25 @@ def test_math_html_carries_the_tex_rather_than_baked_glyphs(tmp_path):
 
 
 def test_plain_html_does_not_carry_the_mathjax_bundle(tmp_path):
-    """2.2 MB is a lot to ship for a figure with no math in it."""
+    """2.2 MB is a lot to ship for a figure with no math in it.
+
+    The size is asserted with the embedded faces taken out. SVG and HTML inline
+    the body font *whole* rather than subset (only PDF subsets), so the raw page
+    size is whatever the host's Arial or Helvetica happens to weigh: 372 KB here,
+    1.0 MB on a macOS runner, 1.4 MB on a Windows one. A flat `len(page) < 1MB`
+    therefore measured the runner's font directory, not this library - it passed
+    on the machine it was written on and failed on both of the others. What has
+    to be true regardless of host is that nothing *else* large rides along.
+    """
     plain = _html(tmp_path, "plain")
     assert "MathJax" not in plain
-    assert len(plain) < 1_000_000, f"a math-free page is {len(plain)} bytes"
+
+    faces = sum(len(b) for b in re.findall(r"base64,([A-Za-z0-9+/=]+)\)", plain))
+    rest = len(plain) - faces
+    assert rest < 250_000, (
+        f"a math-free page carries {rest} bytes beyond its embedded fonts "
+        f"({faces} bytes of face data in {len(plain)} total)"
+    )
 
 
 def test_3d_html_is_the_interactive_viewer(tmp_path):

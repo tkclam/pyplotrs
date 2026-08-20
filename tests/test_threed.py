@@ -92,7 +92,7 @@ def test_depthsort_off_emits_one_path_per_line(tmp_path):
         ax.plot(hx, hy, hz, depthsort=depthsort)
         out = tmp_path / f"ds_{depthsort}.svg"
         fig.save(str(out))
-        return len(re.findall(r"<path", out.read_text()))
+        return len(re.findall(r"<path", out.read_text(encoding="utf-8")))
 
     many, one = paths(True), paths(False)
     assert many > 250, f"sorted line should emit a path per segment, got {many}"

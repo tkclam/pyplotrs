@@ -294,7 +294,7 @@ def test_nan_still_breaks_the_line_into_a_gap(tmp_path):
 
     # Inspect the path geometry only. Searching the whole document would match
     # the base64-encoded embedded font.
-    paths = re.findall(r'<path[^>]*\sd="([^"]*)"', out.read_text())
+    paths = re.findall(r'<path[^>]*\sd="([^"]*)"', out.read_text(encoding="utf-8"))
     data = " ".join(paths)
     assert "nan" not in data.lower(), "a non-finite coordinate reached the geometry"
     assert any(p.count("M") >= 2 for p in paths), (

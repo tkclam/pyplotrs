@@ -110,14 +110,14 @@ def test_linear_axes_have_no_minor_ticks_by_default(tmp_path):
     ax.line([0, 1, 2, 3], [0, 5, 3, 9])
     out = tmp_path / "plain.svg"
     fig.save(str(out))
-    plain = len(re.findall(r"<path", out.read_text()))
+    plain = len(re.findall(r"<path", out.read_text(encoding="utf-8")))
 
     fig2, ax2 = pp.subplots(figsize=(240, 180))
     ax2.line([0, 1, 2, 3], [0, 5, 3, 9])
     ax2.set(minor=4)
     out2 = tmp_path / "minor.svg"
     fig2.save(str(out2))
-    assert len(re.findall(r"<path", out2.read_text())) > plain
+    assert len(re.findall(r"<path", out2.read_text(encoding="utf-8"))) > plain
 
 
 def test_minor_subdivision_lands_between_majors():
@@ -151,7 +151,7 @@ def test_tick_direction_changes_the_rendering(tmp_path):
         ax.set(**kw)
         out = tmp_path / f"{name}.svg"
         fig.save(str(out))
-        return out.read_text()
+        return out.read_text(encoding="utf-8")
 
     assert render("out") != render("in", tick_direction="in")
 
@@ -163,7 +163,7 @@ def test_tick_length_changes_the_rendering(tmp_path):
         ax.set(**kw)
         out = tmp_path / f"{name}.svg"
         fig.save(str(out))
-        return out.read_text()
+        return out.read_text(encoding="utf-8")
 
     assert render("short") != render("long", tick_length=9.0)
 
@@ -177,7 +177,7 @@ def test_tick_labels_stay_put_when_ticks_turn_inward(tmp_path):
         ax.set(**kw)
         out = tmp_path / f"{name}.svg"
         fig.save(str(out))
-        return re.findall(r'<text[^>]*x="([-\d.]+)"', out.read_text())
+        return re.findall(r'<text[^>]*x="([-\d.]+)"', out.read_text(encoding="utf-8"))
 
     assert label_xs("o") == label_xs("i", tick_direction="in")
 

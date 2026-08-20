@@ -134,7 +134,7 @@ def test_svg_embeds_the_font_and_keeps_text(tmp_path):
     ax.set(title="Selectable")
     out = tmp_path / "t.svg"
     fig.save(str(out))
-    svg = out.read_text()
+    svg = out.read_text(encoding="utf-8")
     assert "<text" in svg, "no text elements: labels may have been outlined"
     assert "Selectable" in svg, "title text is not present as characters"
     assert "@font-face" in svg, "font is not embedded, output is not portable"

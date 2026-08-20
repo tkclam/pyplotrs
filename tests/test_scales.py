@@ -69,7 +69,7 @@ def test_symlog_linthresh_reaches_the_rust_transform(linthresh, tmp_path):
 
     # The data polyline is the one with exactly as many vertices as points;
     # the frame, spines and tick marks all have two.
-    paths = re.findall(r'<path d="(M[^"]+)"', out.read_text())
+    paths = re.findall(r'<path d="(M[^"]+)"', out.read_text(encoding="utf-8"))
     runs = [[float(v) for v in re.findall(r"[ML]([-\d.]+) ", d)] for d in paths]
     got = next((r for r in runs if len(r) == len(xs)), None)
     assert got is not None, f"no {len(xs)}-vertex polyline among {len(paths)} paths"
@@ -299,6 +299,6 @@ def test_manual_ticks_and_labels_are_honoured(tmp_path):
     ax.set(xticks=[0, 1, 2], xticklabels=["zero", "one", "two"])
     out = tmp_path / "ticks.svg"
     fig.save(str(out))
-    svg = out.read_text()
+    svg = out.read_text(encoding="utf-8")
     for label in ("zero", "one", "two"):
         assert label in svg, f"manual tick label {label!r} missing from output"
