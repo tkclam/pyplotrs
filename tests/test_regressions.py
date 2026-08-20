@@ -1558,102 +1558,6 @@ def test_an_inverted_axis_flips_the_image_and_not_the_rect(kw, corners, tmp_path
     assert ops, f"{kw or 'plain'}: the PDF has no image at all"
 
 
-def test_a_shared_axis_keeps_its_inversion():
-    """`sharey` resolved the union with a plain min/max, which always returns
-    ascending - so an axes set to `yinverted` was drawn ascending while
-    `get_ylim()` still reported it descending."""
-    fig, axs = pp.subplots(1, 2, figsize=(300, 160), sharey=True)
-    axs[0].line([0, 1, 2], [0, 5, 2])
-    axs[1].line([0, 1, 2], [1, 3, 7])
-    axs[0].set(yinverted=True)
-
-    lo, hi = axs[0].get_ylim()
-    assert lo > hi, "get_ylim() no longer reports the inversion"
-    from pyplotrs._util import _union_ranges
-    ys = [ax._ranges()[1] for ax in fig.axes]
-    drawn = _union_ranges(ys[0], ys)
-    assert drawn[0] > drawn[1], f"the renderer drew {drawn}, losing the inversion"
-
-
-def test_long_category_labels_neither_overlap_nor_leave_the_page(tmp_path):
-    """Flat tick labels wider than their spacing simply overprinted, and the
-    outermost ones ran off the canvas: the x tick band reserves thickness, and
-    used to reserve no length at all."""
-    from pyplotrs import _pyplotrs_core as _core
-    from pyplotrs._draw import _tw
-
-    width = 300.0
-    fig, ax = pp.subplots(figsize=(width, 200))
-    ax.bar(["Escherichia coli", "Bacillus subtilis",
-            "Staphylococcus aureus", "Pseudomonas putida"], [3, 5, 2, 4])
-    out = tmp_path / "cats.svg"
-    fig.save(str(out))
-
-    assert ax._x_tick_deg != 0.0, "labels this long should have been rotated"
-
-    # A rotated label lives inside a `<g transform=matrix(...)>`, so its own
-    # coordinates are group-local; the page position needs the matrix applied.
-    svg = out.read_text()
-    scene = _core.Scene(width, 200.0)
-    size = ax._theme.tick_label_size
-    spans = []
-    for grp in re.finditer(
-            r'<g transform="matrix\(([-\d.,\s]+)\)">(.*?)</g>', svg, re.S):
-        a, b, c, d, e, f = (float(v) for v in re.split(r"[,\s]+", grp.group(1).strip()))
-        for lx, ly, text in _parse_texts(grp.group(2)):
-            w = _tw(scene, text, size)
-            xs = [a * px + c * ly + e for px in (lx, lx + w)]
-            spans.append((text, min(xs), max(xs)))
-    assert len(spans) >= 4, f"expected the four rotated category labels, got {spans}"
-    for text, x0, x1 in spans:
-        assert -0.5 <= x0 and x1 <= width + 0.5, (
-            f"label {text!r} spans {x0:.1f}..{x1:.1f} on a {width:.0f} pt canvas")
-
-    # Rotated far enough apart that they no longer overprint each other.
-    spans.sort(key=lambda t: t[1])
-    for (t0, _a0, b0), (t1, a1, _b1) in zip(spans, spans[1:]):
-        assert a1 >= b0 - 0.5, f"{t0!r} and {t1!r} still overlap"
-
-
-def test_an_overlong_suptitle_wraps_instead_of_being_cut(tmp_path):
-    """The suptitle band reserves height, never length, so a title wider than
-    the page was centered on a line wider than the page and clipped at both
-    ends - losing the first and last words with nothing said."""
-    fig, ax = pp.subplots(figsize=(240, 150))
-    ax.line([0, 1], [0, 1])
-    fig.set(suptitle="An overly long figure suptitle describing the whole experiment")
-    out = tmp_path / "sup.svg"
-    fig.save(str(out))
-
-    texts = [s for _x, _y, s in _parse_texts(out.read_text())]
-    joined = " ".join(texts)
-    assert "An overly" in joined and "experiment" in joined, (
-        f"the suptitle lost words at one end or the other: {texts}")
-
-
-def test_svg_states_its_size_in_points(tmp_path):
-    """`width="200"` is 200 CSS px = 2.08 in, while the PDF page is 200 pt =
-    2.78 in - so the same figure was published at 75% of its size in SVG, and
-    8 pt type came out at 6 pt."""
-    fig, ax = pp.subplots(figsize=(200, 150))
-    ax.line([0, 1], [0, 1])
-    out = tmp_path / "size.svg"
-    fig.save(str(out))
-    head = out.read_text()[:400]
-    assert 'width="200pt"' in head and 'height="150pt"' in head, (
-        f"SVG size is unitless (CSS px), not points: {head[:200]}")
-    assert 'viewBox="0 0 200 150"' in head, "the user-unit grid should stay 1:1"
-
-
-def test_contourf_uses_its_vmin_and_vmax():
-    """Both were accepted and then overwritten with the level extremes, so
-    passing them did nothing - not even a warning - and two panels asked to
-    share a color scale each got their own."""
-    fig, ax = pp.subplots()
-    m = ax.contourf([0, 1], [0, 1], [[0, 1], [2, 3]], vmin=-10, vmax=10)
-    assert (m.vmin, m.vmax) == (-10.0, 10.0)
-
-
 def test_a_tiny_axis_span_keeps_its_scale(tmp_path):
     """Every tick on a sub-microsecond axis used to read "0".
 
@@ -1763,6 +1667,102 @@ def test_nan_is_transparent_under_every_norm(norm_name):
     out = _draw._rgba_values([-1.0, 0.0, float("nan")], pp.get_cmap("coolwarm"), made)
     assert tuple(out[2]) == (0, 0, 0, 0), (
         f"{norm_name} painted NaN as {tuple(out[2])} instead of leaving it clear")
+
+
+def test_a_shared_axis_keeps_its_inversion():
+    """`sharey` resolved the union with a plain min/max, which always returns
+    ascending - so an axes set to `yinverted` was drawn ascending while
+    `get_ylim()` still reported it descending."""
+    fig, axs = pp.subplots(1, 2, figsize=(300, 160), sharey=True)
+    axs[0].line([0, 1, 2], [0, 5, 2])
+    axs[1].line([0, 1, 2], [1, 3, 7])
+    axs[0].set(yinverted=True)
+
+    lo, hi = axs[0].get_ylim()
+    assert lo > hi, "get_ylim() no longer reports the inversion"
+    from pyplotrs._util import _union_ranges
+    ys = [ax._ranges()[1] for ax in fig.axes]
+    drawn = _union_ranges(ys[0], ys)
+    assert drawn[0] > drawn[1], f"the renderer drew {drawn}, losing the inversion"
+
+
+def test_long_category_labels_neither_overlap_nor_leave_the_page(tmp_path):
+    """Flat tick labels wider than their spacing simply overprinted, and the
+    outermost ones ran off the canvas: the x tick band reserves thickness, and
+    used to reserve no length at all."""
+    from pyplotrs import _pyplotrs_core as _core
+    from pyplotrs._draw import _tw
+
+    width = 300.0
+    fig, ax = pp.subplots(figsize=(width, 200))
+    ax.bar(["Escherichia coli", "Bacillus subtilis",
+            "Staphylococcus aureus", "Pseudomonas putida"], [3, 5, 2, 4])
+    out = tmp_path / "cats.svg"
+    fig.save(str(out))
+
+    assert ax._x_tick_deg != 0.0, "labels this long should have been rotated"
+
+    # A rotated label lives inside a `<g transform=matrix(...)>`, so its own
+    # coordinates are group-local; the page position needs the matrix applied.
+    svg = out.read_text()
+    scene = _core.Scene(width, 200.0)
+    size = ax._theme.tick_label_size
+    spans = []
+    for grp in re.finditer(
+            r'<g transform="matrix\(([-\d.,\s]+)\)">(.*?)</g>', svg, re.S):
+        a, b, c, d, e, f = (float(v) for v in re.split(r"[,\s]+", grp.group(1).strip()))
+        for lx, ly, text in _parse_texts(grp.group(2)):
+            w = _tw(scene, text, size)
+            xs = [a * px + c * ly + e for px in (lx, lx + w)]
+            spans.append((text, min(xs), max(xs)))
+    assert len(spans) >= 4, f"expected the four rotated category labels, got {spans}"
+    for text, x0, x1 in spans:
+        assert -0.5 <= x0 and x1 <= width + 0.5, (
+            f"label {text!r} spans {x0:.1f}..{x1:.1f} on a {width:.0f} pt canvas")
+
+    # Rotated far enough apart that they no longer overprint each other.
+    spans.sort(key=lambda t: t[1])
+    for (t0, _a0, b0), (t1, a1, _b1) in zip(spans, spans[1:]):
+        assert a1 >= b0 - 0.5, f"{t0!r} and {t1!r} still overlap"
+
+
+def test_an_overlong_suptitle_wraps_instead_of_being_cut(tmp_path):
+    """The suptitle band reserves height, never length, so a title wider than
+    the page was centered on a line wider than the page and clipped at both
+    ends - losing the first and last words with nothing said."""
+    fig, ax = pp.subplots(figsize=(240, 150))
+    ax.line([0, 1], [0, 1])
+    fig.set(suptitle="An overly long figure suptitle describing the whole experiment")
+    out = tmp_path / "sup.svg"
+    fig.save(str(out))
+
+    texts = [s for _x, _y, s in _parse_texts(out.read_text())]
+    joined = " ".join(texts)
+    assert "An overly" in joined and "experiment" in joined, (
+        f"the suptitle lost words at one end or the other: {texts}")
+
+
+def test_svg_states_its_size_in_points(tmp_path):
+    """`width="200"` is 200 CSS px = 2.08 in, while the PDF page is 200 pt =
+    2.78 in - so the same figure was published at 75% of its size in SVG, and
+    8 pt type came out at 6 pt."""
+    fig, ax = pp.subplots(figsize=(200, 150))
+    ax.line([0, 1], [0, 1])
+    out = tmp_path / "size.svg"
+    fig.save(str(out))
+    head = out.read_text()[:400]
+    assert 'width="200pt"' in head and 'height="150pt"' in head, (
+        f"SVG size is unitless (CSS px), not points: {head[:200]}")
+    assert 'viewBox="0 0 200 150"' in head, "the user-unit grid should stay 1:1"
+
+
+def test_contourf_uses_its_vmin_and_vmax():
+    """Both were accepted and then overwritten with the level extremes, so
+    passing them did nothing - not even a warning - and two panels asked to
+    share a color scale each got their own."""
+    fig, ax = pp.subplots()
+    m = ax.contourf([0, 1], [0, 1], [[0, 1], [2, 3]], vmin=-10, vmax=10)
+    assert (m.vmin, m.vmax) == (-10.0, 10.0)
 
 
 def test_polar_marks_are_clipped_to_the_dial(tmp_path):

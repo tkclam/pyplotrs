@@ -3005,6 +3005,7 @@ class Axes(_AxesBase):
         scene.add_image(m["img"], m["uw"], m["uh"], rx, ry, rw, rh,
                         right < left, bot < top)
 
+
     def _draw_image(self, scene, m: dict, sx, sy) -> None:
         x0, x1, y0, y1 = m["extent"]
         w, h = m["w"], m["h"]
