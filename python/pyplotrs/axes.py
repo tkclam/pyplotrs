@@ -1780,7 +1780,7 @@ class Axes(_AxesBase):
         A numeric axis whose labels would otherwise repeat the same leading
         digits, or run to a string of zeros, gets a shared term lifted out of
         every label and written once at the end of the axis instead. Without
-        it a nanometre axis can only be labelled by printing ten decimals, and
+        it a nanometer axis can only be labeled by printing ten decimals, and
         a `1000000.05`-style label is both unreadable and wide enough to run
         off the page. An explicit formatter or explicit labels always win -
         this only fills in for the default.

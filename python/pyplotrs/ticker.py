@@ -270,7 +270,7 @@ def factor_out(values) -> tuple[float, int]:
       labels would be a run of zeros either way.
 
     This is what an axis has always needed and never had. Its absence is why a
-    nanometre axis could only be labelled by printing ten decimal places, and
+    nanometer axis could only be labeled by printing ten decimal places, and
     why a long tick label ran off the page instead of being short.
     """
     vals = [float(v) for v in values if math.isfinite(v)]

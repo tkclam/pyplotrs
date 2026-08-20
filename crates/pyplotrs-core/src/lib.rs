@@ -185,7 +185,7 @@ pub struct TextNode {
 /// pixels so a resample can average the **data** rather than the colors.
 ///
 /// Reducing a heatmap - which every vector export does, and most raster ones -
-/// averages neighbouring samples. Doing that to the RGBA is not the same
+/// averages neighboring samples. Doing that to the RGBA is not the same
 /// operation as doing it to the data and colormapping the result, because a
 /// colormap is not linear: on `viridis` the mean of the colors for 0.0 and 1.0
 /// is a muddy blue-green that the map assigns to no value at all, so a reduced

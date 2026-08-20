@@ -54,7 +54,7 @@ pub struct AxesBands {
     /// The x tick band reserves thickness but has no length of its own - it is
     /// as wide as the plot - so a tick label centered on the last tick hangs
     /// half its width past the plot's right edge. Inside a grid that lands on
-    /// the neighbouring cell; on the outermost column it lands off the page,
+    /// the neighboring cell; on the outermost column it lands off the page,
     /// and the label was simply cut there, silently, mid-glyph. These two say
     /// how far the overhang reaches so the plot can be inset enough to keep it
     /// on the canvas.

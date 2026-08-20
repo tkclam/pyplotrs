@@ -791,7 +791,7 @@ mod tests {
         );
     }
 
-    /// A masked sample lowers coverage instead of pulling its neighbours
+    /// A masked sample lowers coverage instead of pulling its neighbors
     /// toward an arbitrary value.
     #[test]
     fn a_masked_field_sample_only_lowers_coverage() {

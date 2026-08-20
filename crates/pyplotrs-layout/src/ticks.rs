@@ -209,8 +209,8 @@ mod tests {
         assert_eq!(vals(-1.0, 1.0, 6), vec![-1.0, -0.5, 0.0, 0.5, 1.0]);
     }
 
-    /// A sub-microsecond / nanometre / picoamp axis. This used to return five
-    /// copies of 0.0 labelled "0": `decimals_for_step` answered 0 for any step
+    /// A sub-microsecond / nanometer / picoamp axis. This used to return five
+    /// copies of 0.0 labeled "0": `decimals_for_step` answered 0 for any step
     /// below its absolute 1e-6 tolerance, and the tick *values* were then
     /// rounded to that. The axis silently stopped carrying a scale.
     #[test]

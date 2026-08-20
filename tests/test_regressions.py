@@ -1563,7 +1563,7 @@ def test_a_tiny_axis_span_keeps_its_scale(tmp_path):
 
     `decimals_for_step` answered 0 for any step below an absolute 1e-6
     tolerance, and the tick *values* were then rounded to that - so five ticks
-    landed on the same number and carried the same label. A nanometre or
+    landed on the same number and carried the same label. A nanometer or
     picoamp axis silently stopped saying anything.
     """
     fig, ax = pp.subplots(figsize=(280, 180))
