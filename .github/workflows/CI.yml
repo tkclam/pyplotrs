@@ -388,7 +388,7 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
 
       - name: The tag must match the version being published
         # Every artifact is named from the metadata version, not from the tag,
