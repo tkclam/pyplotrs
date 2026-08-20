@@ -23,7 +23,7 @@ pyplotrs-layout = { path = "../pyplotrs-layout" }
 pyplotrs-render-pdf = { path = "../pyplotrs-render-pdf" }
 pyplotrs-render-raster = { path = "../pyplotrs-render-raster" }
 pyplotrs-render-svg = { path = "../pyplotrs-render-svg" }
-pyo3 = { version = "0.28", features = ["extension-module"] }
+pyo3 = { version = "0.29", features = ["extension-module"] }
 # Robust, cross-platform system-font discovery (same RazrFalcon ecosystem as
 # rustybuzz/ttf-parser already in the tree). `fontconfig` honors the host's
 # fontconfig directories/aliases on Unix so the Arial->Helvetica lookup finds
