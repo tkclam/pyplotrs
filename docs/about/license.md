@@ -25,7 +25,7 @@ compiled into the extension module.
   compatible fallback for body text.
   Source: <https://github.com/liberationfonts>.
   License text: [`assets/fonts/LiberationSans-OFL.txt`](https://github.com/tkclam/pyplotrs/blob/main/assets/fonts/LiberationSans-OFL.txt).
-- **Fira Math** — © 2018–2023 Xiangdong Zeng. SIL Open Font License 1.1. The
+- **Fira Math** — © 2018–2020 Xiangdong Zeng. SIL Open Font License 1.1. The
   **sans** OpenType math font: radicals, big operators, stretchy fences, and the
   MATH table that positions every atom of a `$...$` span.
   Source: <https://github.com/firamath/firamath>.

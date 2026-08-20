@@ -88,7 +88,7 @@ dependencies.
 
 ## What gets bundled
 
-pyplotrs embeds two fonts into the compiled extension (so rendering always works
+pyplotrs embeds four fonts into the compiled extension (so rendering always works
 without relying on system fonts):
 
 - **Liberation Sans** — the permissive, Arial-metric-compatible fallback for
@@ -107,7 +107,8 @@ Letters, Greek, digits and the common operators come from the body face itself,
 so `$10^{-3}$` matches the plain ticks beside it and `$E = mc^2$` is one
 typeface throughout.
 
-Both are under the SIL Open Font License 1.1. For body text pyplotrs prefers the
-host's Arial, then Helvetica, before falling back to Liberation Sans — and
-embeds whichever it picks into every saved figure. See
+Liberation Sans, Fira Math and STIX Two Math are under the SIL Open Font License
+1.1; the DejaVu Sans subset is under the Bitstream Vera license. For body text
+pyplotrs prefers the host's Arial, then Helvetica, before falling back to
+Liberation Sans — and embeds whichever it picks into every saved figure. See
 [styling & themes](guide/styling-and-themes.md#fonts) for how to control this.

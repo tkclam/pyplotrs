@@ -17,9 +17,13 @@ font being installed on the host system.
 The Liberation, Fira Math and STIX fonts are licensed under the SIL Open Font
 License, Version 1.1, which permits bundling and redistribution (including
 embedding in documents) provided the license text accompanies the font software.
-None declares a Reserved Font Name, and all three are bundled unmodified. The
-license texts are included alongside the fonts here and are shipped in the
-source distribution.
+All three are bundled byte-for-byte as published upstream. Two of them declare a
+Reserved Font Name — Liberation declares "Liberation", STIX Two Math declares
+"TM Math"; Fira Math declares none — so the RFN clause is not engaged here, but
+any future subsetting or modification of those two files would require renaming
+them first. (The DejaVu Sans subset *is* modified, and the Bitstream Vera
+license it travels under is handled separately below.) The license texts are
+included alongside the fonts here and are shipped in the source distribution.
 
 ## Why three math fonts
 
@@ -119,5 +123,4 @@ its portability.
 
 STIX Fonts™ is a trademark of the Institute of Electrical and Electronics
 Engineers, Inc.; the font is used here under the OFL and the "STIX" name is not
-used to identify modified versions. "Liberation" is a Reserved Font Name under
-the OFL; the bundled file is the unmodified upstream font.
+used to identify modified versions.
