@@ -153,6 +153,36 @@ def test_sdist_resolves(tmp_path):
     )
 
 
+@pytest.mark.packaging
+def test_sdist_carries_no_bytecode(tmp_path):
+    """No `.pyc` in the tarball. `include = tests/**/*` swept up whatever
+    `tests/__pycache__/` held on the machine doing the build, and a `.pyc`
+    stores the absolute source path it was compiled from - so a public sdist
+    shipped 28 copies of the maintainer's home directory. The globs are
+    spelled out in pyproject.toml to keep bytecode out; this is what notices
+    if one gets widened back."""
+    out = tmp_path / "dist"
+    build = subprocess.run(
+        [sys.executable, "-m", "maturin", "sdist", "-o", str(out)],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    if build.returncode != 0:
+        if "No module named maturin" in build.stderr:
+            pytest.skip("maturin not available")
+        pytest.fail(f"maturin sdist failed:\n{build.stderr}")
+
+    (tarball,) = list(out.glob("*.tar.gz"))
+    with tarfile.open(tarball) as tar:
+        names = tar.getnames()
+
+    leaked = [n for n in names if n.endswith(".pyc") or "__pycache__" in n]
+    assert not leaked, (
+        f"{len(leaked)} bytecode entries in the sdist, e.g. {leaked[:3]}. "
+        "A .pyc embeds the absolute path it was compiled from; narrow the "
+        "`[tool.maturin] include` globs rather than shipping them."
+    )
+
+
 # -- what actually reaches the user ------------------------------------------
 #
 # The distribution redistributes fonts, colormap tables, a MathJax bundle and
@@ -184,6 +214,11 @@ def test_every_declared_license_file_exists():
      "assets/fonts/DejaVuSans-LICENSE.txt"),
     ("assets/fonts/FiraMath-Regular.otf",
      "assets/fonts/FiraMath-OFL.txt"),
+    # Vendored and compiled in, so the wheel is a redistribution of it too.
+    ("vendor/krilla-0.8.2/Cargo.toml",
+     "vendor/krilla-0.8.2/LICENSE-MIT"),
+    ("vendor/krilla-0.8.2/Cargo.toml",
+     "vendor/krilla-0.8.2/LICENSE-APACHE"),
 ])
 def test_every_redistributed_asset_ships_its_license(asset, notice):
     """If the asset is here, so is its license, and the license is declared."""

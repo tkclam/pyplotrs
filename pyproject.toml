@@ -35,6 +35,14 @@ license-files = [
     "THIRD_PARTY_COLORMAPS.md",
     "python/pyplotrs/_vendor/MATHJAX-LICENSE.txt",
     "python/pyplotrs/_vendor/MATHJAX-NOTICE.md",
+    # krilla is vendored and patched, so its code is compiled into the wheel and
+    # its source ships in the sdist - both are redistribution, and MIT and
+    # Apache-2.0 each require the license text to travel with it. The crate is
+    # dual-licensed, so both texts go; PYPLOTRS_PATCH.md is what Apache-2.0 §4(b)
+    # asks for, a statement of what was changed.
+    "vendor/krilla-0.8.2/LICENSE-MIT",
+    "vendor/krilla-0.8.2/LICENSE-APACHE",
+    "vendor/krilla-0.8.2/PYPLOTRS_PATCH.md",
 ]
 authors = [{ name = "tkclam", email = "thomas.lam@epfl.ch" }]
 maintainers = [{ name = "tkclam", email = "thomas.lam@epfl.ch" }]
@@ -161,7 +169,13 @@ include = [
     # The test suite, so a downstream packager can validate the artifact they
     # build rather than taking it on trust. Conda-forge and the distros all
     # run the suite during their build; without this they have nothing to run.
-    { path = "tests/**/*", format = "sdist" },
+    # Spelled out rather than `tests/**/*`: that glob also swept up whatever
+    # `tests/__pycache__/` happened to hold, putting 28 `.pyc` files - each
+    # embedding the absolute path of the machine that built them - into a
+    # public artifact. maturin has no exclude counterpart, so the include has
+    # to be the narrow thing. `test_sdist_carries_no_bytecode` guards it.
+    { path = "tests/*.py", format = "sdist" },
+    { path = "tests/golden/*.png", format = "sdist" },
     { path = "tools/gen_third_party_notices.py", format = "sdist" },
 ]
 
