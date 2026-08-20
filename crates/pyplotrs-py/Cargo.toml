@@ -28,7 +28,7 @@ pyo3 = { version = "0.28", features = ["extension-module"] }
 # rustybuzz/ttf-parser already in the tree). `fontconfig` honors the host's
 # fontconfig directories/aliases on Unix so the Arial->Helvetica lookup finds
 # whatever the OS exposes; `memmap` avoids reading every system font into RAM.
-fontdb = { version = "0.23", default-features = false, features = ["fontconfig", "memmap"] }
+fontdb = { version = "0.24", default-features = false, features = ["fontconfig", "memmap"] }
 
 [lints]
 workspace = true
