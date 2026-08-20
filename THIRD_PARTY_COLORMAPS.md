@@ -22,6 +22,23 @@ Peter Kovesi, "Good Colour Maps: How to Design Them,"
 [Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/).
 No changes were made beyond resampling to a 256-entry RGB table.
 
+**ColorBrewer attribution.** 35 of the maps taken from matplotlib originate
+with ColorBrewer, not with matplotlib: the sequential and diverging ramps
+`Blues`, `BrBG`, `BuGn`, `BuPu`, `GnBu`, `Greens`, `Greys`, `OrRd`, `Oranges`,
+`PRGn`, `PiYG`, `PuBu`, `PuBuGn`, `PuOr`, `PuRd`, `Purples`, `RdBu`, `RdGy`,
+`RdPu`, `RdYlBu`, `RdYlGn`, `Reds`, `Spectral`, `YlGn`, `YlGnBu`, `YlOrBr`,
+`YlOrRd`, and the qualitative sets `Accent`, `Dark2`, `Paired`, `Pastel1`,
+`Pastel2`, `Set1`, `Set2`, `Set3`. Colormaps are Copyright © 2002 Cynthia
+Brewer, Mark Harrower and The Pennsylvania State University, licensed under the
+Apache License, Version 2.0, and redistributed here under that license.
+matplotlib carries the same notice as its own `LICENSE_COLORBREWER`.
+
+**Yorick/GIST attribution.** The nine `gist_*` maps — `gist_earth`,
+`gist_gray`, `gist_grey`, `gist_heat`, `gist_ncar`, `gist_rainbow`,
+`gist_stern`, `gist_yarg`, `gist_yerg` — are derived from the Yorick/GIST
+package, Copyright © 1996 The Regents of the University of California,
+distributed under Yorick's BSD-style license (matplotlib's `LICENSE_YORICK`).
+
 All other bundled sources use permissive (BSD/MIT/CC0-family) licenses that do
 not require attribution beyond this notice, which is included here as a matter
 of good practice and to document provenance for anyone auditing the wheel's
