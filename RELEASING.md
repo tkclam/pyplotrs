@@ -28,8 +28,11 @@ The version lives in **one** place: `[workspace.package].version` in
    ```
 
 2. **Bump the version** in `Cargo.toml` (`[workspace.package].version`) and
-   run `cargo check --workspace` so `Cargo.lock` picks it up. Nothing else
-   states a version; if you find something that does, that is a bug.
+   run `cargo check --workspace` so `Cargo.lock` picks it up. Then bump
+   `version` and `date-released` in `CITATION.cff` to match — GitHub's "Cite
+   this repository" widget reads them verbatim, and CFF has no way to take
+   them from the build. Nothing else states a version; if you find something
+   that does, that is a bug.
 
 3. **Cut the changelog.** In `docs/about/changelog.md`, rename `## Unreleased`
    to `## X.Y.Z — YYYY-MM-DD` and open a fresh empty `## Unreleased` above it.
