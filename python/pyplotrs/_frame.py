@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from itertools import pairwise
 from typing import TYPE_CHECKING, Any, Literal
 
 from . import _core, _legend
 from . import scales as _scales
-from ._axis import Axis, Range, Ticks
+from ._axis import Axis, Range, Ticks, join
 from ._canvas import Canvas
 from .artists import Mappable, View
 from .colormaps import Colormap
@@ -33,6 +34,8 @@ OFFSET_GAP = 3.0
 CBAR_GAP = 8.0
 CBAR_WIDTH = 11.0
 MINOR_TICK = 0.6  # minor tick length relative to major
+BREAK_GAP = 5.0  # between the pieces of a broken axis
+BREAK_MARK = 3.0  # half-length of a break mark across its spine
 
 
 @dataclass
@@ -324,6 +327,84 @@ def _fit(canvas: Canvas, axis: Axis, r: Range, length: float, horizontal: bool) 
     return ticks
 
 
+# -- broken axes ----------------------------------------------------------------------
+
+#: A piece of an axis: its data range, and where it starts and how long it is
+#: on the page (device points).
+Cut = tuple[Range, float, float]
+
+
+def _cuts(axis: Axis, view: Range, start: float, length: float, horizontal: bool) -> list[Cut]:
+    """Lay the pieces of ``view`` along ``length`` points, sized by their data
+    span and separated by `BREAK_GAP`. The first piece is at the left (x) or
+    bottom (y)."""
+    pieces = axis.pieces(view)
+    if len(pieces) == 1:
+        return [(view, start, length)]
+    s = axis.scale
+    spans = [abs(s.transform(b) - s.transform(a)) for a, b in pieces]
+    total = sum(spans) or 1.0
+    room = max(length - BREAK_GAP * (len(pieces) - 1), 0.0)
+    out: list[Cut] = []
+    pos = 0.0
+    for piece, span in zip(pieces, spans, strict=True):
+        n = room * span / total
+        out.append((piece, start + pos if horizontal else start + length - pos - n, n))
+        pos += n + BREAK_GAP
+    return out
+
+
+def _place(axis: Axis, cuts: list[Cut], v: float, horizontal: bool) -> float:
+    """Device position of the value ``v`` on a (possibly broken) axis."""
+    s = axis.scale
+    for (a, b), start, n in cuts:
+        lo, hi = min(a, b), max(a, b)
+        eps = (hi - lo) * 1e-9
+        if lo - eps <= v <= hi + eps:
+            t0, t1 = s.transform(a), s.transform(b)
+            f = (s.transform(v) - t0) / ((t1 - t0) or 1.0)
+            return start + f * n if horizontal else start + n - f * n
+    return math.nan
+
+
+def _fit_pieces(canvas: Canvas, axis: Axis, r: Range, length: float, horizontal: bool) -> Ticks:
+    """Ticks fitted to each piece of a broken axis. Where the labels on either
+    side of a gap would collide, the one after the gap is dropped."""
+    cuts = _cuts(axis, r, 0.0, length, horizontal)
+    parts = [_fit(canvas, axis, piece, n, horizontal) for piece, _, n in cuts]
+    if len(parts) == 1:
+        return parts[0]
+    size = canvas.theme.tick_label_size
+    for before, after in pairwise(parts):
+        if not (before.values and after.values):
+            continue
+        a = _place(axis, cuts, before.values[-1], horizontal)
+        b = _place(axis, cuts, after.values[0], horizontal)
+        if horizontal:
+            wa = canvas.measure(before.labels[-1], size).width
+            wb = canvas.measure(after.labels[0], size).width
+            need = (wa + wb) / 2 + size * 0.6
+        else:
+            need = canvas.measure("0", size).height * 1.2
+        if abs(b - a) < need:
+            after.values, after.labels = after.values[1:], after.labels[1:]
+    return join(parts, canvas.theme.unicode_minus)
+
+
+def _regions(cuts: list[Cut]) -> list[Range]:
+    """Split the whole line between the pieces, at the middle of each gap, so
+    a mark allowed outside the plot is drawn by exactly one piece."""
+    far = 1e6
+    spans = [(start, start + n) for _, start, n in cuts]
+    order = sorted(range(len(spans)), key=lambda k: spans[k][0])
+    out: list[Range] = [(-far, far)] * len(spans)
+    for rank, k in enumerate(order):
+        lo = -far if rank == 0 else (spans[order[rank - 1]][1] + spans[k][0]) / 2
+        hi = far if rank == len(order) - 1 else (spans[k][1] + spans[order[rank + 1]][0]) / 2
+        out[k] = (lo, hi)
+    return out
+
+
 def _x_rotation(canvas: Canvas, ax: Axes, ticks: Ticks, width_hint: float) -> float:
     rot = ax._xtickrotation
     if rot != "auto":
@@ -348,8 +429,10 @@ def measure(
     th = canvas.theme
     minus = th.unicode_minus
     frame = ax._frame_on
-    xticks = _fit(canvas, ax.xaxis, xr, width_hint, True)
-    yticks = _fit(canvas, ax.yaxis, yr, height_hint, False)
+    if (ax.xaxis.breaks or ax.yaxis.breaks) and ax._twins:
+        raise ValueError("an axes with a broken axis can't have twin axes")
+    xticks = _fit_pieces(canvas, ax.xaxis, xr, width_hint, True)
+    yticks = _fit_pieces(canvas, ax.yaxis, yr, height_hint, False)
     rot = _x_rotation(canvas, ax, xticks, width_hint) if frame else 0.0
     bottom = measure_band(canvas, AxisBand("bottom", xticks, ax.xaxis.label, rot), frame)
     left = measure_band(canvas, AxisBand("left", yticks, ax.yaxis.label), frame)
@@ -357,13 +440,13 @@ def measure(
 
     # Tick labels centered on the outermost ticks hang past the plot's ends.
     if frame and xticks.values and rot == 0:
-        a, b = ax.xaxis.scale.transform(xr[0]), ax.xaxis.scale.transform(xr[1])
-        size = th.tick_label_size
-        for i, attr in ((0, "left"), (-1, "right")):
-            f = (ax.xaxis.scale.transform(xticks.values[i]) - a) / ((b - a) or 1.0)
-            dist = (f if (attr == "left") == (b > a) else 1 - f) * width_hint
-            hang = canvas.measure(xticks.labels[i], size).width / 2 - dist
-            setattr(m, attr, max(getattr(m, attr), hang))
+        cuts = _cuts(ax.xaxis, xr, 0.0, width_hint, True)
+        for i in (0, -1):
+            px = _place(ax.xaxis, cuts, xticks.values[i], True)
+            if math.isfinite(px):
+                half = canvas.measure(xticks.labels[i], th.tick_label_size).width / 2
+                m.left = max(m.left, half - px)
+                m.right = max(m.right, half - (width_hint - px))
 
     plan = Plan(xr, yr, bottom, left, m)
     if frame and yticks.offset:
@@ -425,26 +508,56 @@ def draw(ax: Axes, canvas: Canvas, plan: Plan, rect: tuple[float, float, float, 
     x, y, w, h = rect
     tf = transform(ax.xaxis.scale, ax.yaxis.scale, plan.xr, plan.yr, rect)
     view = View(tf, x, y, w, h, plan.xr, plan.yr)
+    xcuts = _cuts(ax.xaxis, plan.xr, x, w, True)
+    ycuts = _cuts(ax.yaxis, plan.yr, y, h, False)
+    broken = len(xcuts) > 1 or len(ycuts) > 1
     xt, yt = plan.bottom.ticks, plan.left.ticks
-    xs = [tf.x(v) for v in xt.values]
-    ys = [tf.y(v) for v in yt.values]
-    xm = [tf.x(v) for v in xt.minor]
-    ym = [tf.y(v) for v in yt.minor]
-
-    if th.axes_facecolor is not None and not ax._is_twin:
-        canvas.rects([x], [y], [x + w], [y + h], fill=th.axes_facecolor)
-    grid = th.grid if ax._grid is None else ax._grid
-    if grid and ax._frame_on:
-        if xs:
-            canvas.segments(
-                xs, [y] * len(xs), xs, [y + h] * len(xs), color=th.grid_color, width=th.grid_width
+    if broken:
+        xs, xm, ys, ym = (
+            [_place(axis, cuts, v, horiz) for v in values]
+            for axis, cuts, values, horiz in (
+                (ax.xaxis, xcuts, xt.values, True),
+                (ax.xaxis, xcuts, xt.minor, True),
+                (ax.yaxis, ycuts, yt.values, False),
+                (ax.yaxis, ycuts, yt.minor, False),
             )
-        if ys:
-            canvas.segments(
-                [x] * len(ys), ys, [x + w] * len(ys), ys, color=th.grid_color, width=th.grid_width
-            )
+        )
+    else:
+        xs, xm = [tf.x(v) for v in xt.values], [tf.x(v) for v in xt.minor]
+        ys, ym = [tf.y(v) for v in yt.values], [tf.y(v) for v in yt.minor]
 
-    draw_artists(canvas, ax._artists, view)
+    # One cell per piece of the plot: a single cell unless an axis is broken.
+    cells: list[tuple[tuple[float, float, float, float], View, Any]] = []
+    if broken:
+        for (xp, cx, cw), (xlo, xhi) in zip(xcuts, _regions(xcuts), strict=True):
+            for (yp, cy, ch), (ylo, yhi) in zip(ycuts, _regions(ycuts), strict=True):
+                cell = (cx, cy, cw, ch)
+                ctf = transform(ax.xaxis.scale, ax.yaxis.scale, xp, yp, cell)
+                region = (xlo, ylo, xhi - xlo, yhi - ylo)
+                cells.append((cell, View(ctf, x, y, w, h, xp, yp, clip=cell), region))
+    else:
+        cells.append((rect, view, None))
+
+    grid = (th.grid if ax._grid is None else ax._grid) and ax._frame_on
+    for (cx, cy, cw, ch), _, _ in cells:
+        if th.axes_facecolor is not None and not ax._is_twin:
+            canvas.rects([cx], [cy], [cx + cw], [cy + ch], fill=th.axes_facecolor)
+        if grid:
+            gx = [p for p in xs if cx - 0.01 <= p <= cx + cw + 0.01]
+            gy = [p for p in ys if cy - 0.01 <= p <= cy + ch + 0.01]
+            if gx:
+                n = len(gx)
+                canvas.segments(
+                    gx, [cy] * n, gx, [cy + ch] * n, color=th.grid_color, width=th.grid_width
+                )
+            if gy:
+                n = len(gy)
+                canvas.segments(
+                    [cx] * n, gy, [cx + cw] * n, gy, color=th.grid_color, width=th.grid_width
+                )
+
+    for _, cell_view, region in cells:
+        draw_artists(canvas, ax._artists, cell_view, region)
     for twin, band, r in plan.twins:
         if band.side == "right":
             twin_tf = transform(ax.xaxis.scale, twin.yaxis.scale, plan.xr, r, rect)
@@ -457,7 +570,10 @@ def draw(ax: Axes, canvas: Canvas, plan: Plan, rect: tuple[float, float, float, 
 
     if ax._frame_on:
         spines = set(th.spines) | {band.side for _, band, _ in plan.twins}
-        _draw_spines(canvas, spines, rect)
+        if broken:
+            _draw_broken_spines(canvas, spines, xcuts, ycuts)
+        else:
+            _draw_spines(canvas, spines, rect)
         draw_band(canvas, plan.bottom, rect, xs, xm)
         draw_band(canvas, plan.left, rect, ys, ym)
     else:
@@ -511,16 +627,68 @@ def draw(ax: Axes, canvas: Canvas, plan: Plan, rect: tuple[float, float, float, 
     return view
 
 
-def draw_artists(canvas: Canvas, artists: list, view: View) -> None:
+def draw_artists(
+    canvas: Canvas,
+    artists: list,
+    view: View,
+    region: tuple[float, float, float, float] | None = None,
+) -> None:
+    """Draw ``artists`` in z-order. Clipped ones are clipped to the plot (or
+    to ``view.clip``); the rest are clipped only to ``region``, if given."""
     ordered = sorted(artists, key=lambda a: a.zorder)
     clipped = [a for a in ordered if a.clip]
     if clipped:
-        with canvas.group(clip=(view.x, view.y, view.w, view.h)):
+        with canvas.group(clip=view.clip or (view.x, view.y, view.w, view.h)):
             for a in clipped:
                 a.draw(canvas, view)
-    for a in ordered:
-        if not a.clip:
+    free = [a for a in ordered if not a.clip]
+    if free and region is not None:
+        with canvas.group(clip=region):
+            for a in free:
+                a.draw(canvas, view)
+    else:
+        for a in free:
             a.draw(canvas, view)
+
+
+def _draw_broken_spines(
+    canvas: Canvas, spines: set[str], xcuts: list[Cut], ycuts: list[Cut]
+) -> None:
+    """Spines around each piece of a broken plot, open towards the gaps, with
+    a slanted mark where a spine is cut."""
+    th = canvas.theme
+    k = BREAK_MARK
+    marks: tuple[list[float], ...] = ([], [], [], [])
+    nx, ny = len(xcuts), len(ycuts)
+    for i, (_, cx, cw) in enumerate(xcuts):
+        for j, (_, cy, ch) in enumerate(ycuts):  # j = 0 is the bottom piece
+            inner = {
+                side
+                for side, cut in (
+                    ("left", i > 0),
+                    ("right", i < nx - 1),
+                    ("bottom", j > 0),
+                    ("top", j < ny - 1),
+                )
+                if cut
+            }
+            here = spines - inner
+            _draw_spines(canvas, here, (cx, cy, cw, ch))
+            edge = {"left": cx, "right": cx + cw, "top": cy, "bottom": cy + ch}
+            for gap in inner:
+                for sp in here:
+                    if sp in ("left", "right") and gap in ("top", "bottom"):
+                        px, py = edge[sp], edge[gap]
+                        seg = (px - k, py + k / 2, px + k, py - k / 2)
+                    elif sp in ("top", "bottom") and gap in ("left", "right"):
+                        px, py = edge[gap], edge[sp]
+                        seg = (px - k / 2, py + k, px + k / 2, py - k)
+                    else:
+                        continue
+                    for col, v in zip(marks, seg, strict=True):
+                        col.append(v)
+    if marks[0]:
+        canvas.segments(*marks, color=th.spine_color, width=th.spine_width)
 
 
 def _draw_spines(canvas: Canvas, spines: set[str], rect: tuple[float, float, float, float]) -> None:

@@ -31,6 +31,12 @@ fn offset_range(values: F64s, offsets: F64s, two_sided: bool) -> Option<(f64, f6
     kernels::offset_range(&values, &offsets, two_sided)
 }
 
+/// The largest finite `ys[i]` with `xs[i]` in `lo..=hi`, or `None`.
+#[pyfunction]
+fn peak(xs: F64s, ys: F64s, lo: f64, hi: f64) -> Option<f64> {
+    kernels::peak(&xs, &ys, lo, hi)
+}
+
 /// `(edges, counts)` of a fixed-width histogram.
 #[pyfunction]
 #[pyo3(signature = (values, bins, range=None, density=false))]
@@ -283,6 +289,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Transform>()?;
     m.add_function(wrap_pyfunction!(finite_range, m)?)?;
     m.add_function(wrap_pyfunction!(offset_range, m)?)?;
+    m.add_function(wrap_pyfunction!(peak, m)?)?;
     m.add_function(wrap_pyfunction!(histogram, m)?)?;
     m.add_function(wrap_pyfunction!(hist2d, m)?)?;
     m.add_function(wrap_pyfunction!(gaussian_kde, m)?)?;

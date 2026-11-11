@@ -49,6 +49,7 @@ passed on (for example to `fig.colorbar`).
 | Guides | `axhline`, `axvline`, `axhspan`, `axvspan`, `axline` |
 | Shapes | `rectangle`, `circle`, `ellipse`, `polygon`, `arrow` |
 | Text | `text`, `annotate` |
+| Figure marks | `scalebar`, `bracket` |
 
 Data can be lists, `array.array`, or NumPy arrays (read without copying when
 they are float64). NaN leaves a gap in a line. Strings make a categorical axis
@@ -82,6 +83,14 @@ ax.set(
 Read values back with `get_xlim()`, `get_xticks()`, `get_xticklabels()`, and
 so on; they report what will be drawn, including autoscaling and sharing.
 
+To leave out an empty stretch of an axis, break it. The rest is drawn as
+separate pieces, sized by their data span, with break marks on the spines:
+
+```python
+ax.bar(["walk", "groom", "rest"], [412, 23, 31])
+ax.set(ybreak=(40, 390))  # a list of pairs makes several breaks
+```
+
 Other axes features: `ax.legend(loc="best", ncols=2)`, `ax.twinx()`,
 `ax.twiny()`, `ax.inset_axes((x, y, w, h))`, and `ax.set(frame=False)`.
 For panel letters, `ax.set(title=pp.bold("a"), title_loc="left")`.
@@ -93,11 +102,40 @@ im = ax.imshow(z, cmap="magma", norm="log")
 fig.colorbar(im, label="intensity")
 ```
 
+`scatter` and `line` take `c=values` to color points, or a line along its
+length, by value (a walking path colored by time, say):
+
+```python
+path = ax.line(x, y, c=t, cmap="viridis")
+fig.colorbar(path, label="time (s)")
+```
+
 There are about 125 colormaps (`pp.colormaps.names()`) and 25 palettes
 (`pp.colormaps.palette("tab10")`); add `_r` to reverse one, or build your own
 with `pp.Colormap.from_colors(["navy", "white", "firebrick"])`. Norms are in
 `pp.norms`: `LogNorm`, `TwoSlopeNorm` (diverging around a center) and
 `BoundaryNorm` (discrete bins).
+
+## Scale bars and significance brackets
+
+Scale bars stand in for axes on traces and images:
+
+```python
+ax.line(t, v)
+ax.scalebar(x=0.2, y=5, xlabel="200 ms", ylabel="5 mV")  # loc="lower right"
+ax.set(frame=False)
+```
+
+A bracket marks a comparison between two groups. Give it text, or a p-value
+to show as stars (`*` < 0.05, `**` < 0.01, `***` < 0.001, `****` < 0.0001,
+otherwise `n.s.`). Brackets sit just above the data between their ends, and
+stack when they overlap, so add them after the data:
+
+```python
+ax.boxplot(speeds)
+ax.bracket(0, 1, 0.003)
+ax.bracket(0, 2, "n.s.")
+```
 
 ## Text and math
 

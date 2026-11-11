@@ -147,13 +147,7 @@ pub fn polyline_path(
     let mut geometry = BezPath::new();
     let mut run: Vec<Point> = Vec::new();
     let flush = |run: &mut Vec<Point>, geometry: &mut BezPath| {
-        let pts = match simplify {
-            Some(tol) if run.len() >= 3 => {
-                let dense = decimate_columns(run, COLUMN);
-                simplify_polyline(dense.as_deref().unwrap_or(run), tol)
-            }
-            _ => run.clone(),
-        };
+        let pts = thin(run, simplify);
         run.clear();
         if pts.is_empty() {
             return;
@@ -168,6 +162,76 @@ pub fn polyline_path(
     }
     flush(&mut run, &mut geometry);
     geometry
+}
+
+/// The vertices of `run` worth drawing: dense columns decimated and straight
+/// stretches simplified to within `simplify` points.
+fn thin(run: &[Point], simplify: Option<f64>) -> Vec<Point> {
+    match simplify {
+        Some(tol) if run.len() >= 3 => {
+            let dense = decimate_columns(run, COLUMN);
+            simplify_polyline(dense.as_deref().unwrap_or(run), tol)
+        }
+        _ => run.to_vec(),
+    }
+}
+
+/// A polyline whose color follows `values` through `mapper`: each segment
+/// takes the color of its midpoint value. Consecutive segments that land on
+/// the same colormap entry are joined into one path, so a slowly varying
+/// value costs a few paths, not one per segment. Non-finite points or values
+/// leave gaps.
+#[allow(clippy::too_many_arguments)]
+pub fn colored_line(
+    xs: &[f64],
+    ys: &[f64],
+    values: &[f64],
+    tf: &Transform,
+    mapper: &ColorMapper,
+    lut: &[u8],
+    stroke: &Stroke,
+    simplify: Option<f64>,
+) -> Vec<Node> {
+    let mut nodes = Vec::new();
+    let mut run: Vec<Point> = Vec::new();
+    let mut entry = 0usize;
+    let mut flush = |run: &mut Vec<Point>, entry: usize| {
+        if run.len() >= 2 {
+            let c = &lut[entry * 4..entry * 4 + 4];
+            nodes.push(Node::Path(PathNode {
+                geometry: polyline(thin(run, simplify), false),
+                fill: None,
+                fill_rule: FillRule::NonZero,
+                stroke: Some(Stroke {
+                    color: Color::rgba(c[0], c[1], c[2], c[3]),
+                    ..stroke.clone()
+                }),
+            }));
+        }
+        run.clear();
+    };
+    let mut prev: Option<(Point, f64)> = None;
+    for i in 0..xs.len().min(ys.len()).min(values.len()) {
+        let here = tf.point(xs[i], ys[i]).map(|p| (p, values[i]));
+        let segment = prev.zip(here).and_then(|((a, va), (b, vb))| {
+            let t = mapper.position((va + vb) / 2.0)?;
+            Some((a, b, ((t * 255.0).round() as usize).min(255)))
+        });
+        match segment {
+            Some((a, b, k)) => {
+                if run.is_empty() || k != entry {
+                    flush(&mut run, entry);
+                    run.push(a);
+                    entry = k;
+                }
+                run.push(b);
+            }
+            None => flush(&mut run, entry),
+        }
+        prev = here;
+    }
+    flush(&mut run, entry);
+    nodes
 }
 
 /// Independent straight segments from `(x0, y0)` to `(x1, y1)`, as one path.
@@ -392,6 +456,35 @@ mod tests {
             .filter(|e| matches!(e, kurbo::PathEl::MoveTo(_)))
             .count();
         assert_eq!(moves, 2);
+    }
+
+    #[test]
+    fn colored_line_joins_runs_of_one_color() {
+        let lut: Vec<u8> = (0..=255u8).flat_map(|i| [i, 0, 0, 255]).collect();
+        let mapper = ColorMapper::new(&lut, crate::geometry::Scale::Linear, 0.0, 1.0);
+        let xs = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
+        let ys = [0.0; 6];
+        // Two segments at 0, a NaN gap, then two segments at 1.
+        let vs = [0.0, 0.0, 0.0, f64::NAN, 1.0, 1.0];
+        let stroke = Stroke::new(Color::BLACK, 1.0);
+        let nodes = colored_line(
+            &xs,
+            &ys,
+            &vs,
+            &Transform::IDENTITY,
+            &mapper,
+            &lut,
+            &stroke,
+            None,
+        );
+        let reds: Vec<u8> = nodes
+            .iter()
+            .map(|n| match n {
+                Node::Path(p) => p.stroke.as_ref().unwrap().color.r,
+                _ => panic!("expected a path"),
+            })
+            .collect();
+        assert_eq!(reds, vec![0, 255]);
     }
 
     #[test]

@@ -47,6 +47,21 @@ class Scene:
         join: _Join = "round",
         simplify: float | None = None,
     ) -> None: ...
+    def colored_line(
+        self,
+        xs: _Floats,
+        ys: _Floats,
+        values: _Floats,
+        lut: _Bytes,
+        vmin: float,
+        vmax: float,
+        tf: Transform | None = None,
+        *,
+        norm: str = "linear",
+        width: float = 1.0,
+        dash: Sequence[float] | None = None,
+        simplify: float | None = None,
+    ) -> None: ...
     def segments(
         self,
         x0: _Floats,
@@ -181,6 +196,7 @@ class Scene:
     def to_png(self, *, dpi: float = 200.0, transparent: bool = False) -> bytes: ...
 
 def finite_range(values: _Floats, scale: str = "linear") -> tuple[float, float] | None: ...
+def peak(xs: _Floats, ys: _Floats, lo: float, hi: float) -> float | None: ...
 def offset_range(
     values: _Floats, offsets: _Floats, two_sided: bool = True
 ) -> tuple[float, float] | None: ...

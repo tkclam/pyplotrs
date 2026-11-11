@@ -23,6 +23,10 @@ Each image is produced by the script of the same name in
 
 ![neuroscience](gallery/neuroscience.png)
 
+## behavior
+
+![behavior](gallery/behavior.png)
+
 ## scales
 
 ![scales](gallery/scales.png)

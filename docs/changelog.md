@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+**Added**
+
+- `ax.line(x, y, c=values)` colors a line along its length through a
+  colormap; pass it to `fig.colorbar`.
+- `ax.scalebar(x=..., y=...)` draws labeled scale bars in a corner or at a
+  data point.
+- `ax.bracket(x0, x1, text)` marks a comparison between groups; a p-value
+  becomes stars, and brackets stack above the data automatically.
+- `ax.set(xbreak=(lo, hi))` and `ybreak` draw a broken axis.
+
 ## 0.2.0
 
 A rewrite for a smaller, clearer codebase. Output and speed are equal or

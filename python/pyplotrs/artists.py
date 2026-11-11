@@ -42,6 +42,9 @@ class View:
     h: float
     xlim: Range
     ylim: Range
+    #: Where clipped marks are cut off, if not the plot rectangle (one piece
+    #: of a broken axes).
+    clip: tuple[float, float, float, float] | None = None
 
     def fx(self, frac: float) -> float:
         """Device x of an axes fraction (0 = left)."""
@@ -107,6 +110,20 @@ class Artist:
         """A sample of data points this mark covers, for legend placement."""
         return [], []
 
+    def peak(self, lo: float, hi: float) -> float | None:
+        """The highest y this mark reaches over x in ``lo..hi`` (``None`` if
+        it has nothing there). Brackets use it to sit above the data."""
+        xs, ys = self.footprint()
+        return _peak(xs, ys, lo, hi)
+
+
+def _peak(xs: Any, ys: Any, lo: float, hi: float) -> float | None:
+    return _core.peak(f64(xs), f64(ys), lo, hi) if len(xs) else None
+
+
+def _highest(*values: float | None) -> float | None:
+    return max((v for v in values if v is not None), default=None)
+
 
 class Mappable:
     """A mark colored through a colormap; pass it to ``Figure.colorbar``."""
@@ -120,7 +137,7 @@ class Mappable:
 
 
 @dataclass(eq=False)
-class Line(Artist):
+class Line(Artist, Mappable):
     xs: Array = field(repr=False)
     ys: Array = field(repr=False)
     color: RGBA = (0, 0, 0, 255)
@@ -129,11 +146,19 @@ class Line(Artist):
     marker: str | None = None
     markersize: float = 5.0
     simplify: bool = True
+    #: Per-point values colored through `cmap` and `norm` (optional).
+    values: Array | None = field(default=None, repr=False)
+    cmap: Colormap | None = None  # type: ignore[assignment]
+    norm: Norm | None = None  # type: ignore[assignment]
+    alpha: float = 1.0
 
     def limits(self, xscale: Scale, yscale: Scale) -> tuple[Range | None, Range | None]:
         return _range(self.xs, xscale), _range(self.ys, yscale)
 
     def draw(self, canvas: Canvas, view: View) -> None:
+        if self.values is not None and self.cmap is not None and self.norm is not None:
+            self._draw_mapped(canvas, view, self.cmap, self.norm, self.values)
+            return
         if self.linestyle not in NO_LINE and len(self.xs) >= 2:
             canvas.path(
                 self.xs,
@@ -151,12 +176,45 @@ class Line(Artist):
                 self.xs, self.ys, view.tf, marker=self.marker, size=self.markersize, fill=self.color
             )
 
+    def _draw_mapped(
+        self, canvas: Canvas, view: View, cmap: Colormap, norm: Norm, values: Array
+    ) -> None:
+        lut, code = norm.lut(cmap, self.alpha)
+        lo, hi = norm.limits
+        if self.linestyle not in NO_LINE and len(self.xs) >= 2:
+            canvas.colored_line(
+                self.xs,
+                self.ys,
+                values,
+                lut,
+                lo,
+                hi,
+                view.tf,
+                norm=code,
+                width=self.linewidth,
+                dash=dash(self.linestyle),
+                simplify=0.1 if self.simplify else None,
+            )
+        if self.marker:
+            canvas.markers(
+                self.xs,
+                self.ys,
+                view.tf,
+                marker=self.marker,
+                size=self.markersize,
+                fill=self.color,
+                fills=_core.map_colors(values, lut, lo, hi, code),
+            )
+
     def legend_key(self) -> Key:
         return Key("line", self.color, self.linewidth, self.linestyle, self.marker, self.markersize)
 
     def footprint(self) -> tuple[list[float], list[float]]:
         idx = _sample(len(self.xs))
         return [self.xs[i] for i in idx], [self.ys[i] for i in idx]
+
+    def peak(self, lo: float, hi: float) -> float | None:
+        return _peak(self.xs, self.ys, lo, hi)
 
 
 @dataclass(eq=False)
@@ -200,6 +258,7 @@ class Scatter(Artist, Mappable):
         )
 
     footprint = Line.footprint  # type: ignore[assignment]
+    peak = Line.peak  # type: ignore[assignment]
 
 
 @dataclass(eq=False)
@@ -293,6 +352,15 @@ class Rects(Artist):
 
     def legend_key(self) -> Key:
         return Key("patch", self.color, edgecolor=self.edgecolor)
+
+    def peak(self, lo: float, hi: float) -> float | None:
+        x0, x1, y0, y1 = self.x0, self.x1, self.y0, self.y1
+        tops = [
+            max(y0[i], y1[i])
+            for i in range(len(x0))
+            if min(x0[i], x1[i]) <= hi and max(x0[i], x1[i]) >= lo
+        ]
+        return _highest(*(t for t in tops if math.isfinite(t)))
 
     def footprint(self) -> tuple[list[float], list[float]]:
         xs, ys = [], []
@@ -563,6 +631,9 @@ class Group(Artist):
             ys += b
         return xs, ys
 
+    def peak(self, lo: float, hi: float) -> float | None:
+        return _highest(*(c.peak(lo, hi) for c in self.children))
+
 
 @dataclass(eq=False)
 class ContourSet(Group, Mappable):
@@ -654,6 +725,12 @@ class ErrorBars(Artist):
         )
 
     footprint = Line.footprint  # type: ignore[assignment]
+
+    def peak(self, lo: float, hi: float) -> float | None:
+        if self.yerr is None:
+            return _peak(self.xs, self.ys, lo, hi)
+        tops = f64([v + e for v, e in zip(self.ys, self.yerr[1], strict=True)])
+        return _highest(_peak(self.xs, tops, lo, hi), _peak(self.xs, self.ys, lo, hi))
 
 
 @dataclass(eq=False)
@@ -754,6 +831,17 @@ class BoxPlot(Artist):
     def legend_key(self) -> Key:
         return Key("patch", with_alpha(self.color, 0.25), edgecolor=self.color)
 
+    def peak(self, lo: float, hi: float) -> float | None:
+        if not self.vertical:
+            return None
+        hw = self.width / 2
+        tops = [
+            max([st["hi"], *st["fliers"]] if self.showfliers else [st["hi"]])
+            for p, st in zip(self.positions, self.stats, strict=True)
+            if p - hw <= hi and p + hw >= lo
+        ]
+        return _highest(*tops)
+
 
 # -- guides ------------------------------------------------------------------------
 
@@ -844,6 +932,121 @@ class AxLine(Artist):
 
     def legend_key(self) -> Key:
         return Key("line", self.color, self.linewidth, self.linestyle)
+
+
+@dataclass(eq=False)
+class ScaleBar(Artist):
+    """Bars showing a length in data units, in place of axes: ``x`` and/or
+    ``y`` long. ``loc`` is a corner of the plot (``"lower right"``, ...) or a
+    data point ``(x, y)`` where the bars start and extend right and up."""
+
+    x: float | None = None
+    y: float | None = None
+    xlabel: Label | None = None
+    ylabel: Label | None = None
+    loc: str | tuple[float, float] = "lower right"
+    color: RGBA | None = None
+    linewidth: float = 1.5
+    size: float | None = None
+    #: Gap between the bars and the plot edge, in points.
+    pad: float = 4.0
+    clip: bool = field(default=False, kw_only=True)
+
+    GAP = 2.0  # between a bar and its label
+
+    def draw(self, canvas: Canvas, view: View) -> None:
+        tf, (x0, _), (y0, _) = view.tf, view.xlim, view.ylim
+        lx = abs(tf.x(x0 + self.x) - tf.x(x0)) if self.x else 0.0
+        ly = abs(tf.y(y0 + self.y) - tf.y(y0)) if self.y else 0.0
+        if not (math.isfinite(lx) and math.isfinite(ly)) or not (lx or ly):
+            return
+        size = self.size or canvas.theme.tick_label_size
+        color = self.color or canvas.theme.text_color
+        ex = canvas.measure(self.xlabel, size) if lx and self.xlabel else None
+        ey = canvas.measure(self.ylabel, size) if ly and self.ylabel else None
+        gap = self.GAP + self.linewidth / 2
+
+        if isinstance(self.loc, str):
+            vert, _, horiz = self.loc.partition(" ")
+            upper, right = vert == "upper", horiz == "right"
+            if vert not in ("upper", "lower") or horiz not in ("left", "right"):
+                raise ValueError(
+                    "scalebar loc must be 'lower right', 'lower left', 'upper right', "
+                    f"'upper left' or a data point (x, y); got {self.loc!r}"
+                )
+            label_w = ey.width + gap if ey else 0.0
+            label_h = ex.height + gap if ex else 0.0
+            cx = view.x + view.w - self.pad - label_w if right else view.x + self.pad + label_w
+            cy = view.y + self.pad + label_h if upper else view.y + view.h - self.pad - label_h
+        else:
+            upper = right = False
+            cx, cy = tf.x(self.loc[0]), tf.y(self.loc[1])
+            if not (math.isfinite(cx) and math.isfinite(cy)):
+                return
+        # The bars meet at the corner (cx, cy) and run away from the plot edge.
+        hx = cx - lx if right else cx + lx
+        vy = cy + ly if upper else cy - ly
+        xs = [hx, cx, cx] if lx and ly else ([hx, cx] if lx else [cx, cx])
+        ys = [cy, cy, vy] if lx and ly else ([cy, cy] if lx else [cy, vy])
+        canvas.path(xs, ys, stroke=color, width=self.linewidth, cap="butt", join="miter")
+        if ex is not None and self.xlabel:
+            ty = cy - gap - ex.depth if upper else cy + gap + ex.ascent
+            canvas.text((cx + hx) / 2, ty, self.xlabel, size, color, ha="center")
+        if ey is not None and self.ylabel:
+            tx = cx + gap if right else cx - gap
+            ha: HAlign = "left" if right else "right"
+            canvas.text(tx, (cy + vy) / 2, self.ylabel, size, color, ha=ha, va="center")
+
+
+def stars(p: float) -> str:
+    """The usual significance stars for a p-value: ``*`` below 0.05, ``**``
+    below 0.01, ``***`` below 0.001, ``****`` below 0.0001, else ``n.s.``"""
+    for cut, mark in ((1e-4, "****"), (1e-3, "***"), (1e-2, "**"), (0.05, "*")):
+        if p < cut:
+            return mark
+    return "n.s."
+
+
+@dataclass(eq=False)
+class Bracket(Artist):
+    """A bracket from ``x0`` to ``x1`` at height ``y`` with ``text`` above it,
+    marking a comparison between two groups."""
+
+    x0: float = 0.0
+    x1: float = 1.0
+    y: float = 0.0
+    text: Label = "*"
+    #: Room reserved above ``y`` for the text, in data units.
+    headroom: float = 0.0
+    color: RGBA | None = None
+    linewidth: float = 0.8
+    size: float | None = None
+    #: Length of the downward ticks at each end, in points.
+    tip: float = 3.0
+    clip: bool = field(default=False, kw_only=True)
+
+    def limits(self, xscale: Scale, yscale: Scale) -> tuple[Range | None, Range | None]:
+        return (min(self.x0, self.x1), max(self.x0, self.x1)), (self.y, self.y + self.headroom)
+
+    def peak(self, lo: float, hi: float) -> float | None:
+        if min(self.x0, self.x1) <= hi and max(self.x0, self.x1) >= lo:
+            return self.y + self.headroom
+        return None
+
+    def draw(self, canvas: Canvas, view: View) -> None:
+        tf = view.tf
+        a, b, y = tf.x(self.x0), tf.x(self.x1), tf.y(self.y)
+        if not all(math.isfinite(v) for v in (a, b, y)):
+            return
+        color = self.color or canvas.theme.text_color
+        t = self.tip
+        canvas.path(
+            [a, a, b, b], [y + t, y, y, y + t], stroke=color, width=self.linewidth, join="miter"
+        )
+        if self.text:
+            size = self.size or canvas.theme.tick_label_size
+            gap = 1.5 + self.linewidth / 2
+            canvas.text((a + b) / 2, y - gap, self.text, size, color, ha="center", va="bottom")
 
 
 # -- text ----------------------------------------------------------------------------

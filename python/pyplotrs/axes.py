@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 from array import array
 from collections.abc import Callable, Sequence
+from numbers import Real
 from typing import TYPE_CHECKING, Any, Literal
 
 from . import _core
@@ -32,6 +33,7 @@ from .artists import (
     AxLine,
     Band,
     BoxPlot,
+    Bracket,
     ContourSet,
     ErrorBars,
     Group,
@@ -42,11 +44,13 @@ from .artists import (
     Rects,
     RefLine,
     RGBImage,
+    ScaleBar,
     Scatter,
     Segments,
     SpanBand,
     Text,
     View,
+    stars,
 )
 from .colors import RGBA, ColorLike, with_alpha
 from .text import Label, as_label
@@ -209,11 +213,16 @@ class Axes(AxesBase):
         x: Any,
         y: Any = None,
         *,
+        c: Any = None,
         color: Color = None,
         linewidth: float | None = None,
         linestyle: str = "solid",
         marker: str | None = None,
         markersize: float | None = None,
+        cmap: Cmap = "viridis",
+        norm: NormLike = None,
+        vmin: float | None = None,
+        vmax: float | None = None,
         alpha: float = 1.0,
         simplify: bool = True,
         label: Label | None = None,
@@ -225,18 +234,35 @@ class Axes(AxesBase):
         (or ``-``, ``--``, ``:``, ``-.``) or ``"none"``. ``marker`` (``o s ^ v
         D + x | _``) adds a marker at each point. NaN values leave gaps.
         ``simplify`` drops vertices that would not change the drawing.
+
+        ``c`` gives each point a value, and the line is colored along its
+        length through ``cmap`` and ``norm`` (a trajectory colored by time,
+        say). Pass the result to ``Figure.colorbar`` to show the scale.
         """
         xs, ys = self._xy("line", x, y)
+        values = cm = nrm = None
+        if c is not None:
+            values = data.f64(c)
+            data.same_length("line", x=xs, c=values)
+            cm = _colormaps.get(cmap)
+            nrm = _norms.get(norm, vmin, vmax).autoscale(values)
+            rgba = with_alpha(cm(0.5), alpha) if color is None else self._color(color, alpha)
+        else:
+            rgba = self._color(color, alpha)
         return self._add(
             Line(
                 xs,
                 ys,
-                self._color(color, alpha),
+                rgba,
                 self.theme.line_width if linewidth is None else float(linewidth),
                 check_linestyle(linestyle),
                 check_marker(marker),
                 self.theme.marker_size if markersize is None else float(markersize),
                 simplify,
+                values,
+                cm,
+                nrm,
+                alpha,
             ),
             label,
             zorder,
@@ -1367,6 +1393,121 @@ class Axes(AxesBase):
             zorder,
         )
 
+    # -- figure furniture ---------------------------------------------------------
+
+    def scalebar(
+        self,
+        x: float | None = None,
+        y: float | None = None,
+        *,
+        xlabel: Label | None = None,
+        ylabel: Label | None = None,
+        loc: str | tuple[float, float] = "lower right",
+        color: Color = None,
+        linewidth: float = 1.5,
+        size: float | None = None,
+        pad: float = 4.0,
+        zorder: float = 3.0,
+    ) -> ScaleBar:
+        """Scale bars: a horizontal bar ``x`` data units long and/or a vertical
+        bar ``y`` units tall, the usual stand-in for axes on traces and images::
+
+            ax.scalebar(x=0.5, y=20, xlabel="500 ms", ylabel="20 mV")
+            ax.set(frame=False)
+
+        Labels default to the length; pass ``""`` for none. ``loc`` is a
+        corner of the plot (``"lower right"``, ``"lower left"``, ``"upper
+        right"``, ``"upper left"``), with the bars and their labels kept
+        ``pad`` points inside it, or a data point ``(x, y)`` where the bars
+        start and run right and up.
+        """
+        if x is None and y is None:
+            raise ValueError("scalebar() needs a length for x, y or both")
+        minus = self.theme.unicode_minus
+
+        def lab(given: Label | None, length: float | None) -> Label | None:
+            if length is None:
+                return None
+            return as_label(given) if given is not None else _ticker.plain(length, minus)
+
+        return self._add(
+            ScaleBar(
+                _opt_float(x),
+                _opt_float(y),
+                lab(xlabel, x),
+                lab(ylabel, y),
+                loc if isinstance(loc, str) else (float(loc[0]), float(loc[1])),
+                None if color is None else self.theme.color(color),
+                float(linewidth),
+                size,
+                float(pad),
+            ),
+            None,
+            zorder,
+        )
+
+    def bracket(
+        self,
+        x0: Any,
+        x1: Any,
+        text: Label | float = "*",
+        *,
+        y: float | None = None,
+        color: Color = None,
+        linewidth: float | None = None,
+        size: float | None = None,
+        tip: float = 3.0,
+        zorder: float = 2.0,
+    ) -> Bracket:
+        """A bracket from ``x0`` to ``x1`` with ``text`` above it, marking a
+        comparison between two groups::
+
+            ax.bar(["ctrl", "drug"], [3.1, 4.5], yerr=[0.3, 0.4])
+            ax.bracket("ctrl", "drug", p)
+
+        ``text`` may be a p-value, shown as stars: ``*`` below 0.05, ``**``
+        below 0.01, ``***`` below 0.001, ``****`` below 0.0001, else ``n.s.``
+
+        Without ``y`` the bracket sits just above the highest mark between
+        ``x0`` and ``x1``, including earlier brackets, so brackets added one
+        after another stack without overlapping. Add it after the data.
+        ``tip`` is the length of the end ticks in points.
+        """
+        a, b = (float(self._coords([v], "x")[0]) for v in (x0, x1))
+        label = stars(float(text)) if isinstance(text, (int, float)) else as_label(text)
+        scale = self.yaxis.scale
+        yr = None
+        for art in self._artists:
+            if not isinstance(art, Bracket):
+                yr = data.union(yr, art.limits(self.xaxis.scale, scale)[1])
+        lo, hi = self.yaxis.view(yr)
+        t_lo, t_hi = scale.transform(min(lo, hi)), scale.transform(max(lo, hi))
+        span = (t_hi - t_lo) or 1.0
+        if y is None:
+            top = max(
+                (p for art in self._artists if (p := art.peak(min(a, b), max(a, b))) is not None),
+                default=None,
+            )
+            t_top = t_hi if top is None else scale.transform(top)
+            y = scale.inverse(t_top + 0.05 * span)
+        y = float(y)
+        headroom = scale.inverse(scale.transform(y) + 0.09 * span) - y
+        return self._add(
+            Bracket(
+                a,
+                b,
+                y,
+                label,
+                headroom,
+                None if color is None else self.theme.color(color),
+                self.theme.spine_width if linewidth is None else float(linewidth),
+                size,
+                float(tip),
+            ),
+            None,
+            zorder,
+        )
+
     # -- text ---------------------------------------------------------------------
 
     def text(
@@ -1460,6 +1601,8 @@ class Axes(AxesBase):
         xinverted: bool | None = None,
         yinverted: bool | None = None,
         grid: bool | None = None,
+        xbreak: Any = _UNSET,
+        ybreak: Any = _UNSET,
         aspect: Literal["auto", "equal"] | None = None,
         frame: bool | None = None,
     ) -> Axes:
@@ -1478,6 +1621,10 @@ class Axes(AxesBase):
         * ``title_loc="left"`` aligns the title with the plot's left edge, the
           usual place for a panel letter: ``set(title=pp.bold("a"), title_loc="left")``.
         * ``frame=False`` hides spines, ticks and tick labels.
+        * ``ybreak=(lo, hi)`` cuts ``lo..hi`` out of the y axis, drawing the
+          rest as separate pieces with break marks on the spines (a list of
+          pairs makes several cuts; ``None`` removes them). Each piece is sized
+          by its data span. ``xbreak`` does the same along x.
 
         Returns the axes, so calls can be chained.
         """
@@ -1546,6 +1693,9 @@ class Axes(AxesBase):
             self._aspect = aspect
         if frame is not None:
             self._frame_on = bool(frame)
+        for axis, cut in ((self.xaxis, xbreak), (self.yaxis, ybreak)):
+            if cut is not _UNSET:
+                axis.breaks = _breaks(cut)
         return self
 
     def axis(self, mode: Literal["on", "off", "equal", "auto"]) -> None:
@@ -1600,16 +1750,16 @@ class Axes(AxesBase):
         return self.yaxis.scale.name
 
     def get_xticks(self) -> list[float]:
-        return self.xaxis.locate(*self.get_xlim(), minus=self.theme.unicode_minus).values
+        return self.xaxis.locate_view(self.get_xlim(), self.theme.unicode_minus).values
 
     def get_yticks(self) -> list[float]:
-        return self.yaxis.locate(*self.get_ylim(), minus=self.theme.unicode_minus).values
+        return self.yaxis.locate_view(self.get_ylim(), self.theme.unicode_minus).values
 
     def get_xticklabels(self) -> list[Label]:
-        return self.xaxis.locate(*self.get_xlim(), minus=self.theme.unicode_minus).labels
+        return self.xaxis.locate_view(self.get_xlim(), self.theme.unicode_minus).labels
 
     def get_yticklabels(self) -> list[Label]:
-        return self.yaxis.locate(*self.get_ylim(), minus=self.theme.unicode_minus).labels
+        return self.yaxis.locate_view(self.get_ylim(), self.theme.unicode_minus).labels
 
     # -- related axes -------------------------------------------------------------
 
@@ -1654,6 +1804,22 @@ class _LegendOnly(Artist):
 
 def _one(v: float) -> Any:
     return array("d", [float(v)])
+
+
+def _breaks(value: Any) -> list[tuple[float, float]]:
+    """``(lo, hi)``, a list of them, or ``None``, as sorted ranges."""
+    if value is None:
+        return []
+    pairs = [value] if len(value) == 2 and all(isinstance(v, Real) for v in value) else value
+    out = []
+    for pair in pairs:
+        if len(pair) != 2:
+            raise ValueError(f"an axis break is a pair (lo, hi), got {pair!r}")
+        lo, hi = sorted((float(pair[0]), float(pair[1])))
+        if not lo < hi:
+            raise ValueError(f"an axis break needs lo < hi, got {pair!r}")
+        out.append((lo, hi))
+    return sorted(out)
 
 
 def _opt_float(v: Any) -> float | None:

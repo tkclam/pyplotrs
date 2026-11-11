@@ -100,6 +100,44 @@ impl Scene {
         Ok(())
     }
 
+    /// A polyline colored segment by segment: `values` go through `norm` and
+    /// the 256-entry RGBA `lut`.
+    #[pyo3(signature = (xs, ys, values, lut, vmin, vmax, tf=None, *, norm="linear", width=1.0,
+                        dash=None, simplify=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn colored_line(
+        &mut self,
+        py: Python<'_>,
+        xs: F64s,
+        ys: F64s,
+        values: F64s,
+        lut: Bytes,
+        vmin: f64,
+        vmax: f64,
+        tf: Option<&Transform>,
+        norm: &str,
+        width: f64,
+        dash: Option<Vec<f32>>,
+        simplify: Option<f64>,
+    ) -> PyResult<()> {
+        if lut.0.len() != 1024 {
+            return Err(PyValueError::new_err(
+                "lut must be 256 RGBA entries (1024 bytes)",
+            ));
+        }
+        let stroke = stroke(Some((0, 0, 0, 255)), width, dash, "round", "round")?
+            .expect("a stroke color was given");
+        let tf = transform(tf);
+        let nodes = py.detach(|| {
+            let mapper = ColorMapper::new(&lut.0, Scale::parse(norm), vmin, vmax);
+            draw::colored_line(&xs, &ys, &values, &tf, &mapper, &lut.0, &stroke, simplify)
+        });
+        for node in nodes {
+            self.builder.push(node);
+        }
+        Ok(())
+    }
+
     /// Independent segments `(x0[i], y0[i]) -> (x1[i], y1[i])`.
     #[pyo3(signature = (x0, y0, x1, y1, tf=None, *, color, width=1.0, dash=None, cap="butt"))]
     #[allow(clippy::too_many_arguments)]

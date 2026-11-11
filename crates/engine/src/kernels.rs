@@ -74,6 +74,15 @@ pub fn offset_range(values: &[f64], offsets: &[f64], two_sided: bool) -> Option<
     }
 }
 
+/// The largest finite `ys[i]` whose `xs[i]` lies in `lo..=hi`.
+pub fn peak(xs: &[f64], ys: &[f64], lo: f64, hi: f64) -> Option<f64> {
+    xs.iter()
+        .zip(ys)
+        .filter(|&(&x, &y)| (lo..=hi).contains(&x) && y.is_finite())
+        .map(|(_, &y)| y)
+        .reduce(f64::max)
+}
+
 /// Maps values to positions on a 256-entry lookup table through a norm.
 pub struct ColorMapper<'a> {
     lut: &'a [u8],
@@ -534,4 +543,16 @@ pub fn contourf_image(
         }
     }
     Ok((buf, ow, oh))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn peak_looks_only_inside_the_range() {
+        let xs = [0.0, 1.0, 2.0, 3.0];
+        let ys = [5.0, 1.0, f64::NAN, 9.0];
+        assert_eq!(super::peak(&xs, &ys, 0.5, 2.5), Some(1.0));
+        assert_eq!(super::peak(&xs, &ys, 0.0, 3.0), Some(9.0));
+        assert_eq!(super::peak(&xs, &ys, 10.0, 11.0), None);
+    }
 }

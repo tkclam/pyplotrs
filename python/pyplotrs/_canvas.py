@@ -114,6 +114,7 @@ class Canvas:
         self._metrics: dict[tuple, tuple[float, ...]] = {}
         s = self.scene
         self.path, self.segments, self.rects = s.path, s.segments, s.rects
+        self.colored_line = s.colored_line
         self.polygons, self.band, self.markers = s.polygons, s.band, s.markers
         self.image, self.colormapped_image = s.image, s.colormapped_image
 
