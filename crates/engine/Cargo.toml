@@ -1,0 +1,30 @@
+[package]
+name = "pyplotrs-engine"
+description = "Scene IR, text and math layout, and PDF/SVG/PNG renderers for pyplotrs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+kurbo = "0.13"
+rustybuzz = "0.20"
+ttf-parser = "0.25"
+fontdb = { version = "0.23", default-features = false, features = ["fontconfig", "memmap"] }
+palette = { version = "0.7", default-features = false, features = ["std", "approx"] }
+krilla = "0.8"
+tiny-skia = "0.12"
+# Must match the skrifa krilla uses, so only one font stack is compiled in.
+skrifa = "0.42"
+gif = "0.14"
+rayon = "1.10"
+flate2 = "1.0"
+base64 = "0.22"
+png = "0.18"
+
+[dev-dependencies]
+approx = "0.5"
+
+[lints]
+workspace = true

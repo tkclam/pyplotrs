@@ -1,14 +1,20 @@
-"""Polar plot: line + scatter on a polar projection, with a legend."""
-import math
+"""Polar axes."""
+
+import os
+from pathlib import Path
+
+import numpy as np
 
 import pyplotrs as pp
 
-theta = [i * math.pi / 180 for i in range(0, 361)]
-fig, ax = pp.subplots(projection="polar", figsize=(360, 360))
-ax.plot(theta, [abs(math.cos(2 * t)) for t in theta], label="rose  r=|cos 2θ|")
-ax.plot(theta, [t / (2 * math.pi) for t in theta], label="spiral", linestyle="dashed")
-ax.scatter([0, math.pi / 2, math.pi, 3 * math.pi / 2], [0.9, 0.7, 0.9, 0.7],
-           color="C7", label="markers")
-ax.set(title="Polar plot")
-ax.legend(loc="upper right")
-fig.save("polar.png")
+out = Path(os.environ.get("PYPLOTRS_EXAMPLES_OUT", Path(__file__).parent / "output"))
+out.mkdir(exist_ok=True)
+
+theta = np.linspace(0, 2 * np.pi, 360)
+fig, ax = pp.subplots(projection="polar")
+ax.line(theta, 1 + 0.4 * np.cos(4 * theta), label="rose")
+ax.fill(theta, 0.6 + 0.2 * np.sin(theta), color="C2")
+ax.scatter(theta[::30], np.full(12, 1.3), color="C1")
+ax.set(title="Preferred direction", theta_zero="N", theta_direction=-1, rmax=1.5)
+ax.legend()
+fig.save(out / "polar.png")

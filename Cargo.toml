@@ -1,38 +1,16 @@
 [workspace]
-resolver = "2"
-members = [
-    "crates/pyplotrs-core",
-    "crates/pyplotrs-3d",
-    "crates/pyplotrs-color",
-    "crates/pyplotrs-text",
-    "crates/pyplotrs-math",
-    "crates/pyplotrs-layout",
-    "crates/pyplotrs-render-pdf",
-    "crates/pyplotrs-render-raster",
-    "crates/pyplotrs-render-svg",
-    "crates/pyplotrs-py",
-]
+resolver = "3"
+members = ["crates/engine", "crates/python"]
 exclude = ["vendor/krilla-0.8.2"]
 
 [workspace.package]
-version = "0.1.0"
-edition = "2021"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.92" # krilla's floor
 license = "MIT"
 repository = "https://github.com/tkclam/pyplotrs"
-# The floor is set by krilla, the PDF backend, which declares 1.92; the next
-# constraints down are 1.85 (kurbo, read-fonts, indexmap, hashbrown) and 1.83
-# (pyo3). It was declared as 1.80 and was wrong by twelve minor versions -
-# and inert besides, because no member crate inherited it, so
-# `cargo metadata` reported `null` for all ten and cargo enforced nothing.
-# Every crate now sets `rust-version.workspace = true`, and CI's `msrv` job
-# reads this value and runs `cargo check` on exactly that toolchain, so the
-# number is a fact rather than a hope. `docs/installation.md` quotes it.
-rust-version = "1.92"
+publish = false
 
-# There is no `unsafe` anywhere in the workspace today. `forbid` (not `deny`)
-# means a future block cannot be waved through with a local `#[allow]` either -
-# it has to be an explicit, reviewable change to this file. Free to add now,
-# expensive to add after the first one lands.
 [workspace.lints.rust]
 unsafe_code = "forbid"
 
@@ -40,7 +18,6 @@ unsafe_code = "forbid"
 lto = true
 codegen-units = 1
 
-# Vendored, minimally-patched krilla: see vendor/krilla-0.8.2/PYPLOTRS_PATCH.md
-# for what changed and why.
+# krilla with a small speed patch; see vendor/krilla-0.8.2/PYPLOTRS_PATCH.md.
 [patch.crates-io]
 krilla = { path = "vendor/krilla-0.8.2" }

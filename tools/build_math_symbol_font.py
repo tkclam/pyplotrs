@@ -5,7 +5,7 @@ A dev tool, not part of the package. Run from the repo root::
 
     .venv/bin/python tools/build_math_symbol_font.py
 
-It writes ``assets/fonts/DejaVuSans-MathSymbols.ttf``, which the extension
+It writes ``crates/engine/fonts/DejaVuSans-MathSymbols.ttf``, which the extension
 embeds via ``include_bytes!``.
 
 Why this font exists
@@ -51,8 +51,9 @@ redistribution provided the notices travel with the font and a modified font is
 renamed to a name containing neither "Bitstream" nor "Vera". "DejaVu Sans"
 contains neither, and no glyph outline is altered here — this is a subset, the
 same operation every PDF writer performs on the way into a file. The license
-text ships as ``assets/fonts/DejaVuSans-LICENSE.txt``.
+text ships as ``crates/engine/fonts/DejaVuSans-LICENSE.txt``.
 """
+
 from __future__ import annotations
 
 import os
@@ -95,7 +96,7 @@ CANDIDATES = [
 ]
 
 OUT = os.path.join(
-    os.path.dirname(__file__), "..", "assets", "fonts", "DejaVuSans-MathSymbols.ttf"
+    os.path.dirname(__file__), "..", "crates", "engine", "fonts", "DejaVuSans-MathSymbols.ttf"
 )
 
 

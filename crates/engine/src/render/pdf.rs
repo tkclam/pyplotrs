@@ -1,0 +1,380 @@
+//! Renders a scene to PDF with krilla. Text is drawn from the shaped glyph
+//! runs, so it is embedded (subset) as real, selectable text. Groups map onto
+//! krilla's transform/clip/opacity stack.
+
+use std::collections::HashMap;
+
+use crate::resample;
+use crate::scene::{
+    Color, FillRule as CoreFillRule, Group, ImageNode, LineCap as CoreLineCap,
+    LineJoin as CoreLineJoin, MarkerNode, Node, PathNode, Scene, Stroke as CoreStroke, TextNode,
+};
+use krilla::Document;
+use krilla::color::rgb;
+use krilla::geom::{Path, PathBuilder, Point, Size as KSize, Transform};
+use krilla::graphic::Graphic;
+use krilla::metadata::Metadata;
+use krilla::num::NormalizedF32;
+use krilla::page::PageSettings;
+use krilla::paint::{Fill, FillRule, LineCap, LineJoin, Stroke, StrokeDash};
+use krilla::surface::Surface;
+use krilla::tagging::{ContentTag, Tag, TagGroup, TagTree};
+use krilla::text::{Font, GlyphId, KrillaGlyph};
+use kurbo::{Affine, PathEl};
+
+fn to_krilla_path(geometry: &kurbo::BezPath) -> Option<Path> {
+    let mut pb = PathBuilder::new();
+    for el in geometry.elements() {
+        match *el {
+            PathEl::MoveTo(p) => pb.move_to(p.x as f32, p.y as f32),
+            PathEl::LineTo(p) => pb.line_to(p.x as f32, p.y as f32),
+            PathEl::QuadTo(p1, p2) => {
+                pb.quad_to(p1.x as f32, p1.y as f32, p2.x as f32, p2.y as f32)
+            }
+            PathEl::CurveTo(p1, p2, p3) => pb.cubic_to(
+                p1.x as f32,
+                p1.y as f32,
+                p2.x as f32,
+                p2.y as f32,
+                p3.x as f32,
+                p3.y as f32,
+            ),
+            PathEl::ClosePath => pb.close(),
+        }
+    }
+    pb.finish()
+}
+
+fn krilla_color(c: Color) -> rgb::Color {
+    rgb::Color::new(c.r, c.g, c.b)
+}
+
+/// Map a [`pyplotrs_core`] alpha (0-255) to a krilla [`NormalizedF32`].
+fn alpha(a: u8) -> NormalizedF32 {
+    NormalizedF32::new(a as f32 / 255.0).unwrap_or(NormalizedF32::ONE)
+}
+
+fn to_transform(affine: Affine) -> Transform {
+    let [a, b, c, d, e, f] = affine.as_coeffs();
+    Transform::from_row(a as f32, b as f32, c as f32, d as f32, e as f32, f as f32)
+}
+
+fn to_fill_rule(rule: CoreFillRule) -> FillRule {
+    match rule {
+        CoreFillRule::NonZero => FillRule::NonZero,
+        CoreFillRule::EvenOdd => FillRule::EvenOdd,
+    }
+}
+
+fn to_krilla_stroke(s: &CoreStroke) -> Stroke {
+    Stroke {
+        paint: krilla_color(s.color).into(),
+        width: s.width as f32,
+        opacity: alpha(s.color.a),
+        line_cap: match s.cap {
+            CoreLineCap::Butt => LineCap::Butt,
+            CoreLineCap::Round => LineCap::Round,
+            CoreLineCap::Square => LineCap::Square,
+        },
+        line_join: match s.join {
+            CoreLineJoin::Miter => LineJoin::Miter,
+            CoreLineJoin::Round => LineJoin::Round,
+            CoreLineJoin::Bevel => LineJoin::Bevel,
+        },
+        dash: s.dash.as_ref().map(|array| StrokeDash {
+            array: array.clone(),
+            offset: 0.0,
+        }),
+        ..Default::default()
+    }
+}
+
+/// Per-document state shared across the recursive walk.
+struct PdfRenderer {
+    /// krilla `Font`s cached by underlying-buffer identity so each distinct
+    /// font is parsed (and later embedded/subsetted) only once.
+    fonts: HashMap<*const Vec<u8>, Font>,
+    /// Linear part of the transform accumulated down the group stack. The
+    /// surface keeps its own stack for *placing* geometry; this exists only to
+    /// size the pixel grid an image is resampled onto (see `draw_image`).
+    transform: Affine,
+    /// Resolution embedded images are resampled to, in pixels per inch.
+    ppi: f64,
+}
+
+impl PdfRenderer {
+    fn font_for(&mut self, run_font: &crate::scene::FontData) -> Font {
+        self.fonts
+            .entry(run_font.key())
+            .or_insert_with(|| {
+                Font::new(run_font.data.clone().into(), run_font.index).expect("invalid font data")
+            })
+            .clone()
+    }
+
+    fn draw_path(&self, surface: &mut Surface, p: &PathNode) {
+        let Some(path) = to_krilla_path(&p.geometry) else {
+            return;
+        };
+        surface.set_fill(p.fill.map(|c| Fill {
+            paint: krilla_color(c).into(),
+            opacity: alpha(c.a),
+            rule: to_fill_rule(p.fill_rule),
+        }));
+        surface.set_stroke(p.stroke.as_ref().map(to_krilla_stroke));
+        surface.draw_path(&path);
+    }
+
+    fn draw_text(&mut self, surface: &mut Surface, text: &TextNode) {
+        surface.set_fill(Some(Fill {
+            paint: krilla_color(text.color).into(),
+            opacity: alpha(text.color.a),
+            rule: FillRule::NonZero,
+        }));
+        surface.set_stroke(None);
+
+        for run in &text.runs {
+            if run.glyphs.is_empty() {
+                continue;
+            }
+            let font = self.font_for(&run.font);
+            // One `draw_glyphs` call per run, so each label is one editable text object.
+            // krilla advances a pen by each glyph's advance; the offsets reconcile that
+            // pen with the shaper's absolute positions (y negated: krilla's y is up).
+            let size = run.size;
+            let mut pen = 0.0f32;
+            let mut kglyphs = Vec::with_capacity(run.glyphs.len());
+            for (i, glyph) in run.glyphs.iter().enumerate() {
+                let cluster_start = glyph.cluster as usize;
+                let cluster_end = run
+                    .glyphs
+                    .get(i + 1)
+                    .map(|g| g.cluster as usize)
+                    .unwrap_or(run.source_text.len())
+                    .max(cluster_start)
+                    .min(run.source_text.len());
+                kglyphs.push(KrillaGlyph::new(
+                    GlyphId::new(glyph.glyph_id as u32),
+                    glyph.advance / size,
+                    (glyph.x - pen) / size,
+                    -glyph.y / size,
+                    0.0,
+                    cluster_start..cluster_end,
+                    None,
+                ));
+                pen += glyph.advance;
+            }
+            let start = Point::from_xy(text.origin.x as f32, text.origin.y as f32);
+            surface.draw_glyphs(start, &kglyphs, font, &run.source_text, size, false);
+        }
+    }
+
+    fn draw_markers(&self, surface: &mut Surface, m: &MarkerNode) {
+        let Some(path) = to_krilla_path(&m.marker) else {
+            return;
+        };
+        // Colormapped scatter: a per-point fill, so the shared-XObject dedup
+        // (which assumes one color) doesn't apply. Draw the shared outline with
+        // each point's own fill; the shape is still defined once in `path`.
+        if let Some(colors) = &m.colors {
+            for (pos, c) in m.positions.iter().zip(colors) {
+                surface.push_transform(&Transform::from_translate(pos.x as f32, pos.y as f32));
+                surface.set_fill(Some(Fill {
+                    paint: krilla_color(*c).into(),
+                    opacity: alpha(c.a),
+                    rule: to_fill_rule(m.fill_rule),
+                }));
+                surface.set_stroke(m.stroke.as_ref().map(to_krilla_stroke));
+                surface.draw_path(&path);
+                surface.pop();
+            }
+            return;
+        }
+        // Describe the marker once as a reusable Form XObject. krilla writes the
+        // XObject's content stream a single time and dedupes it across all the
+        // `draw_graphic` invocations below, so a 1e6-point scatter is one small
+        // glyph definition plus N cheap `q cm Do Q` placements - not N copies of
+        // the bezier outline. Each placement is a pure translation, so stroke
+        // widths and shape are preserved exactly.
+        let graphic = {
+            let mut builder = surface.stream_builder();
+            let mut sub = builder.surface();
+            sub.set_fill(m.fill.map(|c| Fill {
+                paint: krilla_color(c).into(),
+                opacity: alpha(c.a),
+                rule: to_fill_rule(m.fill_rule),
+            }));
+            sub.set_stroke(m.stroke.as_ref().map(to_krilla_stroke));
+            sub.draw_path(&path);
+            sub.finish();
+            Graphic::new(builder.finish(), false)
+        };
+        for pos in &m.positions {
+            surface.push_transform(&Transform::from_translate(pos.x as f32, pos.y as f32));
+            surface.draw_graphic(graphic.clone());
+            surface.pop();
+        }
+    }
+
+    fn draw_image(&self, surface: &mut Surface, image: &ImageNode) {
+        // Resampled per axis first (see [`resample`]), since PDF has a single
+        // `/Interpolate` flag. The rect is re-normalized because krilla drops images
+        // with negative size.
+        let rect = image.rect.abs();
+        let (ex, ey) = resample::device_extent(rect, self.transform);
+        let resampled =
+            resample::vector_grid(image.data.width, image.data.height, ex, ey, self.ppi)
+                .map(|(w, h)| image.data.resampled_to(w, h));
+        let data = resampled.as_ref().unwrap_or(&image.data);
+        let img = krilla::image::Image::from_rgba8((*data.rgba).clone(), data.width, data.height);
+        // `draw_image` covers (0,0)..(w,h) in the current space; translate to
+        // the destination rect's top-left and let `size` scale it to fill.
+        surface.push_transform(&Transform::from_translate(rect.x0 as f32, rect.y0 as f32));
+        if let Some(size) = KSize::from_wh(rect.width() as f32, rect.height() as f32) {
+            surface.draw_image(img, size);
+        }
+        surface.pop();
+    }
+
+    fn render_node(&mut self, surface: &mut Surface, node: &Node) {
+        match node {
+            Node::Path(p) => self.draw_path(surface, p),
+            Node::Text(t) => self.draw_text(surface, t),
+            Node::Image(im) => self.draw_image(surface, im),
+            Node::Markers(m) => self.draw_markers(surface, m),
+            Node::Group(g) => self.render_group(surface, g),
+        }
+    }
+
+    fn render_group(&mut self, surface: &mut Surface, g: &Group) {
+        let mut pushed = 0;
+        if g.transform != Affine::IDENTITY {
+            surface.push_transform(&to_transform(g.transform));
+            pushed += 1;
+        }
+        if let Some(clip) = &g.clip
+            && let Some(path) = to_krilla_path(&clip.geometry)
+        {
+            surface.push_clip_path(&path, &to_fill_rule(clip.rule));
+            pushed += 1;
+        }
+        if g.opacity < 1.0 {
+            surface.push_opacity(NormalizedF32::new(g.opacity).unwrap_or(NormalizedF32::ONE));
+            pushed += 1;
+        }
+        let outer = self.transform;
+        self.transform = outer * g.transform;
+        for child in &g.children {
+            self.render_node(surface, child);
+        }
+        self.transform = outer;
+        for _ in 0..pushed {
+            surface.pop();
+        }
+    }
+}
+
+/// A document whose RGB colors are tagged with an embedded sRGB profile, so
+/// color-managed print pipelines reproduce them exactly.
+fn new_document() -> Document {
+    Document::new_with(krilla::SerializeSettings {
+        no_device_cs: true,
+        ..Default::default()
+    })
+}
+
+/// Render `scene` to PDF bytes.
+///
+/// Fails rather than panics on a degenerate scene (a zero or negative figure
+/// size) or a serialization error, so the Python binding can raise a normal
+/// exception instead of unwinding across the FFI boundary as a `PanicException`
+/// - which derives from `BaseException` and so escapes `except Exception`.
+pub fn render_pdf(scene: &Scene) -> Result<Vec<u8>, String> {
+    render_pdf_at(scene, resample::VECTOR_IMAGE_PPI)
+}
+
+/// [`render_pdf`], embedding images at `ppi` pixels per inch.
+pub fn render_pdf_at(scene: &Scene, ppi: f64) -> Result<Vec<u8>, String> {
+    let mut document = new_document();
+    render_into(&mut document, scene, None, ppi)?;
+    document
+        .finish()
+        .map_err(|e| format!("PDF serialization failed: {e:?}"))
+}
+
+/// Render `scene` as a **tagged, accessible PDF**: all marks are wrapped in one
+/// `Figure` structure element carrying `alt` text (so a screen reader announces
+/// the chart), and the document gets a `/Lang` + title in its metadata and a
+/// marked structure tree. `title` defaults the figure's document title.
+pub fn render_pdf_tagged(scene: &Scene, title: Option<&str>, alt: &str) -> Result<Vec<u8>, String> {
+    render_pdf_tagged_at(scene, title, alt, resample::VECTOR_IMAGE_PPI)
+}
+
+/// [`render_pdf_tagged`], embedding images at `ppi` pixels per inch.
+pub fn render_pdf_tagged_at(
+    scene: &Scene,
+    title: Option<&str>,
+    alt: &str,
+    ppi: f64,
+) -> Result<Vec<u8>, String> {
+    let mut document = new_document();
+    render_into(&mut document, scene, Some(alt), ppi)?;
+
+    let mut meta = Metadata::new()
+        .language("en".to_string())
+        .producer("pyplotrs".to_string());
+    if let Some(t) = title {
+        meta = meta.title(t.to_string());
+    }
+    document.set_metadata(meta);
+    document
+        .finish()
+        .map_err(|e| format!("PDF serialization failed: {e:?}"))
+}
+
+/// Shared render body. When `alt` is `Some`, the page's content is enclosed in a
+/// single tagged marked-content sequence referenced by a `Figure` struct
+/// element (the whole chart is one accessible figure with alternate text), and a
+/// tag tree is attached to the document.
+fn render_into(
+    document: &mut Document,
+    scene: &Scene,
+    alt: Option<&str>,
+    ppi: f64,
+) -> Result<(), String> {
+    let settings = PageSettings::from_wh(scene.size.width as f32, scene.size.height as f32)
+        .ok_or_else(|| {
+            format!(
+                "figure size must be positive, got {} x {} pt",
+                scene.size.width, scene.size.height
+            )
+        })?;
+    let mut page = document.start_page_with(settings);
+    let mut surface = page.surface();
+
+    let mut renderer = PdfRenderer {
+        fonts: HashMap::new(),
+        transform: Affine::IDENTITY,
+        ppi,
+    };
+
+    let content_id = alt.map(|_| surface.start_tagged(ContentTag::Other));
+    for node in &scene.nodes {
+        renderer.render_node(&mut surface, node);
+    }
+    if content_id.is_some() {
+        surface.end_tagged();
+    }
+
+    surface.finish();
+    page.finish();
+
+    if let (Some(id), Some(alt)) = (content_id, alt) {
+        let mut figure = TagGroup::new(Tag::Figure(Some(alt.to_string())));
+        figure.push(id);
+        let mut tree = TagTree::new();
+        tree.push(figure);
+        document.set_tag_tree(tree);
+    }
+    Ok(())
+}

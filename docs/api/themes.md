@@ -1,3 +1,0 @@
-# Themes
-
-::: pyplotrs.theme

@@ -1,12 +1,12 @@
 # Third-party colormap & palette data
 
 pyplotrs embeds a curated set of colormap/palette tables directly into the
-compiled extension (`crates/pyplotrs-color`, via Rust `include_bytes!`), so
+compiled extension (`crates/engine/src/color`, via Rust `include_bytes!`), so
 using a built-in colormap by name has no runtime dependency on the packages
 that originated its data. The tables were pulled once by
 `tools/extract_colormaps.py` (a dev-only tool, not shipped) and are committed
-as ordinary source (`crates/pyplotrs-color/data/continuous.bin` +
-`crates/pyplotrs-color/src/data/*_gen.rs`); see
+as ordinary source (`crates/engine/src/color/data/continuous.bin` +
+`crates/engine/src/color/data/*_gen.rs`); see
 `tools/colormap_manifest.json` for the exact name -> source mapping.
 
 | Source | License | What's included |

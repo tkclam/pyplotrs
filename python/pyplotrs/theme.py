@@ -1,100 +1,48 @@
-"""Themes: the single bundle of style choices a figure is drawn with.
+"""Themes: every style default a figure is drawn with, in one immutable object.
 
-A ``Theme`` is an immutable dataclass holding the genuinely *style*-varying
-knobs (palette, type scale, spine/grid/background, default line weights). There
-is **no global "current theme"** - a theme is passed to [`pyplotrs.subplots`][pyplotrs.subplots]
-(or [`pyplotrs.Figure`][pyplotrs.Figure]) and flows to its axes, matching the library's
-no-global-state philosophy.
+Pass a theme to a figure, or set the default for new figures::
 
-Built-in presets are module attributes, so ``pyplotrs.themes.dark`` etc. work::
+    fig, ax = pp.subplots(theme="dark")
+    pp.set_theme(font_family=("Helvetica",), grid=True)
 
-    fig, ax = pyplotrs.subplots(theme=pyplotrs.themes.dark)
+Derive variants with ``replace``::
 
-Derive your own with ``Theme.with_``::
-
-    mine = pyplotrs.themes.default.with_(grid=True, line_width=2.0)
+    big = pp.themes.default.replace(tick_label_size=10, axis_label_size=11)
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import dataclasses
+from dataclasses import dataclass
+from typing import Literal
 
-RGBA = tuple[int, int, int, int]
+from .colors import RGBA, ColorLike, to_rgba
 
-# Okabe-Ito's colorblind-safe categorical palette, in the order Okabe and Ito
-# published it (Color Universal Design, 2002) rather than one of our own.
-#
-# The order is not incidental, whatever its authors intended by it. Scored as a
-# *cycle* - the worst-separated pair among the first n entries, under normal,
-# protan and deutan vision, in CAM16-UCS - it ties the best of all 40320
-# orderings of these eight colors at n=2 and n=3, and trails the best by little
-# after that. A tab10-shaped reordering (blue, orange, green, ...) scores worse
-# at every n, so there is nothing to buy by rearranging it and a citable
-# palette to lose.
-#
-# Black leading is the part worth stating out loud, because it decides what a
-# one-series figure looks like. A lone line has nothing to contrast against, so
-# a hue on it encodes nothing and merely asks to be read as if it did; ink is
-# the honest default, and `grayscale` below already starts the same way. It is
-# also the most separable entry here - its nearest neighbor under CVD sits at
-# 54.8 where every other color's is under 16 - so C0 is where it does the most
-# good. Every ordering that maximizes cycle separation puts it first.
-#
-# The one wart: C4 yellow is 1.32:1 against a white page, so the fifth line of
-# a five-line plot is faint at the default 1.2 pt width. That is Okabe-Ito
-# being designed for filled regions rather than hairlines, and it is the price
-# of using the published order. Reach past it (`color="C5"`) or reorder the
-# palette in a derived theme if a fifth *line* is what you need.
-#
-# The second thing to know is that colorblind-safe is not grayscale-safe. The
-# palette separates on hue, and its lightnesses are not spread out: C1 (orange,
-# L* 70.6) and C2 (sky blue, L* 69.8) are 0.8 L* apart, which is under any
-# printing system's discrimination threshold. Two series are fine - C0 black
-# against anything is the widest contrast in the set - but a three-line figure
-# printed in monochrome is black plus two identical grays. Where a mono press
-# is a possibility, pair the color cycle with a linestyle cycle so the
-# distinction does not live in hue alone, or use the `grayscale` theme, which
-# separates on lightness by construction.
+__all__ = ["Theme", "dark", "default", "get_theme", "grayscale", "set_theme"]
+
+# Okabe & Ito (2008): distinguishable under the common color-vision deficiencies.
 _OKABE_ITO: tuple[RGBA, ...] = (
-    (0, 0, 0, 255),        # C0 black
-    (230, 159, 0, 255),    # C1 orange
-    (86, 180, 233, 255),   # C2 sky blue
-    (0, 158, 115, 255),    # C3 bluish green
-    (240, 228, 66, 255),   # C4 yellow
-    (0, 114, 178, 255),    # C5 blue
-    (213, 94, 0, 255),     # C6 vermillion
-    (204, 121, 167, 255),  # C7 reddish purple
+    (0, 0, 0, 255),
+    (230, 159, 0, 255),
+    (86, 180, 233, 255),
+    (0, 158, 115, 255),
+    (240, 228, 66, 255),
+    (0, 114, 178, 255),
+    (213, 94, 0, 255),
+    (204, 121, 167, 255),
 )
 
-# The same palette re-aimed at a dark page, index for index, so switching a
-# figure between `default` and `dark` keeps every series on its own hue.
-#
-# Only two entries had to move. Okabe-Ito's blue reaches just 3.6:1 against the
-# dark page - legible as a filled area, thin and sunken as a 1.2 pt line - so it
-# is lifted in Oklch (hue held, chroma shrunk only as far as the sRGB gamut
-# demands) to the smallest lightness that clears 4.5:1. Black cannot be lifted
-# at all without becoming a different color, so C0 is the page's ink instead -
-# which keeps its meaning across the switch, since what C0 stands for is "no
-# hue, just ink" rather than "black" specifically. The other six clear the
-# target as they stand and are Okabe-Ito verbatim.
-#
-# Lifting *every* entry to a common lightness was the obvious first try and is
-# wrong: blue and sky blue are separated as much by lightness as by hue, and a
-# flat lightness collapses them into each other.
+# The same hues re-aimed at a dark page: black becomes off-white and the blue
+# is lifted to keep 4.5:1 contrast.
 _OKABE_ITO_DARK: tuple[RGBA, ...] = (
-    (235, 235, 235, 255),  # C0 off-white (replaces black)
-    (230, 159, 0, 255),    # C1 orange
-    (86, 180, 233, 255),   # C2 sky blue
-    (0, 158, 115, 255),    # C3 bluish green
-    (240, 228, 66, 255),   # C4 yellow
-    (33, 130, 195, 255),   # C5 blue    (Okabe-Ito blue, lifted to 4.5:1)
-    (213, 94, 0, 255),     # C6 vermillion
-    (204, 121, 167, 255),  # C7 reddish purple
+    (235, 235, 235, 255),
+    *_OKABE_ITO[1:5],
+    (33, 130, 195, 255),
+    *_OKABE_ITO[6:],
 )
 
-# Print-safe categorical grays (distinguishable on white without color); pair
-# with distinct line styles / markers for fully grayscale-robust figures.
-_GREYS: tuple[RGBA, ...] = (
+# Ordered by bisection, so any prefix is as spread out as possible.
+_GRAYS: tuple[RGBA, ...] = (
     (0, 0, 0, 255),
     (120, 120, 120, 255),
     (60, 60, 60, 255),
@@ -103,288 +51,94 @@ _GREYS: tuple[RGBA, ...] = (
     (95, 95, 95, 255),
 )
 
-
-#: The CSS Color Module Level 4 named colors, which are also matplotlib's
-#: ``xkcd``-free named set. Kept as a plain dict so no table is built at import.
-_CSS_COLORS: dict[str, tuple[int, int, int]] = {
-    "aliceblue": (240, 248, 255), "antiquewhite": (250, 235, 215),
-    "aqua": (0, 255, 255), "aquamarine": (127, 255, 212), "azure": (240, 255, 255),
-    "beige": (245, 245, 220), "bisque": (255, 228, 196), "black": (0, 0, 0),
-    "blanchedalmond": (255, 235, 205), "blue": (0, 0, 255),
-    "blueviolet": (138, 43, 226), "brown": (165, 42, 42), "burlywood": (222, 184, 135),
-    "cadetblue": (95, 158, 160), "chartreuse": (127, 255, 0),
-    "chocolate": (210, 105, 30), "coral": (255, 127, 80),
-    "cornflowerblue": (100, 149, 237), "cornsilk": (255, 248, 220),
-    "crimson": (220, 20, 60), "cyan": (0, 255, 255), "darkblue": (0, 0, 139),
-    "darkcyan": (0, 139, 139), "darkgoldenrod": (184, 134, 11),
-    "darkgray": (169, 169, 169), "darkgreen": (0, 100, 0), "darkgrey": (169, 169, 169),
-    "darkkhaki": (189, 183, 107), "darkmagenta": (139, 0, 139),
-    "darkolivegreen": (85, 107, 47), "darkorange": (255, 140, 0),
-    "darkorchid": (153, 50, 204), "darkred": (139, 0, 0),
-    "darksalmon": (233, 150, 122), "darkseagreen": (143, 188, 143),
-    "darkslateblue": (72, 61, 139), "darkslategray": (47, 79, 79),
-    "darkslategrey": (47, 79, 79), "darkturquoise": (0, 206, 209),
-    "darkviolet": (148, 0, 211), "deeppink": (255, 20, 147),
-    "deepskyblue": (0, 191, 255), "dimgray": (105, 105, 105),
-    "dimgrey": (105, 105, 105), "dodgerblue": (30, 144, 255),
-    "firebrick": (178, 34, 34), "floralwhite": (255, 250, 240),
-    "forestgreen": (34, 139, 34), "fuchsia": (255, 0, 255),
-    "gainsboro": (220, 220, 220), "ghostwhite": (248, 248, 255),
-    "gold": (255, 215, 0), "goldenrod": (218, 165, 32), "gray": (128, 128, 128),
-    "green": (0, 128, 0), "greenyellow": (173, 255, 47), "grey": (128, 128, 128),
-    "honeydew": (240, 255, 240), "hotpink": (255, 105, 180),
-    "indianred": (205, 92, 92), "indigo": (75, 0, 130), "ivory": (255, 255, 240),
-    "khaki": (240, 230, 140), "lavender": (230, 230, 250),
-    "lavenderblush": (255, 240, 245), "lawngreen": (124, 252, 0),
-    "lemonchiffon": (255, 250, 205), "lightblue": (173, 216, 230),
-    "lightcoral": (240, 128, 128), "lightcyan": (224, 255, 255),
-    "lightgoldenrodyellow": (250, 250, 210), "lightgray": (211, 211, 211),
-    "lightgreen": (144, 238, 144), "lightgrey": (211, 211, 211),
-    "lightpink": (255, 182, 193), "lightsalmon": (255, 160, 122),
-    "lightseagreen": (32, 178, 170), "lightskyblue": (135, 206, 250),
-    "lightslategray": (119, 136, 153), "lightslategrey": (119, 136, 153),
-    "lightsteelblue": (176, 196, 222), "lightyellow": (255, 255, 224),
-    "lime": (0, 255, 0), "limegreen": (50, 205, 50), "linen": (250, 240, 230),
-    "magenta": (255, 0, 255), "maroon": (128, 0, 0),
-    "mediumaquamarine": (102, 205, 170), "mediumblue": (0, 0, 205),
-    "mediumorchid": (186, 85, 211), "mediumpurple": (147, 112, 219),
-    "mediumseagreen": (60, 179, 113), "mediumslateblue": (123, 104, 238),
-    "mediumspringgreen": (0, 250, 154), "mediumturquoise": (72, 209, 204),
-    "mediumvioletred": (199, 21, 133), "midnightblue": (25, 25, 112),
-    "mintcream": (245, 255, 250), "mistyrose": (255, 228, 225),
-    "moccasin": (255, 228, 181), "navajowhite": (255, 222, 173),
-    "navy": (0, 0, 128), "oldlace": (253, 245, 230), "olive": (128, 128, 0),
-    "olivedrab": (107, 142, 35), "orange": (255, 165, 0),
-    "orangered": (255, 69, 0), "orchid": (218, 112, 214),
-    "palegoldenrod": (238, 232, 170), "palegreen": (152, 251, 152),
-    "paleturquoise": (175, 238, 238), "palevioletred": (219, 112, 147),
-    "papayawhip": (255, 239, 213), "peachpuff": (255, 218, 185),
-    "peru": (205, 133, 63), "pink": (255, 192, 203), "plum": (221, 160, 221),
-    "powderblue": (176, 224, 230), "purple": (128, 0, 128),
-    "rebeccapurple": (102, 51, 153), "red": (255, 0, 0),
-    "rosybrown": (188, 143, 143), "royalblue": (65, 105, 225),
-    "saddlebrown": (139, 69, 19), "salmon": (250, 128, 114),
-    "sandybrown": (244, 164, 96), "seagreen": (46, 139, 87),
-    "seashell": (255, 245, 238), "sienna": (160, 82, 45), "silver": (192, 192, 192),
-    "skyblue": (135, 206, 235), "slateblue": (106, 90, 205),
-    "slategray": (112, 128, 144), "slategrey": (112, 128, 144),
-    "snow": (255, 250, 250), "springgreen": (0, 255, 127),
-    "steelblue": (70, 130, 180), "tan": (210, 180, 140), "teal": (0, 128, 128),
-    "thistle": (216, 191, 216), "tomato": (255, 99, 71),
-    "turquoise": (64, 224, 208), "violet": (238, 130, 238),
-    "wheat": (245, 222, 179), "white": (255, 255, 255),
-    "whitesmoke": (245, 245, 245), "yellow": (255, 255, 0),
-    "yellowgreen": (154, 205, 50),
-}
-
-
-def _parse_hex(spec: str) -> RGBA | None:
-    """Parse ``#rgb``/``#rgba``/``#rrggbb``/``#rrggbbaa``; ``None`` if not hex."""
-    body = spec[1:]
-    if len(body) in (3, 4):
-        body = "".join(c * 2 for c in body)  # #f00 -> #ff0000
-    if len(body) not in (6, 8):
-        return None
-    try:
-        vals = [int(body[i:i + 2], 16) for i in range(0, len(body), 2)]
-    except ValueError:
-        return None
-    r, g, b = vals[:3]
-    return (r, g, b, vals[3] if len(vals) == 4 else 255)
-
-
-def _channel(v) -> int:
-    """One RGB channel to 0-255.
-
-    Both conventions are accepted and told apart the way matplotlib's users
-    expect: an *all-float* tuple in 0-1 is scaled, anything else is already in
-    bytes. See ``parse_color`` for why the distinction has to be made on the
-    whole tuple rather than per channel.
-    """
-    return max(0, min(255, int(round(v))))
-
-
-def _is_unit_float_tuple(values) -> bool:
-    """True when every component is a ``float`` within 0-1 inclusive.
-
-    Deciding per *tuple* rather than per *channel* is what makes the two
-    conventions unambiguous: ``(1, 0, 0)`` is byte red (ints), ``(1.0, 0.0, 0.0)``
-    is float red. Only a tuple that is entirely floats in range is scaled, so a
-    mixed tuple like ``(255, 0.5, 0)`` is treated as bytes rather than guessed at.
-    """
-    return all(isinstance(v, float) and 0.0 <= v <= 1.0 for v in values)
-
-
-def parse_color(color, palette: tuple[RGBA, ...]) -> RGBA:
-    """Resolve a color spec to RGBA against ``palette``.
-
-    Accepts, in order:
-
-    * ``"C0".."Cn"`` - index ``palette`` (cycling). This is the one place color
-      strings are interpreted, so ``"C3"`` means *this theme's* fourth color,
-      not a fixed global one.
-    * ``"#rgb"``, ``"#rgba"``, ``"#rrggbb"``, ``"#rrggbbaa"`` hex.
-    * A CSS color name (``"red"``, ``"steelblue"``), case-insensitive.
-    * A 3- or 4-component tuple. **All-float tuples in 0-1 are treated as
-      matplotlib-style fractions** and scaled to bytes; anything else is taken as
-      literal 0-255 bytes. Alpha follows the same convention as its tuple.
-    """
-    if isinstance(color, str):
-        if len(color) >= 2 and color[0] == "C" and color[1:].isdigit():
-            return palette[int(color[1:]) % len(palette)]
-        if color.startswith("#"):
-            parsed = _parse_hex(color)
-            if parsed is not None:
-                return parsed
-            raise ValueError(f"malformed hex color {color!r}")
-        named = _CSS_COLORS.get(color.lower())
-        if named is not None:
-            return (*named, 255)
-        raise ValueError(f"unknown color string {color!r}")
-
-    values = tuple(color)
-    if len(values) not in (3, 4):
-        raise ValueError(f"color tuple must have 3 or 4 components, got {len(values)}")
-    if _is_unit_float_tuple(values):
-        scaled = [_channel(v * 255.0) for v in values]
-        return (scaled[0], scaled[1], scaled[2], scaled[3] if len(scaled) == 4 else 255)
-    r, g, b = (_channel(v) for v in values[:3])
-    return (r, g, b, _channel(values[3]) if len(values) == 4 else 255)
+Weight = Literal["normal", "bold"]
 
 
 @dataclass(frozen=True)
 class Theme:
-    """An immutable set of style choices. Use ``with_`` to derive variants."""
+    """Style defaults for a figure. Sizes are in points.
 
-    def __repr__(self) -> str:
-        """A one-line summary, not the whole field list.
+    The defaults are tuned for a single journal column (~3.5 in wide): compact
+    type, thin rules, no grid, and only the left and bottom spines.
+    """
 
-        The dataclass-generated repr is ~1000 characters of raw RGBA tuples -
-        it fills a notebook cell and answers nothing. What a reader wants from
-        a theme at a glance is which one it is and the two things most likely
-        to have been derived: the base font size and the palette length.
-        """
-        for name, preset in _PRESETS.items():
-            if self == preset:
-                return f"<Theme {name!r}>"
-        return (f"<Theme derived: title_size={self.title_size:g}, "
-                f"{len(self.palette)} palette colors>")
+    # Fonts. `font_family` is tried in order; the bundled Liberation Sans
+    # (metric-compatible with Arial) is always the last resort. Whichever face
+    # is used is embedded in saved files.
+    font_family: tuple[str, ...] = ("Arial", "Helvetica", "Liberation Sans")
+    math_fontset: Literal["sans", "stix"] = "sans"
+    # Sign negative tick labels with U+2212 MINUS rather than a hyphen.
+    unicode_minus: bool = True
 
-
-    palette: tuple[RGBA, ...] = _OKABE_ITO
-    text_color: RGBA = (0, 0, 0, 255)
-    spine_color: RGBA = (0, 0, 0, 255)
-    # Which of "left"/"right"/"top"/"bottom" spines (and their ticks) to draw.
-    spines: tuple[str, ...] = ("left", "bottom")
-    spine_width: float = 0.8
-    # How a spine finishes where another line abuts its end - the perpendicular
-    # spine at a corner, or a tick mark sitting on the axis limit. Stroked
-    # separately, the two stop on each other's centerline and leave the outer
-    # corner open (see `_spine_ends`). "miter" closes it by running the spine
-    # half a stroke width past such an end, "square" past every end, "butt"
-    # never - the geometry before this was noticed.
-    spine_join: str = "miter"
-
-    # Calibrated for a figure printed at journal column width (~3.3 in), where
-    # the type has to stay readable after the page scales it down. Screen-first
-    # work usually wants a step up: `default.with_(...)` or a larger `figsize`.
     tick_label_size: float = 8.0
     axis_label_size: float = 9.0
     title_size: float = 10.0
     suptitle_size: float = 11.0
     legend_size: float = 8.0
+    title_weight: Weight = "normal"
+    suptitle_weight: Weight = "normal"
+    axis_label_weight: Weight = "normal"
 
-    # Weight of the figure's chrome text: "normal" or "bold". Bold panel titles
-    # are near-universal in multi-panel journal figures, and are a theme choice
-    # rather than a per-call one - the same reason sizes live here. Free text
-    # (`Axes.text`, `Axes.annotate`) takes weight/style arguments of its own.
-    title_weight: str = "normal"
-    suptitle_weight: str = "normal"
-    axis_label_weight: str = "normal"
+    palette: tuple[RGBA, ...] = _OKABE_ITO
+    text_color: RGBA = (0, 0, 0, 255)
+    spine_color: RGBA = (0, 0, 0, 255)
+    spines: tuple[str, ...] = ("left", "bottom")
+    spine_width: float = 0.8
+    tick_length: float = 2.5
+    tick_direction: Literal["out", "in"] = "out"
 
-    line_width: float = 1.2  # default width of a `line` mark
+    line_width: float = 1.2
+    marker_size: float = 5.0
 
     grid: bool = False
     grid_color: RGBA = (221, 221, 221, 255)
     grid_width: float = 0.6
 
-    # The page the whole figure is drawn on, painted before anything else.
-    # `None` paints nothing at all, which is what every light theme wants: PNG
-    # already fills the page white, and PDF/SVG/HTML are deliberately
-    # transparent so a figure drops onto whatever background it lands on. A
-    # dark theme has to state its page, because white text over "nothing"
-    # is white text over a white page in every viewer that opens it.
+    # `None` paints nothing: PDF/SVG stay transparent and PNG is white.
     figure_facecolor: RGBA | None = None
-    axes_facecolor: RGBA | None = None  # plot-area background fill
+    axes_facecolor: RGBA | None = None
     legend_facecolor: RGBA = (255, 255, 255, 255)
     legend_edgecolor: RGBA = (179, 179, 179, 255)
 
     def __post_init__(self) -> None:
-        # The one theme field with a closed set of values. Checking it here
-        # names the typo at `Theme(...)` / `with_(...)`; the draw code would
-        # otherwise silently fall back to a join the caller did not ask for.
-        if self.spine_join not in ("miter", "square", "butt"):
-            raise ValueError(
-                f'spine_join must be "miter", "square" or "butt", '
-                f"got {self.spine_join!r}"
-            )
+        if isinstance(self.font_family, str):
+            object.__setattr__(self, "font_family", (self.font_family,))
+        if self.math_fontset not in ("sans", "stix"):
+            raise ValueError(f"math_fontset must be 'sans' or 'stix', got {self.math_fontset!r}")
+        if self.tick_direction not in ("in", "out"):
+            raise ValueError(f"tick_direction must be 'in' or 'out', got {self.tick_direction!r}")
+        bad = set(self.spines) - {"left", "right", "top", "bottom"}
+        if bad:
+            raise ValueError(f"unknown spines {sorted(bad)}")
+        # Accept any color spelling and store bytes.
+        for f in dataclasses.fields(self):
+            value = getattr(self, f.name)
+            if f.name.endswith("color") and value is not None:
+                object.__setattr__(self, f.name, to_rgba(value))
+        object.__setattr__(self, "palette", tuple(to_rgba(c) for c in self.palette))
+
+    def color(self, spec: ColorLike) -> RGBA:
+        """Resolve a color, with ``"C0"``, ``"C1"``, ... taken from this theme's palette."""
+        return to_rgba(spec, self.palette)
+
+    def replace(self, **changes) -> Theme:
+        """A copy of this theme with ``changes`` applied."""
+        return dataclasses.replace(self, **changes)
 
     @property
-    def separator_color(self) -> RGBA:
-        """The hairline drawn between adjacent filled shapes - histogram bins,
-        pie wedges.
+    def background(self) -> RGBA:
+        """What shows behind the plot: used for hairlines between filled shapes."""
+        return self.axes_facecolor or self.figure_facecolor or (255, 255, 255, 255)
 
-        The intent is "the plot background showing through", so it follows
-        ``axes_facecolor``, then the page behind it, and only reaches white
-        when neither is stated. Hardcoding white here is what made histogram
-        bins grow white outlines under a dark theme; stopping the chain at
-        ``axes_facecolor`` brought the same outlines back for a theme that
-        darkens the *page* and lets it show through the plot area - which is
-        exactly what ``dark`` does.
-        """
-        if self.axes_facecolor is not None:
-            return self.axes_facecolor
-        if self.figure_facecolor is not None:
-            return self.figure_facecolor
-        return (255, 255, 255, 255)
-
-    def resolve(self, color) -> RGBA:
-        """Resolve a color spec against this theme's palette (see
-        ``parse_color``)."""
-        return parse_color(color, self.palette)
-
-    def with_(self, **changes) -> "Theme":
-        """A copy of this theme with ``changes`` applied."""
-        return replace(self, **changes)
+    def __repr__(self) -> str:
+        for name, preset in PRESETS.items():
+            if self == preset:
+                return f"<Theme {name!r}>"
+        return "<Theme (custom)>"
 
 
-# -- built-in presets -------------------------------------------------------
-
-#: The zero-config publication default: Okabe-Ito, despined, no grid, with the
-#: compact type and thin rules a journal column wants.
 default = Theme()
-
-#: `default` with the color taken out. Nothing else moves - same type scale,
-#: same rules - so a figure keeps its layout when it goes to a mono press.
-#:
-#: The grays are ordered by bisection rather than by darkness (0, 120, 60, 165,
-#: ...), so *any* prefix of them is spread as widely as that many grays can be:
-#: two series get black against mid-gray, not black against near-black. Past
-#: three or four, pair them with distinct line styles or markers - luminance
-#: alone runs out well before the palette does.
-grayscale = Theme(palette=_GREYS)
-bw = grayscale  # alias
-
-#: `default` with the ink and the paper swapped: a near-black page, off-white
-#: text and spines, and the palette re-aimed at a dark background.
-#:
-#: The page is near-black rather than pure black, which is what dark UI themes
-#: settle on for the same reason - #000 with white text glares, and on OLED it
-#: blooms around the type. `dark.with_(figure_facecolor=(0, 0, 0, 255))` if you
-#: need the true black, e.g. to sit seamlessly on a black slide.
-#:
-#: `axes_facecolor` is left unset on purpose, exactly as in `default`: the plot
-#: area is not a panel floating on the page, it *is* the page.
+grayscale = Theme(palette=_GRAYS)
 dark = Theme(
     palette=_OKABE_ITO_DARK,
     text_color=(235, 235, 235, 255),
@@ -395,22 +149,37 @@ dark = Theme(
     legend_edgecolor=(73, 73, 73, 255),
 )
 
-#: All presets keyed by name (for `get(...)`).
-_PRESETS = {
-    "default": default,
-    "grayscale": grayscale,
-    "bw": bw,
-    "dark": dark,
-}
+PRESETS: dict[str, Theme] = {"default": default, "grayscale": grayscale, "dark": dark}
+
+_current = default
 
 
-def get(theme) -> Theme:
-    """Coerce ``theme`` (a ``Theme``, a preset name, or ``None``) to a
-    ``Theme``. ``None`` -> ``default``."""
+def resolve(theme: Theme | str | None) -> Theme:
+    """A theme from a ``Theme``, a preset name, or ``None`` (the current default)."""
     if theme is None:
-        return default
+        return _current
     if isinstance(theme, Theme):
         return theme
-    if isinstance(theme, str) and theme in _PRESETS:
-        return _PRESETS[theme]
-    raise ValueError(f"unknown theme {theme!r}; choose from {sorted(_PRESETS)}")
+    try:
+        return PRESETS[theme]
+    except KeyError:
+        raise ValueError(f"unknown theme {theme!r}; choose from {sorted(PRESETS)}") from None
+
+
+def set_theme(theme: Theme | str | None = None, **changes) -> Theme:
+    """Set the theme new figures use, optionally with changes. Returns it.
+
+    ``set_theme()`` with no arguments restores the built-in default::
+
+        pp.set_theme("dark")
+        pp.set_theme(font_family=("Helvetica",), tick_direction="in")
+    """
+    global _current
+    base = default if theme is None and not changes else resolve(theme)
+    _current = base.replace(**changes) if changes else base
+    return _current
+
+
+def get_theme() -> Theme:
+    """The theme new figures use."""
+    return _current

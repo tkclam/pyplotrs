@@ -12,10 +12,7 @@ authors:
 repository-code: "https://github.com/tkclam/pyplotrs"
 url: "https://tkclam.github.io/pyplotrs/"
 license: MIT
-# Bump both alongside `[workspace.package].version` in Cargo.toml when cutting a
-# release; GitHub's "Cite this repository" widget reads them verbatim.
-version: 0.1.0
-date-released: "2026-08-20"
+version: 0.2.0
 keywords:
   - plotting
   - visualization

@@ -2,154 +2,73 @@
 
 [![CI](https://github.com/tkclam/pyplotrs/actions/workflows/CI.yml/badge.svg)](https://github.com/tkclam/pyplotrs/actions/workflows/CI.yml)
 [![PyPI](https://img.shields.io/pypi/v/pyplotrs.svg)](https://pypi.org/project/pyplotrs/)
-[![Python versions](https://img.shields.io/pypi/pyversions/pyplotrs.svg)](https://pypi.org/project/pyplotrs/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/tkclam/pyplotrs/blob/main/LICENSE)
 [![Docs](https://img.shields.io/badge/docs-tkclam.github.io-blue)](https://tkclam.github.io/pyplotrs/)
 
-**A blazingly fast, publication-quality plotting library for Python, powered by Rust.**
+Fast, publication-quality figures for Python, with a Rust rendering core.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tkclam/pyplotrs/main/docs/gallery/images/subplots.png"
-       alt="A four-panel pyplotrs figure: damped sinusoids with a legend, a categorical bar chart, a histogram, and a scatter plot"
-       width="720">
+  <img src="docs/gallery/subplots.png" alt="A four-panel figure" width="600">
 </p>
-
-`pyplotrs` (pronounced *py-plotters*) is a from-scratch plotting library with a
-clean, modern Python API and a Rust rendering core. It is built for one thing
-above all: **beautiful static figures you can drop straight into a paper, a
-slide, or a web page** — and, uniquely, **PDF output whose text stays real,
-selectable, and editable in Illustrator** (genuine embedded/subset fonts, never
-outlines).
 
 ```python
 import pyplotrs as pp
 
 fig, ax = pp.subplots()
-ax.line([0, 1, 2, 3], [0, 1, 4, 9], label="y = x²")
+ax.line([0, 1, 2, 3], [0, 1, 4, 9], label="$y = x^2$")
 ax.scatter([0, 1, 2, 3], [0, 1, 4, 9])
-ax.set(title="Hello, pyplotrs", xlabel="x", ylabel="y")
+ax.set(title="Hello", xlabel="x", ylabel="y")
 ax.legend()
 
-fig.save("hello.pdf")   # editable vector text
-fig.save("hello.svg")
-fig.save("hello.png")   # 200 dpi by default
-fig.save("hello.html")  # self-contained, selectable text
+fig.save("hello.pdf")  # vector, with selectable, editable text
+fig.save("hello.png")  # 200 dpi by default
 ```
 
-## Why pyplotrs?
+- **Real text everywhere.** PDF and SVG keep labels as embedded-font text you
+  can select and edit in Illustrator or Inkscape.
+- **Good defaults.** Colorblind-safe palette, type sized for a journal column,
+  and plots that align across a grid automatically.
+- **Fast.** Data loops and rendering run in Rust with the GIL released; a
+  million-point line saves in tens of milliseconds.
+- **No hidden state.** Figures are objects you hold. Themes set every default
+  in one place.
+- **TeX math** in any label, typeset from the math font's OpenType MATH table.
 
-- **Editable-text PDF** — text is embedded and subset, not converted to
-  outlines, so you can open a saved PDF in Illustrator/Inkscape and select,
-  re-type, or restyle every label. `pdftotext` extracts it; screen readers can
-  read it (`save(..., tagged=True)` writes accessible, tagged PDF).
-- **Publication-quality defaults** — a colorblind-safe palette, sensible type
-  scale, despined axes, and "nice-number" ticks out of the box. No styling
-  required to get a figure that looks finished.
-- **Fast** — the hot per-point/per-pixel loops live in Rust. A million-point
-  line exports to PDF in ~0.5 s and SVG in ~0.25 s; a million-point scatter
-  rasterizes to PNG in ~0.15 s. The single-pass layout engine means the lead
-  over matplotlib grows with panel count, and the GIL is released for both
-  rendering and the compute kernels, so a thread pool over figures actually
-  parallelizes. See
-  [benchmarks](https://tkclam.github.io/pyplotrs/guide/performance/) for the
-  measured table, the caveats that come with it, and the one case where export
-  is *slow* — a polyline whose consecutive points jump across the panel.
-- **Portable output** — the chosen font is **embedded into every saved file**
-  (PDF/SVG/PNG/HTML), so a figure looks identical on any machine, regardless of
-  the fonts installed there.
-- **Real LaTeX math** — `$...$` spans are typeset by a faithful, MathJax-grade
-  engine driven by the math font's OpenType MATH table, and stay selectable
-  text in the output.
-- **No global state** — every figure is an explicit object. No `pyplot`
-  current-figure surprises; the same API works cleanly under threads.
+Plot types cover lines, scatter, bars, histograms, box and violin plots,
+images, meshes, contours, vector fields, spike rasters, polar and 3D axes, and
+animations. See the [guide](https://tkclam.github.io/pyplotrs/guide/) and the
+[gallery](https://tkclam.github.io/pyplotrs/gallery/).
 
-## Features
-
-| Area | What you get |
-|---|---|
-| **Lines & points** | `line`, `scatter`, `step`, `stairs`, `stem`, `loglog`/`semilogx`/`semilogy` |
-| **Bars & categories** | `bar`, `barh`, `broken_barh`, `eventplot`, plus automatic categorical axes from string data |
-| **Distributions** | `hist`, `boxplot`, `violinplot` (Rust KDE), `pie` |
-| **Uncertainty** | `errorbar`, `fill_between`, `fill_betweenx`, `stackplot` |
-| **Fields & images** | `imshow` + `colorbar`, `matshow`, `spy`, `pcolormesh`, `hist2d`, `hexbin`, `contour`, `contourf`, `quiver`, `streamplot` |
-| **Guides & shapes** | `axhline`/`axvline`, `axhspan`/`axvspan`, `axline`, `hlines`/`vlines`, `rectangle`, `circle`, `ellipse`, `polygon`, `arrow` |
-| **Polar** | `plot`, `scatter` on a configurable dial |
-| **3D** | `scatter`, `plot`, `surface`, `bar3d`, `plot_wireframe`, `contour3d`, `plot_trisurf`, `quiver3d`, `voxels` — projected to editable 2D vectors, with an interactive HTML viewer |
-| **Axes** | Linear, log, symlog, logit, date and categorical scales; 8 tick formatters; 4 color norms |
-| **Layout** | Grids with ratios, `subplot_mosaic`, `GridSpec`, twin axes, insets, secondary axes |
-| **Themes** | `default`, `grayscale`, `dark`, plus `Theme.with_(...)` to derive your own |
-| **Color** | 127 exact colormaps, 25 categorical palettes, Oklab/CAM16-UCS conversion and CVD checks |
-| **Annotations** | `text`, `annotate` with callout arrows; LaTeX math anywhere |
-| **Rich text** | `rich`/`bold`/`italic`/`mark` to style a substring of any label — math included |
-| **Animation** | `animate(render, frames)` → GIF / APNG |
-| **Formats** | PDF, SVG, PNG (with DPI), and self-contained HTML |
-
-## Installation
+## Install
 
 ```bash
 pip install pyplotrs
 ```
 
-Pre-built wheels ship the Rust core and the bundled fonts — no toolchain
-required. See the [installation guide](https://tkclam.github.io/pyplotrs/installation/)
-for building from source.
+Python 3.11+ on Linux, macOS or Windows. No runtime dependencies; NumPy
+arrays are read directly.
 
-## Documentation
+## Development
 
-Full docs live at **<https://tkclam.github.io/pyplotrs/>**:
-
-- [Quickstart](https://tkclam.github.io/pyplotrs/quickstart/) — zero to a saved
-  figure
-- [Tutorial](https://tkclam.github.io/pyplotrs/tutorial/) — one publication
-  figure, built step by step
-- [Notebooks](https://github.com/tkclam/pyplotrs/tree/main/docs/notebooks) —
-  eight runnable notebooks, committed with their output:
-  [quickstart](https://github.com/tkclam/pyplotrs/blob/main/docs/notebooks/01_quickstart.ipynb),
-  [coming from matplotlib](https://github.com/tkclam/pyplotrs/blob/main/docs/notebooks/02_from_matplotlib.ipynb)
-  (rendered side by side against it),
-  [plot types](https://github.com/tkclam/pyplotrs/blob/main/docs/notebooks/03_plot_types.ipynb),
-  [layout](https://github.com/tkclam/pyplotrs/blob/main/docs/notebooks/04_layout_and_composition.ipynb),
-  [styling and color](https://github.com/tkclam/pyplotrs/blob/main/docs/notebooks/05_styling_and_color.ipynb),
-  [text and math](https://github.com/tkclam/pyplotrs/blob/main/docs/notebooks/06_text_and_math.ipynb),
-  [animation](https://github.com/tkclam/pyplotrs/blob/main/docs/notebooks/07_animation.ipynb), and
-  [output and performance](https://github.com/tkclam/pyplotrs/blob/main/docs/notebooks/08_output_and_performance.ipynb)
-- [Coming from matplotlib](https://tkclam.github.io/pyplotrs/migrating-from-matplotlib/)
-  — the differences, with a translation table
-- [User guide](https://tkclam.github.io/pyplotrs/guide/figure-and-axes/) —
-  layout, plot types, scales, themes, 3D, saving
-- [Gallery](https://tkclam.github.io/pyplotrs/gallery/) — every figure with
-  runnable source
-- [API reference](https://tkclam.github.io/pyplotrs/api/figure/)
-
-To build the docs locally:
+You need [uv](https://docs.astral.sh/uv/) and Rust 1.92+.
 
 ```bash
-pip install -e ".[docs]"
-mkdocs serve
+uv sync                      # build the extension, install dev tools
+uv run pytest                # Python tests
+cargo test -p pyplotrs-engine
+uv run ruff check && uv run ruff format --check && uv run pyright
 ```
+
+The code is in three parts:
+
+| | |
+|---|---|
+| `crates/engine` | Rust: scene description, text and math layout, PDF/SVG/PNG renderers, numeric kernels |
+| `crates/python` | Rust: the `pyplotrs._core` extension, a thin layer over the engine |
+| `python/pyplotrs` | Python: figures, axes, artists, layout, styling |
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for more.
 
 ## License
 
-Licensed under the **MIT license**
-([LICENSE](https://github.com/tkclam/pyplotrs/blob/main/LICENSE)).
-
-pyplotrs redistributes a few third-party assets, each under a permissive
-license. Every bundled asset's license text ships in the wheel under
-`pyplotrs-<version>.dist-info/licenses/`, alongside `THIRD-PARTY-NOTICES.md`,
-which names each of the compiled-in Rust crates and the license it is taken
-under:
-
-| Asset | License |
-|---|---|
-| Liberation Sans, Fira Math, STIX Two Math (bundled fonts) | SIL Open Font License 1.1 |
-| DejaVu Sans subset (bundled math symbols) | Bitstream Vera license |
-| `viridis`/`plasma`/`inferno`/`magma`/`cividis` | CC0 1.0 (public domain) |
-| colorcet colormaps (`cet_*`) | **CC-BY 4.0 — attribution required** |
-| cmocean (`cmo_*`) · seaborn (`sns_*`) | MIT · BSD-3-Clause |
-| MathJax 3.2.2 (inlined into HTML math output) | Apache-2.0 |
-| krilla (PDF backend, vendored) | MIT OR Apache-2.0 |
-| ~110 Rust crates compiled into the extension | MIT / Apache-2.0 / BSD / Zlib / … |
-
-Full details in
-[THIRD-PARTY-NOTICES.md](https://github.com/tkclam/pyplotrs/blob/main/THIRD-PARTY-NOTICES.md)
-and the [license page](https://tkclam.github.io/pyplotrs/about/license/).
+MIT. Bundled fonts and colormap data carry their own permissive licenses;
+see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

@@ -1,101 +1,100 @@
-"""Axis scales: the data-space -> transformed-space mapping that sits between
-raw data and the device transform.
+"""Axis scales: how data values map onto an axis, and where its ticks go.
 
-A ``Scale`` owns three things an axis needs: a monotonic ``transform`` (and
-its ``inverse``) used to position data, a tick *locator+formatter* (``ticks``),
-and an optional set of ``minor_ticks``. The figure draws marks by composing the
-scale transform with an affine device map, so the Rust fast paths stay valid:
-they only ever see an affine map over *transformed* space (see
-``Axes._draw``/``_draw_mark`` in ``pyplotrs._figure``).
+Pass a name or an instance to ``Axes.set``::
 
-``LinearScale`` is the default and is bit-for-bit identical to the previous
-linear-only behavior (its ``transform`` is the identity and its ``ticks`` defer
-to the Rust ``nice_ticks`` locator). Nonlinear scales (log, symlog, ...) override
-``transform``/``inverse``/``ticks`` and set ``is_identity = False`` so the figure
-knows to pre-transform mark coordinates before the affine fast path.
+    ax.set(yscale="log")
+    ax.set(xscale=pp.scales.Symlog(linthresh=1e-3))
+
+Each scale's ``code`` names the same transform in the Rust engine, so drawing
+never calls back into Python per point.
 """
 
 from __future__ import annotations
 
-import datetime as _dt
+import datetime as dt
 import math
-from typing import Sequence
+from collections.abc import Sequence
+from typing import ClassVar
 
-from . import _pyplotrs_core as _core
-from ._util import _auto_repr
-from .ticker import fix_minus
+from . import ticker
 
-#: The public surface of this module. Without it, `from ... import *`
-#: and every editor's completion list also offer `Sequence`, `math` and
-#: `annotations` - names that are imported here, not exported from here.
 __all__ = [
-    "CategoricalScale",
-    "DateScale",
-    "LinearScale",
-    "LogScale",
-    "LogitScale",
+    "Categorical",
+    "Date",
+    "Linear",
+    "Log",
+    "Logit",
     "Scale",
-    "SymlogScale",
+    "Symlog",
     "date2num",
     "get",
-    "is_datetime_like",
     "nice_ticks",
     "num2date",
 ]
 
-
 Tick = tuple[float, str]
 
-# Symlog parameters — must stay numerically identical to the Rust constants in
-# ``apply_scale`` (crates/pyplotrs-py/src/lib.rs).
-_SYMLOG_LINTHRESH = 1.0
-_SYMLOG_LINSCALE_ADJ = 1.0 / (1.0 - 1.0 / 10.0)
-_LN10 = math.log(10.0)
+_NICE_STEPS = (1.0, 2.0, 2.5, 5.0)
 
 
-def nice_ticks(lo: float, hi: float, max_ticks: int) -> list[Tick]:
-    """The Rust "nice numbers" auto-locator, signed for display.
+def nice_step(lo: float, hi: float, max_ticks: int) -> float:
+    """The smallest step from {1, 2, 2.5, 5} x 10^n giving at most ``max_ticks`` ticks."""
+    span = abs(hi - lo)
+    if span == 0.0 or not math.isfinite(span):
+        return 1.0
+    max_ticks = max(max_ticks, 2)
+    mag = 10.0 ** math.floor(math.log10(span / max_ticks))
+    for mult in _NICE_STEPS:
+        if span / (mult * mag) <= max_ticks - 1 + 1e-9:
+            return mult * mag
+    return 10.0 * mag
 
-    Every caller of the locator goes through here rather than
-    ``_core.nice_ticks``: the Rust side formats with an ASCII hyphen (it is a
-    pure function with no view of the display setting) and this is where that
-    becomes a real [`MINUS`][pyplotrs.ticker.MINUS]. Doing it before the labels
-    reach the layout engine keeps the pre-measured extents honest - a minus is
-    nearly twice the width of a hyphen.
-    """
-    return [(v, fix_minus(s)) for v, s in _core.nice_ticks(lo, hi, max_ticks)]
+
+def _round_sig(v: float, digits: int = 12) -> float:
+    """Erase float noise relative to the value's own magnitude."""
+    if v == 0.0 or not math.isfinite(v):
+        return v
+    return round(v, digits - 1 - math.floor(math.log10(abs(v))))
+
+
+def _decimals(step: float) -> int:
+    for d in range(18):
+        scaled = abs(step) * 10.0**d
+        if scaled >= 1.0 - 1e-9 and abs(scaled - round(scaled)) < 1e-6 * scaled:
+            return d
+    return 17
+
+
+def nice_ticks(lo: float, hi: float, max_ticks: int = 7, minus: bool = True) -> list[Tick]:
+    """Round-number ticks covering ``[lo, hi]``, labeled to the step's precision."""
+    lo, hi = min(lo, hi), max(lo, hi)
+    if not (math.isfinite(lo) and math.isfinite(hi)) or lo == hi:
+        return [(lo, ticker.plain(lo, minus))]
+    step = nice_step(lo, hi, max_ticks)
+    eps = step * 1e-9
+    first, last = math.ceil((lo - eps) / step), math.floor((hi + eps) / step)
+    places = _decimals(step)
+    out = []
+    for k in range(first, last + 1):
+        v = _round_sig(k * step) + 0.0  # + 0.0 turns -0.0 into 0.0
+        s = f"{v:.{places}f}"
+        if s.lstrip("-").strip("0.") == "":
+            s = s.lstrip("-")
+        out.append((v, ticker.fix_minus(s, minus)))
+    return out
 
 
 class Scale:
-    """Base axis scale. Subclasses override ``transform``/``inverse``/``ticks``.
+    """An axis scale. Subclasses define the transform and the tick locator."""
 
-    ``is_identity`` is a fast-path flag: when ``True`` the figure may skip the
-    per-point ``transform`` pass entirely (the device map is already affine in
-    data space), preserving the Rust polyline/marker fast paths. ``code`` names
-    the transform for the Rust fast paths (``add_line_xform``/
-    ``add_markers_xform``), which apply it per point in Rust — see
-    ``apply_scale`` in ``crates/pyplotrs-py/src/lib.rs``.
-    """
+    name: ClassVar[str] = "linear"
+    #: Allow the shared offset/exponent to be lifted out of tick labels.
+    offset_labels: ClassVar[bool] = False
 
-    def __repr__(self) -> str:
-        # Every subclass gets this: the scale's own name plus whatever
-        # parameters it was constructed with (`base`, `linthresh`, the
-        # categorical mapping's size).
-        return _auto_repr(self)
-
-
-    #: Human-readable scale name, mirroring matplotlib's ``set_xscale`` strings.
-    name = "scale"
-    #: Rust ``apply_scale`` selector. Must equal a branch handled there.
-    code = "linear"
-    #: Whether ``transform`` is the identity (lets the figure skip transforming).
-    is_identity = False
-    #: Whether tick labels may have a shared offset/multiplier factored out of
-    #: them (see [`pyplotrs.ticker.factor_out`][pyplotrs.ticker.factor_out]).
-    #: Off by default, and deliberately opt-in: a log axis already labels in
-    #: powers of ten, and a categorical or date axis labels with strings that
-    #: are not numbers at all. Only a plain numeric axis wants it.
-    supports_offset = False
+    @property
+    def code(self) -> str:
+        """The transform's name in the Rust engine."""
+        return "linear"
 
     def transform(self, v: float) -> float:
         return v
@@ -103,526 +102,300 @@ class Scale:
     def inverse(self, t: float) -> float:
         return t
 
-    # -- autoscaling hooks --------------------------------------------------
-    #
-    # A scale does *not* compute its own view range. `Axes._ranges` owns that:
-    # it folds every mark's bounds (including the ones a raw value scan can't
-    # see, like a bar's base or an image's extent), pads once in *transformed*
-    # space, and clamps against the marks' sticky bounds. A log axis therefore
-    # gets a multiplicative margin for free, and `xmargin`/`ymargin` work on
-    # every scale - neither of which was true when each scale padded itself
-    # with a hardcoded 0.05.
-    #
-    # What a scale still owns is its *domain*: which data it can represent, and
-    # what to show when none of it qualifies.
-
-    def fixed_range(self) -> tuple[float, float] | None:
-        """A view range this scale pins regardless of the data, or ``None``.
-
-        Only a categorical axis has one: its window is a property of the
-        category list, not of the values plotted against it."""
-        return None
-
-    def clip_bounds(self, bounds: tuple[float, float] | None,
-                    arrays: Sequence) -> tuple[float, float] | None:
-        """Restrict raw ``(lo, hi)`` data bounds to this scale's domain.
-
-        Returns unpadded bounds in *data* space, or ``None`` when the data holds
-        nothing this scale can show. ``arrays`` is every contributed coordinate
-        array, for the domains that can't be decided from the bounds alone (a
-        log axis needs the smallest *positive* value, which the overall minimum
-        does not give it)."""
-        return bounds
-
-    def empty_range(self) -> tuple[float, float]:
-        """The view to show when ``clip_bounds`` finds nothing representable."""
-        return (0.0, 1.0)
-
-    def ticks(self, lo: float, hi: float, max_ticks: int) -> list[Tick]:
-        """Major ticks as ``(value, label)`` pairs, value in *data* space."""
-        raise NotImplementedError
+    def ticks(self, lo: float, hi: float, max_ticks: int = 7, minus: bool = True) -> list[Tick]:
+        return nice_ticks(lo, hi, max_ticks, minus)
 
     def minor_ticks(self, lo: float, hi: float) -> list[float]:
-        """Minor-tick *values* (data space). Default: none."""
         return []
 
+    def default_range(self) -> tuple[float, float]:
+        """The view shown when there is no data."""
+        return (0.0, 1.0)
 
-class LinearScale(Scale):
-    """The default linear scale: identity transform, ``nice_ticks`` locator."""
+    def fixed_range(self) -> tuple[float, float] | None:
+        """A view that ignores the data, if the scale has one."""
+        return None
 
+    def __repr__(self) -> str:
+        return f"<{type(self).__name__} scale>"
+
+
+class Linear(Scale):
     name = "linear"
-    code = "linear"
-    is_identity = True
-    supports_offset = True
-
-    def transform(self, v: float) -> float:
-        return v
-
-    def inverse(self, t: float) -> float:
-        return t
-
-    def ticks(self, lo: float, hi: float, max_ticks: int = 7) -> list[Tick]:
-        return nice_ticks(lo, hi, max_ticks)
+    offset_labels = True
 
 
-#: Below this magnitude a plain decimal cannot be written in the ten places
-#: `_fmt_plain` uses, so it switches to mathtext rather than rounding to zero.
-_PLAIN_MIN = 1e-10
-
-
-def _fmt_plain(v: float) -> str:
-    """Format a tick value without an exponent, trimming trailing zeros
-    (e.g. ``2.0 -> "2"``, ``0.005 -> "0.005"``, ``-3.0 -> "−3"``).
-
-    A value too small for ten decimal places falls back to a mathtext
-    mantissa/exponent instead. ``f"{1e-11:.10f}"`` is ``"0.0000000000"``,
-    which stripped down to ``"0"`` - so on a log axis spanning less than two
-    decades below 1e-10, where this labels the 1-2-3-5 subdivisions, every tick
-    came out reading ``0``.
-    """
-    if v == int(v) and abs(v) < 1e16:
-        return fix_minus(str(int(v)))
-    if v == v and 0.0 < abs(v) < _PLAIN_MIN:
-        k = math.floor(math.log10(abs(v)))
-        mant = v / 10.0 ** k
-        # The engine writes its own minus, so the sign stays ASCII here.
-        m = f"{mant:.6f}".rstrip("0").rstrip(".")
-        return _fmt_pow10(k) if m in ("1", "-1") and mant > 0 else \
-            f"${m}\\times10^{{{k}}}$"
-    s = f"{v:.10f}".rstrip("0").rstrip(".")
-    return fix_minus(s) if s else "0"
-
-
-def _fmt_pow10(k: int) -> str:
-    """A power-of-ten tick label as mathtext (rendered as ``10`` with a real
-    superscript by the math engine)."""
+def _pow10(k: int) -> str:
     return f"$10^{{{k}}}$"
 
 
-class LogScale(Scale):
-    """Base-10 logarithmic scale. Non-positive data is dropped (becomes a gap),
-    matching matplotlib; the per-point transform runs in Rust."""
+def _decade_range(lo: float, hi: float) -> range:
+    lo = max(lo, 1e-300)
+    return range(math.floor(math.log10(lo) - 1e-9), math.ceil(math.log10(max(hi, lo)) + 1e-9) + 1)
+
+
+class Log(Scale):
+    """Base-10 logarithmic. Non-positive values are not drawn."""
 
     name = "log"
-    code = "log"
-    is_identity = False
+
+    @property
+    def code(self) -> str:
+        return "log"
 
     def transform(self, v: float) -> float:
-        return math.log10(v) if v > 0 else -math.inf
+        return math.log10(v) if v > 0 else math.nan
 
     def inverse(self, t: float) -> float:
-        return 10.0 ** t
+        return 10.0**t
 
-    def clip_bounds(self, bounds, arrays):
-        # The overall minimum is useless here - it is routinely <= 0, which this
-        # scale cannot place. The smallest *positive* value is the real lower
-        # bound, and the scan for it runs in Rust over each array in turn.
-        lo = hi = None
-        for a in arrays:
-            r = _core.positive_range(a)
-            if r is None:
-                continue
-            if lo is None or r[0] < lo:
-                lo = r[0]
-            if hi is None or r[1] > hi:
-                hi = r[1]
-        return None if lo is None else (lo, hi)
-
-    def empty_range(self) -> tuple[float, float]:
+    def default_range(self) -> tuple[float, float]:
         return (0.1, 1.0)
 
-    def ticks(self, lo: float, hi: float, max_ticks: int = 7) -> list[Tick]:
-        lo = max(lo, 1e-300)
-        if hi <= lo:
-            return [(lo, _fmt_plain(lo))]
-        k0 = math.floor(math.log10(lo) - 1e-9)
-        k1 = math.ceil(math.log10(hi) + 1e-9)
+    def ticks(self, lo: float, hi: float, max_ticks: int = 7, minus: bool = True) -> list[Tick]:
+        lo, hi = min(lo, hi), max(lo, hi)
         lo_e, hi_e = lo * (1 - 1e-9), hi * (1 + 1e-9)
-        majors = [k for k in range(k0, k1 + 1) if lo_e <= 10.0 ** k <= hi_e]
+        majors = [k for k in _decade_range(lo, hi) if lo_e <= 10.0**k <= hi_e]
         if len(majors) >= 2:
             step = max(1, math.ceil(len(majors) / max_ticks))
-            return [(10.0 ** k, _fmt_pow10(k)) for k in majors[::step]]
-        # Narrow span (<2 decades): label the 1-2-3-5 subdivisions in range.
-        out: list[Tick] = []
-        for k in range(k0, k1 + 1):
-            for mult in (1, 2, 3, 5):
-                v = mult * 10.0 ** k
-                if lo_e <= v <= hi_e:
-                    out.append((v, _fmt_plain(v)))
-        return out or [(lo, _fmt_plain(lo)), (hi, _fmt_plain(hi))]
+            return [(10.0**k, _pow10(k)) for k in majors[::step]]
+        # Under two decades: label the 1-2-5 subdivisions.
+        out = [
+            (m * 10.0**k, ticker.plain(m * 10.0**k, minus))
+            for k in _decade_range(lo, hi)
+            for m in (1, 2, 5)
+            if lo_e <= m * 10.0**k <= hi_e
+        ]
+        return out or nice_ticks(lo, hi, max_ticks, minus)
 
     def minor_ticks(self, lo: float, hi: float) -> list[float]:
-        lo = max(lo, 1e-300)
-        if hi <= lo:
-            return []
-        k0 = math.floor(math.log10(lo) - 1e-9)
-        k1 = math.ceil(math.log10(hi) + 1e-9)
-        out: list[float] = []
-        for k in range(k0, k1 + 1):
-            for mult in range(2, 10):
-                v = mult * 10.0 ** k
-                if lo <= v <= hi:
-                    out.append(v)
-        return out
+        lo, hi = min(lo, hi), max(lo, hi)
+        return [
+            m * 10.0**k
+            for k in _decade_range(lo, hi)
+            for m in range(2, 10)
+            if lo <= m * 10.0**k <= hi
+        ]
 
 
-class SymlogScale(Scale):
-    """Symmetric log: linear within ``[-linthresh, linthresh]`` and logarithmic
-    beyond, so zero and negative values are representable.
-
-    ``linthresh`` is where the axis stops being linear. It has to match the
-    data: the default of 1.0 is right for a signal measured in ones and wrong
-    for one measured in microvolts, where it puts the entire dataset inside the
-    linear region and produces a plain linear axis wearing a symlog label.
-    Setting it is the whole point of the scale, so it is a constructor
-    argument::
-
-        ax.set(yscale=pp.scales.SymlogScale(linthresh=1e-6))
-
-    The threshold travels to the Rust fast paths inside the scale ``code``
-    (``"symlog:1e-06"``), which is what lets the per-point transform stay in
-    Rust while still being this axes' transform rather than a global constant.
-    """
+class Symlog(Scale):
+    """Linear within ``±linthresh`` and logarithmic beyond, so zero and negative
+    values can be shown. Choose ``linthresh`` to match the data's small scale."""
 
     name = "symlog"
-    is_identity = False
-    supports_offset = False
+    _ADJ = 1.0 / (1.0 - 1.0 / 10.0)
 
-    def __init__(self, linthresh: float = _SYMLOG_LINTHRESH) -> None:
-        linthresh = float(linthresh)
-        if not (math.isfinite(linthresh) and linthresh > 0.0):
-            raise ValueError(
-                f"symlog linthresh must be finite and positive; got {linthresh!r}")
-        self.linthresh = linthresh
+    def __init__(self, linthresh: float = 1.0) -> None:
+        if not (math.isfinite(linthresh) and linthresh > 0):
+            raise ValueError(f"linthresh must be positive and finite, got {linthresh!r}")
+        self.linthresh = float(linthresh)
 
     @property
     def code(self) -> str:
         return f"symlog:{self.linthresh!r}"
 
     def transform(self, v: float) -> float:
-        a = abs(v)
-        if a <= self.linthresh:
-            return v * _SYMLOG_LINSCALE_ADJ
-        return math.copysign(1.0, v) * self.linthresh * (
-            _SYMLOG_LINSCALE_ADJ + math.log(a / self.linthresh) / _LN10
-        )
+        t, a = self.linthresh, abs(v)
+        if a <= t:
+            return v * self._ADJ
+        return math.copysign(t * (self._ADJ + math.log10(a / t)), v)
 
     def inverse(self, t: float) -> float:
-        a = abs(t)
-        lin_edge = self.linthresh * _SYMLOG_LINSCALE_ADJ
-        if a <= lin_edge:
-            return t / _SYMLOG_LINSCALE_ADJ
-        return math.copysign(1.0, t) * self.linthresh * 10.0 ** (
-            a / self.linthresh - _SYMLOG_LINSCALE_ADJ
-        )
+        u = t
+        t, a = self.linthresh, abs(u)
+        if a <= t * self._ADJ:
+            return u / self._ADJ
+        return math.copysign(t * 10.0 ** (a / t - self._ADJ), u)
 
-    # Symlog represents every real, so it needs no domain clipping; it inherits
-    # `clip_bounds`. Only the no-data fallback is its own - a symlog axis is
-    # centered on zero, so an empty one shows (-linthresh, linthresh).
-    def empty_range(self) -> tuple[float, float]:
+    def default_range(self) -> tuple[float, float]:
         return (-self.linthresh, self.linthresh)
 
-    def _decades(self, lo: float, hi: float) -> list[float]:
-        """Signed decade positions at or beyond the threshold, inside the view."""
-        out: list[float] = []
-        for sign in (1.0, -1.0):
-            for k in range(-300, 301):
-                v = sign * 10.0 ** k
-                if abs(v) >= self.linthresh and lo <= v <= hi:
-                    out.append(v)
-        return out
+    def _decades(self, lo: float, hi: float, mults: Sequence[int]) -> set[float]:
+        top = max(abs(lo), abs(hi), self.linthresh)
+        ks = range(math.floor(math.log10(self.linthresh)), math.ceil(math.log10(top)) + 1)
+        return {
+            s * m * 10.0**k
+            for s in (1.0, -1.0)
+            for k in ks
+            for m in mults
+            if m * 10.0**k >= self.linthresh and lo <= s * m * 10.0**k <= hi
+        }
 
-    def ticks(self, lo: float, hi: float, max_ticks: int = 7) -> list[Tick]:
-        """Decades outside the linear region, plus the threshold and zero.
-
-        The old version emitted decades and nothing else, so a view like
-        ``[-3, 3]`` at the default threshold got ticks at only -1, 0 and 1 -
-        every one of them inside the middle fifth of the axis, with the outer
-        80% carrying no label at all. The threshold itself was never marked
-        either, so nothing on the axis told a reader where the scale stops
-        being logarithmic. Both are fixed here: `±linthresh` is always a tick
-        when it is in view, and an axis too narrow to hold two decades falls
-        back to plain nice numbers, which is what such an axis actually is.
-        """
-        vals = set(self._decades(lo, hi))
+    def ticks(self, lo: float, hi: float, max_ticks: int = 7, minus: bool = True) -> list[Tick]:
+        lo, hi = min(lo, hi), max(lo, hi)
+        vals = self._decades(lo, hi, (1,))
         if len(vals) < 2:
-            return nice_ticks(lo, hi, max_ticks)
-        # Too few decades in view to carry the axis on their own: subdivide
-        # them, widening the subdivision until there are enough ticks to read
-        # by. `[-3, 3]` at a threshold of 1 has exactly two decades, both
-        # inside the middle fifth - without this the outer 80% of the axis
-        # holds no tick at all.
-        for subs in ((2, 5), (2, 3, 4, 5, 6, 7, 8, 9)):
-            if len(vals) >= max_ticks - 1:
-                break
-            for sign in (1.0, -1.0):
-                for k in range(-300, 301):
-                    base = 10.0 ** k
-                    if base < self.linthresh:
-                        continue
-                    for mult in subs:
-                        v = sign * mult * base
-                        if lo <= v <= hi:
-                            vals.add(v)
-        if lo <= 0.0 <= hi:
-            vals.add(0.0)
-        # Mark the linear/log crossover, on whichever side is in view.
-        for edge in (self.linthresh, -self.linthresh):
-            if lo <= edge <= hi:
-                vals.add(edge)
-        return [(v, _fmt_symlog(v)) for v in sorted(vals)]
+            return nice_ticks(lo, hi, max_ticks, minus)
+        if len(vals) < max_ticks - 1:
+            vals |= self._decades(lo, hi, (1, 2, 5))
+        vals |= {v for v in (0.0, self.linthresh, -self.linthresh) if lo <= v <= hi}
+
+        def label(v: float) -> str:
+            a = abs(v)
+            if v != 0 and (a >= 1000 or a < 1e-3):
+                k = round(math.log10(a))
+                return f"$-10^{{{k}}}$" if v < 0 else _pow10(k)
+            return ticker.plain(v, minus)
+
+        return [(v, label(v)) for v in sorted(vals)]
 
     def minor_ticks(self, lo: float, hi: float) -> list[float]:
-        """The 2..9 subdivisions of each decade, as on a log axis.
-
-        A symlog axis had none at all, so between two labeled decades there was
-        no way to read off where a point sat - the one thing minor ticks are
-        for on a logarithmic axis.
-        """
-        out: list[float] = []
-        for sign in (1.0, -1.0):
-            for k in range(-300, 301):
-                base = 10.0 ** k
-                if base < self.linthresh:
-                    continue
-                for mult in range(2, 10):
-                    v = sign * mult * base
-                    if abs(v) >= self.linthresh and lo <= v <= hi:
-                        out.append(v)
-        return out
+        lo, hi = min(lo, hi), max(lo, hi)
+        return sorted(self._decades(lo, hi, range(2, 10)))
 
 
-def _fmt_symlog(v: float) -> str:
-    if v == 0.0:
-        return "0"
-    a = abs(v)
-    if a >= 1000 or a < 1e-3:
-        k = round(math.log10(a))
-        return ("$-10^{%d}$" % k) if v < 0 else _fmt_pow10(k)
-    return _fmt_plain(v)
-
-
-class LogitScale(Scale):
-    """Logit scale for probabilities in ``(0, 1)``: ``log10(p / (1 - p))``."""
+class Logit(Scale):
+    """``log10(p / (1 - p))`` for probabilities in (0, 1)."""
 
     name = "logit"
-    code = "logit"
-    is_identity = False
+
+    @property
+    def code(self) -> str:
+        return "logit"
 
     def transform(self, v: float) -> float:
-        return math.log10(v / (1.0 - v)) if 0.0 < v < 1.0 else math.copysign(math.inf, v - 0.5)
+        return math.log10(v / (1.0 - v)) if 0.0 < v < 1.0 else math.nan
 
     def inverse(self, t: float) -> float:
-        e = 10.0 ** t
+        e = 10.0**t
         return e / (1.0 + e)
 
-    def clip_bounds(self, bounds, arrays):
-        # Only the open interval (0, 1) is representable: 0 and 1 map to -inf
-        # and +inf. Like the log scale, the overall min/max is the wrong summary
-        # (a single 0.0 would drag the lower bound to -inf), so this looks at
-        # the values.
-        lo = hi = None
-        for a in arrays:
-            for v in a:
-                if 0.0 < v < 1.0:
-                    if lo is None or v < lo:
-                        lo = v
-                    if hi is None or v > hi:
-                        hi = v
-        return None if lo is None else (lo, hi)
-
-    def empty_range(self) -> tuple[float, float]:
+    def default_range(self) -> tuple[float, float]:
         return (0.01, 0.99)
 
-    def ticks(self, lo: float, hi: float, max_ticks: int = 7) -> list[Tick]:
-        # Conventional logit gridline positions, symmetric about 0.5; kept sparse
-        # so labels don't collide in the compressed mid-range.
-        std = [0.001, 0.01, 0.1, 0.5, 0.9, 0.99, 0.999]
-        return [(v, _fmt_plain(v)) for v in std if lo <= v <= hi]
+    def ticks(self, lo: float, hi: float, max_ticks: int = 7, minus: bool = True) -> list[Tick]:
+        lo, hi = min(lo, hi), max(lo, hi)
+        std = (0.001, 0.01, 0.1, 0.5, 0.9, 0.99, 0.999)
+        return [(v, ticker.plain(v, minus)) for v in std if lo <= v <= hi]
 
     def minor_ticks(self, lo: float, hi: float) -> list[float]:
-        sub = [0.002, 0.005, 0.02, 0.05, 0.2, 0.25, 0.75, 0.8, 0.95, 0.98, 0.995, 0.998]
-        return [v for v in sub if lo <= v <= hi]
+        sub = (0.002, 0.005, 0.02, 0.05, 0.2, 0.25, 0.75, 0.8, 0.95, 0.98, 0.995, 0.998)
+        return [v for v in sub if min(lo, hi) <= v <= max(lo, hi)]
 
 
-class CategoricalScale(Scale):
-    """A discrete axis: string categories occupy integer positions ``0..n-1``.
-
-    Data are mapped to their category index before plotting (see
-    ``Axes._categorize``); the transform is the identity in that index space, so
-    the Rust affine fast paths are untouched (``code = "linear"``). Ticks are one
-    per category, centered on its position; the view spans ``-0.5 .. n-0.5``."""
+class Categorical(Scale):
+    """Discrete categories at positions 0, 1, 2, ... in first-seen order. Set
+    automatically when string data is plotted."""
 
     name = "categorical"
-    code = "linear"
-    is_identity = False  # so the figure uses ``fixed_range`` for the view range
 
-    def __init__(self, categories: Sequence) -> None:
-        self.categories = [str(c) for c in categories]
-        self.index = {c: i for i, c in enumerate(self.categories)}
+    def __init__(self, categories: Sequence[str] = ()) -> None:
+        self.categories: list[str] = []
+        self.index: dict[str, int] = {}
+        for c in categories:
+            self.position(c)
 
-    def transform(self, v: float) -> float:
-        return v
-
-    def inverse(self, t: float) -> float:
-        return t
+    def position(self, category: object) -> float:
+        key = str(category)
+        if key not in self.index:
+            self.index[key] = len(self.categories)
+            self.categories.append(key)
+        return float(self.index[key])
 
     def fixed_range(self) -> tuple[float, float]:
-        # Half a slot of air either side of the first and last category, and no
-        # data margin on top: the window belongs to the category list, so it
-        # must not move when a bar is drawn narrower or a series is added.
-        n = len(self.categories)
-        return (-0.5, (n - 1) + 0.5) if n else (-0.5, 0.5)
+        return (-0.5, max(len(self.categories), 1) - 0.5)
 
-    def ticks(self, lo: float, hi: float, max_ticks: int = 7) -> list[Tick]:
-        return [(float(i), c) for i, c in enumerate(self.categories)
-                if lo - 1e-9 <= i <= hi + 1e-9]
+    def ticks(self, lo: float, hi: float, max_ticks: int = 7, minus: bool = True) -> list[Tick]:
+        lo, hi = min(lo, hi), max(lo, hi)
+        return [(float(i), c) for i, c in enumerate(self.categories) if lo - 1e-9 <= i <= hi + 1e-9]
 
 
-# -- datetime axis ----------------------------------------------------------
+# -- dates ------------------------------------------------------------------
 
-#: Epoch for pyplotrs' day-number convention (float days since this instant).
-_EPOCH = _dt.datetime(1970, 1, 1)
+_EPOCH = dt.datetime(1970, 1, 1)
 
 
-def is_datetime_like(v) -> bool:
-    """Whether ``v`` is a datetime we can place on a ``DateScale``
-    (``datetime``/``date``, pandas ``Timestamp``, or NumPy ``datetime64``)."""
-    if isinstance(v, (_dt.datetime, _dt.date)):
-        return True
-    if hasattr(v, "to_pydatetime"):  # pandas Timestamp
-        return True
-    return type(v).__name__ == "datetime64"  # numpy
+def is_datetime(v: object) -> bool:
+    return (
+        isinstance(v, (dt.datetime, dt.date))
+        or hasattr(v, "to_pydatetime")
+        or type(v).__name__ == "datetime64"
+    )
 
 
 def date2num(v) -> float:
-    """Convert a datetime-like value to float **days since 1970-01-01**."""
-    if isinstance(v, _dt.datetime):
-        return (v - _EPOCH).total_seconds() / 86400.0
-    if isinstance(v, _dt.date):
-        return (_dt.datetime(v.year, v.month, v.day) - _EPOCH).total_seconds() / 86400.0
+    """A datetime as float days since 1970-01-01."""
     if hasattr(v, "to_pydatetime"):  # pandas Timestamp
-        return date2num(v.to_pydatetime())
-    if type(v).__name__ == "datetime64":  # numpy datetime64
-        import numpy as _np  # local: numpy is optional
-        ns = _np.datetime64(v, "ns").astype("int64")
-        return ns / 1e9 / 86400.0
+        v = v.to_pydatetime()
+    if isinstance(v, dt.datetime):
+        if v.tzinfo is not None:
+            v = v.astimezone(dt.UTC).replace(tzinfo=None)
+        return (v - _EPOCH).total_seconds() / 86400.0
+    if isinstance(v, dt.date):
+        return float((v - _EPOCH.date()).days)
+    if type(v).__name__ == "datetime64":
+        import numpy as np
+
+        return float(np.datetime64(v, "us").astype("int64")) / 86400e6
     return float(v)
 
 
-def num2date(x: float) -> _dt.datetime:
-    """Inverse of ``date2num``: a float day-number back to a ``datetime``."""
-    return _EPOCH + _dt.timedelta(days=float(x))
+def num2date(x: float) -> dt.datetime:
+    """The inverse of `date2num`."""
+    return _EPOCH + dt.timedelta(days=float(x))
 
 
-def _nice_step(target: float, options: Sequence[int]) -> int:
-    for o in options:
-        if o >= target:
-            return o
-    return options[-1]
+def _first_at_least(target: float, options: Sequence[int]) -> int:
+    return next((o for o in options if o >= target), options[-1])
 
 
 def _date_ticks(lo: float, hi: float, max_ticks: int) -> list[Tick]:
-    """An auto date locator: pick a year/month/day/hour/minute granularity from
-    the visible span and emit calendar-aligned ``(day_number, label)`` ticks."""
     if hi <= lo:
         return [(lo, num2date(lo).strftime("%Y-%m-%d"))]
-    span = hi - lo
-    d0, d1 = num2date(lo), num2date(hi)
-    out: list[_dt.datetime] = []
-    if span > 365 * 2:  # years
-        step = _nice_step((d1.year - d0.year) / max_ticks, [1, 2, 5, 10, 20, 50, 100])
-        y = (d0.year // step) * step
-        while y <= d1.year + 1:
-            out.append(_dt.datetime(y, 1, 1))
-            y += step
+    span, d0, d1 = hi - lo, num2date(lo), num2date(hi)
+    times: list[dt.datetime] = []
+    if span > 730:
+        step = _first_at_least((d1.year - d0.year) / max_ticks, (1, 2, 5, 10, 20, 50, 100))
+        times = [dt.datetime(y, 1, 1) for y in range(d0.year // step * step, d1.year + 2, step)]
         fmt = "%Y"
-    elif span > 60:  # months
-        step = _nice_step(span / 30.0 / max_ticks, [1, 2, 3, 6])
+    elif span > 60:
+        step = _first_at_least(span / 30.0 / max_ticks, (1, 2, 3, 6))
         y, m = d0.year, d0.month
-        for _ in range(400):
-            t = _dt.datetime(y, m, 1)
-            if date2num(t) > hi + 31:
-                break
-            out.append(t)
-            m += step
-            while m > 12:
-                m -= 12
-                y += 1
+        while date2num(dt.datetime(y, m, 1)) <= hi:
+            times.append(dt.datetime(y, m, 1))
+            y, m = y + (m - 1 + step) // 12, (m - 1 + step) % 12 + 1
         fmt = "%b %Y"
-    elif span > 2:  # days
-        step = _nice_step(span / max_ticks, [1, 2, 5, 10, 15])
-        t = _dt.datetime(d0.year, d0.month, d0.day)
-        for _ in range(2000):
-            if date2num(t) > hi:
-                break
-            out.append(t)
-            t += _dt.timedelta(days=step)
-        fmt = "%b %d"
-    elif span > 2.0 / 24.0:  # hours
-        step = _nice_step(span * 24.0 / max_ticks, [1, 2, 3, 6, 12])
-        t = d0.replace(minute=0, second=0, microsecond=0)
-        for _ in range(2000):
-            if date2num(t) > hi:
-                break
-            out.append(t)
-            t += _dt.timedelta(hours=step)
-        fmt = "%H:%M"
-    else:  # minutes
-        step = _nice_step(span * 1440.0 / max_ticks, [1, 5, 10, 15, 30])
-        t = d0.replace(second=0, microsecond=0)
-        for _ in range(2000):
-            if date2num(t) > hi:
-                break
-            out.append(t)
-            t += _dt.timedelta(minutes=step)
-        fmt = "%H:%M"
-    return [(date2num(t), t.strftime(fmt)) for t in out
-            if lo - 1e-9 <= date2num(t) <= hi + 1e-9]
+    else:
+        if span > 2:
+            unit, steps, fmt = 1.0, (1, 2, 5, 10, 15), "%b %d"
+            t = d0.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif span > 2 / 24:
+            unit, steps, fmt = 1 / 24, (1, 2, 3, 6, 12), "%H:%M"
+            t = d0.replace(minute=0, second=0, microsecond=0)
+        else:
+            unit, steps, fmt = 1 / 1440, (1, 5, 10, 15, 30), "%H:%M"
+            t = d0.replace(second=0, microsecond=0)
+        delta = dt.timedelta(days=unit * _first_at_least(span / unit / max_ticks, steps))
+        while date2num(t) <= hi and len(times) < 1000:
+            times.append(t)
+            t += delta
+    return [(date2num(t), t.strftime(fmt)) for t in times if lo - 1e-9 <= date2num(t) <= hi + 1e-9]
 
 
-class DateScale(Scale):
-    """A time axis over float **day numbers** (``date2num``, days since
-    1970-01-01). Datetime inputs are converted on the way in; ticks fall on
-    calendar boundaries (year/month/day/hour) chosen from the visible span."""
+class Date(Scale):
+    """Time on float day numbers (see `date2num`), ticked on calendar
+    boundaries. Set automatically when datetime data is plotted."""
 
     name = "date"
-    code = "linear"  # already numeric day-space, so the Rust fast paths apply
-    is_identity = False
 
-    def transform(self, v: float) -> float:
-        return v
-
-    def inverse(self, t: float) -> float:
-        return t
-
-    def ticks(self, lo: float, hi: float, max_ticks: int = 7) -> list[Tick]:
-        return _date_ticks(lo, hi, max_ticks)
+    def ticks(self, lo: float, hi: float, max_ticks: int = 7, minus: bool = True) -> list[Tick]:
+        return _date_ticks(min(lo, hi), max(lo, hi), max_ticks)
 
 
-def get(scale) -> Scale:
-    """Resolve ``scale`` (a ``Scale``, a name string, or ``None``) to a
-    concrete ``Scale``. ``None``/``"linear"`` -> ``LinearScale``."""
-    if scale is None:
-        return LinearScale()
+_BY_NAME: dict[str, type[Scale]] = {
+    "linear": Linear,
+    "log": Log,
+    "symlog": Symlog,
+    "logit": Logit,
+    "date": Date,
+}
+
+
+def get(scale: Scale | str) -> Scale:
+    """A scale from an instance or a name: linear, log, symlog, logit or date."""
     if isinstance(scale, Scale):
         return scale
-    if isinstance(scale, str):
-        try:
-            return _BY_NAME[scale]()
-        except KeyError:
-            raise ValueError(
-                f"unknown scale {scale!r}; expected one of {sorted(_BY_NAME)}"
-            )
-    raise TypeError(f"expected a Scale, scale name, or None; got {type(scale).__name__}")
-
-
-# Registry of scale-name -> constructor. Categorical/date scales register here as
-# they are added in later phases.
-_BY_NAME: dict[str, type[Scale]] = {
-    "linear": LinearScale,
-    "log": LogScale,
-    "symlog": SymlogScale,
-    "logit": LogitScale,
-    "date": DateScale,
-}
+    try:
+        return _BY_NAME[scale]()
+    except (KeyError, TypeError):
+        raise ValueError(f"unknown scale {scale!r}; expected one of {sorted(_BY_NAME)}") from None

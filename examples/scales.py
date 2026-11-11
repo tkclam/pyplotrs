@@ -1,31 +1,29 @@
-"""Axis scales: log, symlog, an automatic date axis, and categories."""
+"""Axis scales: log, symlog, dates and categories."""
+
 import datetime as dt
-import math
+import os
+from pathlib import Path
+
+import numpy as np
 
 import pyplotrs as pp
 
-fig, ((ax_log, ax_symlog), (ax_date, ax_cat)) = pp.subplots(2, 2, figsize=(620, 420))
+out = Path(os.environ.get("PYPLOTRS_EXAMPLES_OUT", Path(__file__).parent / "output"))
+out.mkdir(exist_ok=True)
 
-xs = [1 + i * 0.5 for i in range(200)]
-ax_log.line(xs, [x ** 2 for x in xs], label="$x^2$")
-ax_log.line(xs, [math.exp(x / 20) for x in xs], label="$e^{x/20}$")
-ax_log.set(title="log-log", xscale="log", yscale="log")
-ax_log.legend(loc="lower right")
+fig, ((a, b), (c, d)) = pp.subplots(2, 2, figsize=(380, 280))
+f = np.geomspace(1, 1e4, 100)
+a.line(f, 1 / np.sqrt(1 + (f / 100) ** 2))
+a.set(xscale="log", yscale="log", title="log-log", grid=True)
 
-ts = [-100 + i for i in range(201)]
-ax_symlog.line(ts, [t ** 3 / 100 for t in ts])
-ax_symlog.set(title="symlog (signed, spans zero)", yscale="symlog")
+v = np.linspace(-1000, 1000, 400)
+b.line(v, v)
+b.set(xscale=pp.scales.Symlog(linthresh=10), title="symlog")
 
-# Datetime values switch that axis to a date scale automatically; the
-# formatter here just shortens the auto labels from "Jan 2026" to "Jan".
-day0 = dt.date(2026, 1, 1)
-days = [day0 + dt.timedelta(days=7 * i) for i in range(26)]
-ax_date.line(days, [20 + 8 * math.sin(i / 4) for i in range(26)])
-ax_date.set(title="date axis (automatic)", ylabel="°C",
-            xformatter=pp.ticker.DateFormatter("%b"))
+days = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(120)]
+c.line(days, np.cumsum(np.random.default_rng(0).normal(size=120)))
+c.set(title="dates")
 
-# String coordinates switch that axis to a categorical scale.
-ax_cat.bar(["ash", "birch", "cedar", "elm"], [12, 19, 7, 15])
-ax_cat.set(title="categorical axis (automatic)", ylabel="count")
-
-fig.save("scales.png")
+d.barh(["mouse", "fly", "zebrafish", "worm"], [22, 14, 9, 5], color="C2")
+d.set(title="categories", xlabel="papers")
+fig.save(out / "scales.png")

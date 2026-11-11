@@ -1,154 +1,117 @@
-"""Built-in colormaps.
+"""Colormaps and categorical palettes.
 
-A ``Colormap`` maps a scalar in ``[0, 1]`` to an ``(r, g, b, a)`` byte
-tuple. This is the LUT machinery behind ``Axes.imshow`` / ``Figure.colorbar``.
+About 125 built-in colormaps (from matplotlib, colorcet and cmocean) and 25
+palettes (matplotlib, ColorBrewer, seaborn). Any name takes an ``_r`` suffix
+to reverse it::
 
-Every ``Colormap`` is backed by an exact 256-entry RGB table, indexed
-directly - so sampling is always O(1), never interpolation math on the hot
-path. That table comes from one of two places:
-
-* **built-in name** - an exact table sourced from upstream (matplotlib,
-  colorcet, or cmocean - see ``available``), bit-for-bit faithful, not an
-  approximation. A trailing ``"_r"`` reverses it.
-* **custom stops** - ``Colormap(name, stops=[(0.0, (0, 0, 0)), ...])``
-  resamples your control colors to 256 entries in **Oklab** space by default
-  (see [`pyplotrs.color`][pyplotrs.color]), so gradients look perceptually smooth rather
-  than banding the way a naive sRGB lerp does.
-
-Both the table data and all interpolation math run in Rust
-(``pyplotrs._pyplotrs_core``, backed by the ``pyplotrs-color`` crate).
+    ax.imshow(z, cmap="magma_r")
+    pp.colormaps.names("diverging")
+    cmap = pp.Colormap.from_colors(["navy", "white", "firebrick"])
 """
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
+from functools import cache
 
-from . import _pyplotrs_core as _core
+from . import _core
+from .colors import RGBA, ColorLike, to_rgba
 
-#: The public surface of this module. Without it, `from ... import *`
-#: and every editor's completion list also offer `Sequence`, `math` and
-#: `annotations` - names that are imported here, not exported from here.
-__all__ = [
-    "CATEGORIES",
-    "Colormap",
-    "available",
-    "get_cmap",
-]
-
-
-_RGBA = tuple[int, int, int, int]
-_RGB = tuple[int, int, int]
-_Stop = tuple[float, _RGB]
-
-#: The categories a built-in continuous colormap can be filtered to via
-#: ``available(category=...)``.
-CATEGORIES = (
-    "perceptually_uniform",
-    "sequential",
-    "diverging",
-    "cyclic",
-    "miscellaneous",
-)
+__all__ = ["Colormap", "get", "names", "palette", "palette_names"]
 
 
 class Colormap:
-    """A colormap: 256 exact RGB entries, sampled by nearest index.
+    """A 256-entry color table. Call it with a position in ``[0, 1]``."""
 
-    Construct either from interpolated ``stops`` (the public, ergonomic
-    path)::
+    __slots__ = ("_lut", "name", "table")
 
-        Colormap("warm", [(0.0, (0, 0, 0)), (1.0, (255, 128, 0))])
-
-    or from an exact 256-entry ``table`` of ``(r, g, b)`` byte triples - the
-    form every built-in name uses internally::
-
-        Colormap("viridis", table=viridis_table)
-
-    ``space`` selects the color space ``stops`` are interpolated in:
-    ``"oklab"`` (default), ``"lab"``, ``"linear"`` (linear-light RGB), or
-    ``"srgb"`` (naive gamma-space lerp, kept for parity with pre-1.0
-    behavior).
-    """
-
-    def __init__(
-        self,
-        name: str,
-        stops: Sequence[_Stop] | None = None,
-        *,
-        table: Sequence[_RGB] | None = None,
-        space: str = "oklab",
-    ) -> None:
-        if (stops is None) == (table is None):
-            raise ValueError("provide exactly one of `stops` or `table`")
+    def __init__(self, name: str, table: bytes) -> None:
+        if len(table) != 768:
+            raise ValueError("a colormap table is 256 RGB entries (768 bytes)")
         self.name = name
-        if table is not None:
-            t = tuple((int(r), int(g), int(b)) for r, g, b in table)
-            if len(t) != 256:
-                raise ValueError(f"a colormap table needs exactly 256 entries, got {len(t)}")
-            self._table: tuple[_RGB, ...] = t
-        else:
-            assert stops is not None
-            s = [(float(p), (int(r), int(g), int(b))) for p, (r, g, b) in stops]
-            if len(s) < 2:
-                raise ValueError("a colormap needs at least two stops")
-            # The table build sorts by position, and NaN does not compare, so a
-            # non-finite position used to surface as a PanicException out of the
-            # sort rather than as a complaint about the argument.
-            bad = [i for i, (p, _c) in enumerate(s) if not -1e308 < p < 1e308]
-            if bad:
-                raise ValueError(
-                    f"colormap stop positions must be finite; stop "
-                    f"{bad[0]} has position {s[bad[0]][0]!r}"
-                )
-            self._table = tuple(_core.colormap_table_from_stops(s, space))
+        self.table = bytes(table)
+        self._lut: dict[float, bytes] = {}
 
-    def __call__(self, t: float) -> _RGBA:
-        """Sample the map at ``t`` (clamped to ``[0, 1]``; NaN -> low end)."""
-        tbl = self._table
-        if t != t or t <= 0.0:  # NaN or low
-            r, g, b = tbl[0]
-        elif t >= 1.0:
-            r, g, b = tbl[-1]
-        else:
-            r, g, b = tbl[int(t * 255.0 + 0.5)]
-        return (r, g, b, 255)
+    @classmethod
+    def from_colors(
+        cls,
+        colors: Sequence[ColorLike],
+        name: str = "custom",
+        *,
+        positions: Sequence[float] | None = None,
+        space: str = "oklab",
+    ) -> Colormap:
+        """Interpolate between colors (evenly spaced unless ``positions`` is
+        given) in a perceptual color space: ``"oklab"`` (default), ``"lab"``,
+        ``"linear"`` or ``"srgb"``."""
+        if len(colors) < 2:
+            raise ValueError("a colormap needs at least two colors")
+        if positions is None:
+            positions = [i / (len(colors) - 1) for i in range(len(colors))]
+        if len(positions) != len(colors):
+            raise ValueError("positions and colors must have the same length")
+        stops = [(float(p), to_rgba(c)[:3]) for p, c in zip(positions, colors, strict=True)]
+        return cls(name, _core.colormap_from_stops(stops, space))
+
+    def __call__(self, t: float) -> RGBA:
+        i = 3 * min(255, max(0, round(t * 255.0))) if t == t else 0
+        return (self.table[i], self.table[i + 1], self.table[i + 2], 255)
+
+    def reversed(self) -> Colormap:
+        rows = [self.table[i : i + 3] for i in range(0, 768, 3)]
+        name = self.name[:-2] if self.name.endswith("_r") else self.name + "_r"
+        return Colormap(name, b"".join(reversed(rows)))
+
+    def lut(self, alpha: float = 1.0) -> bytes:
+        """The table as 256 RGBA entries (1024 bytes) with uniform ``alpha``."""
+        hit = self._lut.get(alpha)
+        if hit is None:
+            a = min(255, max(0, round(alpha * 255)))
+            t = self.table
+            hit = bytes(v for i in range(0, 768, 3) for v in (t[i], t[i + 1], t[i + 2], a))
+            self._lut[alpha] = hit
+        return hit
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, Colormap) and self.table == other.table
+
+    def __hash__(self) -> int:
+        return hash(self.table)
 
     def __repr__(self) -> str:
-        lo, hi = self._table[0], self._table[-1]
-        return (f"<Colormap {self.name!r} "
-                f"#{lo[0]:02x}{lo[1]:02x}{lo[2]:02x} -> "
-                f"#{hi[0]:02x}{hi[1]:02x}{hi[2]:02x}>")
-
-    def reversed(self) -> "Colormap":
-        return Colormap(self.name + "_r", table=tuple(reversed(self._table)))
+        return f"<Colormap {self.name!r}>"
 
 
-_CMAP_CACHE: dict[str, Colormap] = {}
+@cache
+def _builtin(name: str) -> Colormap | None:
+    table = _core.colormap_table(name)
+    return None if table is None else Colormap(name, table)
 
 
-def get_cmap(name) -> Colormap:
-    """Look up a colormap by name. A ``_r`` suffix reverses it
-    (e.g. ``"viridis_r"``). Passing a ``Colormap`` returns it unchanged."""
-    if isinstance(name, Colormap):
-        return name
-    key = str(name)
-    hit = _CMAP_CACHE.get(key)
-    if hit is not None:
-        return hit
-    table = _core.colormap_table(key)
-    if table is None:
-        raise ValueError(
-            f"unknown colormap {name!r}; see pyplotrs.colormaps.available()"
-        )
-    cm = Colormap(key, table=table)
-    _CMAP_CACHE[key] = cm
-    return cm
+def get(cmap: str | Colormap) -> Colormap:
+    """A colormap by name, or the colormap itself."""
+    if isinstance(cmap, Colormap):
+        return cmap
+    found = _builtin(cmap)
+    if found is None:
+        raise ValueError(f"unknown colormap {cmap!r}; see pyplotrs.colormaps.names()")
+    return found
 
 
-def available(category: str | None = None) -> list[str]:
-    """Names of built-in continuous colormaps (each also usable with a
-    ``"_r"`` suffix to reverse it), optionally filtered to one ``category``
-    (see ``CATEGORIES``)."""
-    if category is not None and category not in CATEGORIES:
-        raise ValueError(f"unknown category {category!r}; choose from {CATEGORIES}")
-    return sorted(_core.list_colormaps(category))
+def names(category: str | None = None) -> list[str]:
+    """Built-in colormap names, optionally one category: ``"sequential"``,
+    ``"diverging"``, ``"cyclic"``, ``"perceptually_uniform"`` or
+    ``"miscellaneous"``."""
+    return list(_core.colormap_names(category))
+
+
+def palette(name: str) -> tuple[RGBA, ...]:
+    """A built-in categorical palette, e.g. ``"tab10"``, ``"Set2"``."""
+    colors = _core.palette(name)
+    if colors is None:
+        raise ValueError(f"unknown palette {name!r}; see pyplotrs.colormaps.palette_names()")
+    return tuple((r, g, b, 255) for r, g, b in colors)
+
+
+def palette_names() -> list[str]:
+    return list(_core.palette_names())

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""One-off data importer: matplotlib/colorcet/cmocean/seaborn -> pyplotrs-color.
+"""One-off data importer: matplotlib/colorcet/cmocean/seaborn -> the engine's color module.
 
 This is a **dev tool**, not part of the pyplotrs package or build. It pulls a
 curated set of colormap/palette tables from third-party packages and writes:
 
-  * ``crates/pyplotrs-color/data/continuous.bin`` - concatenated 256x3-byte
+  * ``crates/engine/src/color/data/continuous.bin`` - concatenated 256x3-byte
     RGB tables, one per continuous colormap, in sorted-name order.
-  * ``crates/pyplotrs-color/src/data/registry_gen.rs`` - generated index
+  * ``crates/engine/src/color/data/registry_gen.rs`` - generated index
     (name -> byte offset, category, source) for the continuous table above.
-  * ``crates/pyplotrs-color/src/data/categorical_gen.rs`` - generated
+  * ``crates/engine/src/color/data/categorical_gen.rs`` - generated
     qualitative/categorical palettes as literal ``&[[u8; 3]]`` arrays.
   * ``tools/colormap_manifest.json`` - a human-reviewable manifest (name,
     source, category, size) for provenance/attribution.
@@ -36,10 +36,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 ROOT = Path(__file__).resolve().parent.parent
-COLOR_CRATE = ROOT / "crates" / "pyplotrs-color"
-CONTINUOUS_BIN = COLOR_CRATE / "data" / "continuous.bin"
-REGISTRY_RS = COLOR_CRATE / "src" / "data" / "registry_gen.rs"
-CATEGORICAL_RS = COLOR_CRATE / "src" / "data" / "categorical_gen.rs"
+DATA = ROOT / "crates" / "engine" / "src" / "color" / "data"
+CONTINUOUS_BIN = DATA / "continuous.bin"
+REGISTRY_RS = DATA / "registry_gen.rs"
+CATEGORICAL_RS = DATA / "categorical_gen.rs"
 MANIFEST_JSON = ROOT / "tools" / "colormap_manifest.json"
 
 # The entry tables are one compact line per colormap. rustfmt wants to explode
@@ -54,33 +54,99 @@ RUSTFMT_SKIP = "#[rustfmt::skip]\n"
 # Qualitative names are handled separately (categorical, not 256-entry).
 MPL_PERCEPTUALLY_UNIFORM = ["viridis", "plasma", "inferno", "magma", "cividis"]
 MPL_SEQUENTIAL = [
-    "Greys", "Purples", "Blues", "Greens", "Oranges", "Reds",
-    "YlOrBr", "YlOrRd", "OrRd", "PuRd", "RdPu", "BuPu",
-    "GnBu", "PuBu", "YlGnBu", "PuBuGn", "BuGn", "YlGn",
+    "Greys",
+    "Purples",
+    "Blues",
+    "Greens",
+    "Oranges",
+    "Reds",
+    "YlOrBr",
+    "YlOrRd",
+    "OrRd",
+    "PuRd",
+    "RdPu",
+    "BuPu",
+    "GnBu",
+    "PuBu",
+    "YlGnBu",
+    "PuBuGn",
+    "BuGn",
+    "YlGn",
 ]
 MPL_SEQUENTIAL2 = [
-    "binary", "gist_yarg", "gist_gray", "gray", "bone", "pink",
-    "spring", "summer", "autumn", "winter", "cool", "Wistia",
-    "hot", "afmhot", "gist_heat", "copper",
+    "binary",
+    "gist_yarg",
+    "gist_gray",
+    "gray",
+    "bone",
+    "pink",
+    "spring",
+    "summer",
+    "autumn",
+    "winter",
+    "cool",
+    "Wistia",
+    "hot",
+    "afmhot",
+    "gist_heat",
+    "copper",
 ]
 MPL_DIVERGING = [
-    "PiYG", "PRGn", "BrBG", "PuOr", "RdGy", "RdBu", "RdYlBu", "RdYlGn",
-    "Spectral", "coolwarm", "bwr", "seismic", "berlin", "managua", "vanimo",
+    "PiYG",
+    "PRGn",
+    "BrBG",
+    "PuOr",
+    "RdGy",
+    "RdBu",
+    "RdYlBu",
+    "RdYlGn",
+    "Spectral",
+    "coolwarm",
+    "bwr",
+    "seismic",
+    "berlin",
+    "managua",
+    "vanimo",
 ]
 MPL_CYCLIC = ["twilight", "twilight_shifted", "hsv"]
 MPL_MISC = [
-    "flag", "prism", "ocean", "gist_earth", "terrain", "gist_stern",
-    "gnuplot", "gnuplot2", "CMRmap", "cubehelix", "brg", "gist_rainbow",
-    "rainbow", "jet", "turbo", "nipy_spectral", "gist_ncar",
+    "flag",
+    "prism",
+    "ocean",
+    "gist_earth",
+    "terrain",
+    "gist_stern",
+    "gnuplot",
+    "gnuplot2",
+    "CMRmap",
+    "cubehelix",
+    "brg",
+    "gist_rainbow",
+    "rainbow",
+    "jet",
+    "turbo",
+    "nipy_spectral",
+    "gist_ncar",
 ]
 MPL_QUALITATIVE = [
-    "Pastel1", "Pastel2", "Paired", "Accent", "Dark2",
-    "Set1", "Set2", "Set3", "tab10", "tab20", "tab20b", "tab20c", "okabe_ito",
+    "Pastel1",
+    "Pastel2",
+    "Paired",
+    "Accent",
+    "Dark2",
+    "Set1",
+    "Set2",
+    "Set3",
+    "tab10",
+    "tab20",
+    "tab20b",
+    "tab20c",
+    "okabe_ito",
 ]
 # Aliases: keep back-compat / alternate-spelling names pointing at the same
 # table as their canonical entry (no duplicate bytes).
 MPL_ALIASES = {
-    "grays": "Greys",       # pyplotrs' pre-existing name
+    "grays": "Greys",  # pyplotrs' pre-existing name
     "grey": "gray",
     "gist_grey": "gist_gray",
     "gist_yerg": "gist_yarg",
@@ -102,8 +168,21 @@ MPL_CONTINUOUS = list(MPL_CATEGORY_OF)
 # `_s25`/protanopic/tritanopic variants - see tools/colormap_manifest.json for
 # the final list actually pulled).
 CET_SEQUENTIAL = [
-    "bgy", "bgyw", "blues", "bmw", "bmy", "dimgray", "fire", "gouldian",
-    "gray", "kb", "kbc", "kbgyw", "kg", "kgy", "kr",
+    "bgy",
+    "bgyw",
+    "blues",
+    "bmw",
+    "bmy",
+    "dimgray",
+    "fire",
+    "gouldian",
+    "gray",
+    "kb",
+    "kbc",
+    "kbgyw",
+    "kg",
+    "kgy",
+    "kr",
 ]
 CET_DIVERGING = ["bkr", "bky", "gwv", "bjy", "cwr", "bwy", "coolwarm"]
 CET_CYCLIC = ["colorwheel", "isolum"]
@@ -115,7 +194,14 @@ CET_CATEGORY_OF = {
     **{n: "miscellaneous" for n in CET_MISC},
 }
 CET_CONTINUOUS = list(CET_CATEGORY_OF)
-CET_GLASBEY = ["glasbey", "glasbey_hv", "glasbey_dark", "glasbey_light", "glasbey_cool", "glasbey_warm"]
+CET_GLASBEY = [
+    "glasbey",
+    "glasbey_hv",
+    "glasbey_dark",
+    "glasbey_light",
+    "glasbey_cool",
+    "glasbey_warm",
+]
 
 # -- cmocean: full named set (base names only - `_r`/`_i` variants excluded;
 # pyplotrs' generic `_r` suffix already reverses any registered name).
@@ -123,8 +209,21 @@ CMO_DIVERGING = ["balance", "delta", "curl", "diff", "tarn"]
 CMO_CYCLIC = ["phase"]
 CMO_MISC = ["topo"]
 CMO_SEQUENTIAL = [
-    "algae", "amp", "deep", "dense", "gray", "haline", "ice", "matter",
-    "oxy", "rain", "solar", "speed", "tempo", "thermal", "turbid",
+    "algae",
+    "amp",
+    "deep",
+    "dense",
+    "gray",
+    "haline",
+    "ice",
+    "matter",
+    "oxy",
+    "rain",
+    "solar",
+    "speed",
+    "tempo",
+    "thermal",
+    "turbid",
 ]
 CMO_CATEGORY_OF = {
     **{n: "sequential" for n in CMO_SEQUENTIAL},
@@ -140,15 +239,12 @@ SNS_QUALITATIVE = ["deep", "muted", "bright", "pastel", "dark", "colorblind"]
 
 def _mpl_table(name: str) -> list[tuple[int, int, int]]:
     cmap = plt.get_cmap(name)
-    return [
-        tuple(int(round(c * 255)) for c in cmap(i / 255.0)[:3])
-        for i in range(256)
-    ]
+    return [tuple(round(c * 255) for c in cmap(i / 255.0)[:3]) for i in range(256)]
 
 
 def _mpl_colors(name: str) -> list[tuple[int, int, int]]:
     cmap = plt.get_cmap(name)
-    return [tuple(int(round(c * 255)) for c in rgb[:3]) for rgb in cmap.colors]
+    return [tuple(round(c * 255) for c in rgb[:3]) for rgb in cmap.colors]
 
 
 def _hex_to_rgb(h: str) -> tuple[int, int, int]:
@@ -162,14 +258,11 @@ def _cet_table(name: str) -> list[tuple[int, int, int]]:
 
 def _cmo_table(name: str) -> list[tuple[int, int, int]]:
     cmap = cmocean.cm.cmap_d[name]
-    return [
-        tuple(int(round(c * 255)) for c in cmap(i / 255.0)[:3])
-        for i in range(256)
-    ]
+    return [tuple(round(c * 255) for c in cmap(i / 255.0)[:3]) for i in range(256)]
 
 
 def _sns_colors(name: str) -> list[tuple[int, int, int]]:
-    return [tuple(int(round(c * 255)) for c in rgb) for rgb in sns.color_palette(name)]
+    return [tuple(round(c * 255) for c in rgb) for rgb in sns.color_palette(name)]
 
 
 def main() -> None:
@@ -216,7 +309,7 @@ def main() -> None:
     REGISTRY_RS.parent.mkdir(parents=True, exist_ok=True)
     with REGISTRY_RS.open("w") as f:
         f.write("// Generated by tools/extract_colormaps.py. Do not edit by hand.\n")
-        f.write("use crate::registry::{Category, ContinuousEntry, Source};\n\n")
+        f.write("use crate::color::registry::{Category, ContinuousEntry, Source};\n\n")
         f.write(RUSTFMT_SKIP)
         f.write("pub static CONTINUOUS: &[ContinuousEntry] = &[\n")
         for n in names:
@@ -230,7 +323,7 @@ def main() -> None:
 
     with CATEGORICAL_RS.open("w") as f:
         f.write("// Generated by tools/extract_colormaps.py. Do not edit by hand.\n")
-        f.write("use crate::registry::{CategoricalEntry, Source};\n\n")
+        f.write("use crate::color::registry::{CategoricalEntry, Source};\n\n")
         for n in sorted(categorical):
             colors, _src = categorical[n]
             const_name = "PAL_" + "".join(c if c.isalnum() else "_" for c in n).upper()
@@ -251,7 +344,11 @@ def main() -> None:
 
     manifest = {
         "continuous": {
-            n: {"category": continuous[n][1], "source": continuous[n][2], "n": len(continuous[n][0])}
+            n: {
+                "category": continuous[n][1],
+                "source": continuous[n][2],
+                "n": len(continuous[n][0]),
+            }
             for n in names
         },
         "categorical": {

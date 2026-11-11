@@ -1,244 +1,89 @@
 [build-system]
-requires = ["maturin>=1.7,<2.0"]
+requires = ["maturin>=1.9,<2"]
 build-backend = "maturin"
 
 [project]
 name = "pyplotrs"
-# Taken from `[workspace.package].version` in Cargo.toml, which is the single
-# source of truth. It used to be duplicated here as an independent literal with
-# nothing comparing the two, so a release could ship a wheel whose Python
-# metadata and Rust crates disagreed - and the release workflow, which checks
-# the git tag against the version, would have been checking only one of them.
-dynamic = ["version"]
-description = "A blazingly fast, publication-quality plotting library for Python, powered by Rust"
+dynamic = ["version"] # from Cargo.toml
+description = "Fast, publication-quality plotting for Python, powered by Rust"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license = "MIT"
-# Everything pyplotrs redistributes, with the notice each license requires:
-# the bundled fonts (Liberation Sans, STIX Two Math and Fira Math under the
-# SIL OFL, a DejaVu Sans subset under the Bitstream Vera license); the
-# curated colormap/palette tables, matplotlib/colorcet/cmocean/seaborn-derived
-# (colorcet is CC-BY 4.0 and requires attribution); the MathJax bundle inlined
-# into `.html` output, Apache-2.0, which requires the license text and the
-# notice; and THIRD-PARTY-NOTICES.md for the Rust crates compiled into the
-# extension. Listing them here is what puts them in `dist-info/licenses/` in
-# every wheel, which is where a redistributor looks. `tests/test_packaging.py`
-# asserts they arrive.
 license-files = [
     "LICENSE",
     "THIRD-PARTY-NOTICES.md",
-    "assets/fonts/LiberationSans-OFL.txt",
-    "assets/fonts/STIXTwoMath-OFL.txt",
-    "assets/fonts/DejaVuSans-LICENSE.txt",
-    "assets/fonts/FiraMath-OFL.txt",
-    "assets/fonts/NOTICE.md",
     "THIRD_PARTY_COLORMAPS.md",
-    "python/pyplotrs/_vendor/MATHJAX-LICENSE.txt",
-    "python/pyplotrs/_vendor/MATHJAX-NOTICE.md",
-    # krilla is vendored and patched, so its code is compiled into the wheel and
-    # its source ships in the sdist - both are redistribution, and MIT and
-    # Apache-2.0 each require the license text to travel with it. The crate is
-    # dual-licensed, so both texts go; PYPLOTRS_PATCH.md is what Apache-2.0 §4(b)
-    # asks for, a statement of what was changed.
-    "vendor/krilla-0.8.2/LICENSE-MIT",
-    "vendor/krilla-0.8.2/LICENSE-APACHE",
+    "crates/engine/fonts/*.txt",
+    "crates/engine/fonts/NOTICE.md",
+    "vendor/krilla-0.8.2/LICENSE-*",
     "vendor/krilla-0.8.2/PYPLOTRS_PATCH.md",
 ]
-authors = [{ name = "tkclam", email = "thomas.lam@epfl.ch" }]
-maintainers = [{ name = "tkclam", email = "thomas.lam@epfl.ch" }]
-keywords = [
-    "plotting", "visualization", "graphics", "matplotlib", "charts",
-    "pdf", "svg", "publication", "figures", "rust",
-]
+authors = [{ name = "tkclam" }]
+keywords = ["plotting", "visualization", "pdf", "svg", "figures", "publication"]
 classifiers = [
-    # 3, not 4: nothing has been released yet, the API is explicitly unstable
-    # below 1.0, and claiming Beta on a first upload is a promise about
-    # stability that has no evidence behind it.
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "Intended Audience :: Developers",
     "Topic :: Scientific/Engineering :: Visualization",
-    "Topic :: Scientific/Engineering",
-    "Topic :: Multimedia :: Graphics",
-    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Rust",
-    # Not "OS Independent": that is the pure-Python marker, and this ships a
-    # compiled extension with a wheel per platform.
-    "Operating System :: POSIX :: Linux",
-    "Operating System :: MacOS :: MacOS X",
-    "Operating System :: Microsoft :: Windows",
     "Typing :: Typed",
 ]
+dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/tkclam/pyplotrs"
 Documentation = "https://tkclam.github.io/pyplotrs/"
 Repository = "https://github.com/tkclam/pyplotrs"
 Issues = "https://github.com/tkclam/pyplotrs/issues"
-Changelog = "https://tkclam.github.io/pyplotrs/about/changelog/"
 
-[project.optional-dependencies]
-# Documentation build: `mkdocs build` renders the site under docs/.
-# mkdocstrings renders the API pages from docstrings (mkdocs.yml declares the
-# plugin, so the build aborts without it); black formats the signatures it emits.
-# mkdocs-jupyter renders docs/notebooks/*.ipynb as pages. It is configured with
-# `execute: false`, so the notebooks' committed output is what the site shows
-# and the docs build needs neither a kernel nor matplotlib; regenerating that
-# output is `tools/build_notebooks.py`, which wants the `dev` extra instead.
-docs = [
-    "mkdocs>=1.6",
-    "mkdocs-material>=9.5",
-    "mkdocs-jupyter>=0.25",
-    "mkdocstrings[python]>=0.26",
-    "black>=24",
-]
-# Test suite: `pytest` from the repo root. The suite is deliberately close to
-# standard-library-only (it decodes PNGs with `zlib`), matching pyplotrs' own
-# zero-runtime-dependency stance, and every test that needs more is skipped
-# individually rather than at module scope - a module-level `importorskip`
-# silently disabled 26 tests in CI and hid a crash for months.
-#   numpy      - the array-ingest tests; the fast path exists for it, so it has
-#                to be exercised somewhere, and CI is that somewhere.
-#   tomli      - `tomllib` backport for 3.9/3.10, used by the packaging tests.
-#   fonttools  - reads the bundled DejaVu subset back and asserts it is symbols
-#                only, with no MATH table and no letters. The test skips itself
-#                without it, and a skipped test proves nothing, so CI installs
-#                it. (`pdftotext`, which the PDF-text tests need, is a binary
-#                rather than a wheel - CI.yml installs poppler-utils.)
-test = [
-    "pytest>=8",
-    "pytest-cov>=5",
-    "numpy>=1.24",
-    "tomli>=2; python_version<'3.11'",
-    "fonttools>=4.40",
-]
-# Benchmark-only: `benchmarks/benchmark.py` times pyplotrs head-to-head against matplotlib.
-# Not a runtime dependency of pyplotrs itself. Install with `pip install -e .[bench]`.
-bench = ["matplotlib>=3.8", "numpy>=1.24"]
-# Interactive development: open the documentation notebooks under
-# `docs/notebooks/` with a Jupyter kernel (`uv pip install -e .[dev]`, then
-# select that kernel), and re-execute them with `tools/build_notebooks.py`,
-# which drives a kernel through nbclient. matplotlib and numpy are needed by
-# two of the six notebooks - the ones that compare against matplotlib - and by
-# nothing in pyplotrs itself.
+[dependency-groups]
 dev = [
-    "ipykernel>=6",
-    "nbclient>=0.9",
-    "nbformat>=5.9",
-    "matplotlib>=3.8",
-    "numpy>=1.24",
+    "maturin>=1.9",
+    "pytest>=8",
+    "numpy>=1.26",
+    "ruff>=0.8",
+    "pyright>=1.1.390",
+]
+bench = ["matplotlib>=3.8", "numpy>=1.26"]
+docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5", "mkdocstrings[python]>=0.26"]
+
+[tool.uv]
+# Rebuild the extension when Rust sources change (`uv run` keeps it current).
+cache-keys = [{ file = "pyproject.toml" }, { file = "Cargo.toml" }, { file = "crates/**/*.rs" }]
+default-groups = ["dev"]
+
+[tool.maturin]
+module-name = "pyplotrs._core"
+manifest-path = "crates/python/Cargo.toml"
+python-source = "python"
+features = ["pyo3/extension-module"]
+include = [
+    { path = "crates/engine/fonts/*", format = "sdist" },
+    { path = "vendor/krilla-0.8.2/**/*", format = "sdist" },
 ]
 
 [tool.pytest.ini_options]
-# `--cov-fail-under` is a ratchet, not a target: it is set just below the
-# measured figure so that a change which drops coverage has to say so. Raise it
-# when the real number rises; never lower it to make a red build green.
-markers = [
-    # `test_sdist_resolves` builds a source distribution and resolves it with
-    # cargo. That needs maturin and a populated cargo registry and takes far
-    # longer than the rest of the suite combined, so it is deselected by
-    # default and CI runs it as its own step. The static half of the same
-    # check (`test_patch_paths_are_included_in_sdist`) is unmarked and always
-    # runs.
-    "packaging: builds and resolves the sdist; slow, needs maturin + cargo",
-]
-addopts = "-m 'not packaging'"
-# Dump every thread's stack and abort if one test runs this long, instead of
-# letting the job sit until GitHub's 60-minute timeout kills it with no output
-# at all. That is exactly what the `linux (x86_64)` wheel leg did: it printed a
-# progress line and then went silent for 43 minutes, and the log said only "The
-# operation was canceled" - no test name, no stack, nothing to act on. 600s is
-# far above any real test here (the whole suite is ~25s) and leaves room for the
-# emulated armv7/s390x/ppc64le legs, which run everything under QEMU.
-faulthandler_timeout = 600
-
-[tool.maturin]
-module-name = "pyplotrs._pyplotrs_core"
-manifest-path = "crates/pyplotrs-py/Cargo.toml"
-python-source = "python"
-# The bundled fonts are compiled into the extension via `include_bytes!`, so
-# they must be present in the source distribution for a from-source build.
-# The vendored MathJax bundle ships as package data (inlined into math `.html`
-# output); it lives under the python-source tree so the wheel picks it up, and
-# is listed here so the source distribution carries it too.
-# `vendor/krilla-0.8.2` is a path target of `[patch.crates-io]` in the root
-# Cargo.toml, so cargo cannot even resolve the dependency graph without it.
-# maturin does not follow patch paths when collecting an sdist, so omitting
-# this makes the sdist look fine and fail at `cargo metadata` - which is how it
-# shipped broken. `tests/test_packaging.py` builds a wheel from the sdist to
-# keep that from recurring.
-include = [
-    # `*` not `*.ttf`: Fira Math is an OpenType/CFF `.otf`, and the license
-    # texts have to reach the sdist too.
-    { path = "assets/fonts/*", format = "sdist" },
-    { path = "python/pyplotrs/_vendor/*", format = "sdist" },
-    { path = "vendor/krilla-0.8.2/**/*", format = "sdist" },
-    # The test suite, so a downstream packager can validate the artifact they
-    # build rather than taking it on trust. Conda-forge and the distros all
-    # run the suite during their build; without this they have nothing to run.
-    # Spelled out rather than `tests/**/*`: that glob also swept up whatever
-    # `tests/__pycache__/` happened to hold, putting 28 `.pyc` files - each
-    # embedding the absolute path of the machine that built them - into a
-    # public artifact. maturin has no exclude counterpart, so the include has
-    # to be the narrow thing. `test_sdist_carries_no_bytecode` guards it.
-    { path = "tests/*.py", format = "sdist" },
-    { path = "tests/golden/*.png", format = "sdist" },
-    { path = "tools/gen_third_party_notices.py", format = "sdist" },
-]
+testpaths = ["tests"]
+addopts = "-ra"
 
 [tool.ruff]
-# Match the codebase as written rather than reformatting 8.5k lines: the
-# surrounding style is 4-space, ~95-column, and consistent.
 line-length = 100
-target-version = "py39"
-extend-exclude = ["python/pyplotrs/_vendor", "vendor", "site"]
+target-version = "py311"
+extend-exclude = ["vendor", "site"]
 
 [tool.ruff.lint]
-# Chosen to catch defects, not to restyle a codebase that is already
-# internally consistent. The full `UP`/`RUF` sets flag ~190 quoted annotations
-# and unused tuple elements across this tree; that is churn with no defect
-# behind it, and a lint gate people route around is worse than none.
-select = [
-    "E", "W",   # pycodestyle
-    "F",        # pyflakes: undefined names, unused imports and variables
-    "I",        # import sorting
-    "B",        # bugbear: mutable defaults, loop-variable capture in closures
-    "RUF012",   # mutable class attribute that should be a ClassVar
-    "RUF034",   # `x if c else x` - both branches identical, so one is wrong
-    "UP032",    # `.format()` where an f-string reads better
-]
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
 ignore = [
-    # `l` is never used as a name here, and the rule fights the math code where
-    # single letters are the domain vocabulary (`w`, `h`, `r`, `c`).
-    "E741",
-    # Line length is enforced by `line-length` above; E501 double-reports it.
-    "E501",
-    # Semicolon-joined assignments (`h = len(Z); w = len(Z[0])`) are a
-    # deliberate local style for values that are only meaningful as a pair, and
-    # the rule catches no defect.
-    "E702",
-    # `int(round(v))` / `int(math.floor(v))` look redundant in pure Python and
-    # are not: `round` on a NumPy scalar returns a NumPy scalar, and these sites
-    # take values straight from user arrays.
-    "RUF046",
-    # `raise ... from` inside `except` - the raise sites here deliberately
-    # replace an internal error (KeyError on a lookup table) with a message
-    # about the caller's argument, and chaining the original back in shows the
-    # user an implementation detail.
-    "B904",
+    "E501",   # the formatter owns line length; long strings may stay long
+    "E741",   # single-letter names are the domain vocabulary in the math code
+    "RUF001", # the minus sign U+2212 is intentional in tick labels
+    "RUF002",
+    "RUF003",
 ]
 
-[tool.ruff.lint.per-file-ignores]
-# Tests reach into private helpers on purpose - that is what they are testing.
-"tests/*" = ["E402"]
-# Examples are read as prose as much as run, and re-import per snippet.
-"examples/*" = ["E402", "F401"]
-# The benchmark harness closes over the loop's figure and calls immediately.
-"benchmarks/*" = ["B023"]
+[tool.ruff.lint.isort]
+known-first-party = ["pyplotrs"]
+
+[tool.pyright]
+include = ["python/pyplotrs", "examples"]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"

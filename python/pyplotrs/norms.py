@@ -1,184 +1,161 @@
-"""Normalizations: map data values into ``[0, 1]`` for colormap lookup.
+"""Normalizations: how values map onto a colormap.
 
-A ``Normalize`` (and its subclasses) is the colorbar/colormap analog of a
-[`Scale`][pyplotrs.scales.Scale]: ``norm(value)`` returns the position in ``[0, 1]``
-a value occupies on the color axis, and ``norm.colorbar_ticks()`` locates labeled
-ticks for a colorbar. Used by [`Axes.scatter`][pyplotrs.axes.Axes.scatter] (``c=``) and
-[`Axes.imshow`][pyplotrs.axes.Axes.imshow] (``norm=``).
+``norm(v)`` gives a value's position in ``[0, 1]``. Pass one as ``norm=`` to
+colormapped marks, or the shorthand ``"log"``::
+
+    ax.imshow(z, norm="log")
+    ax.imshow(anomaly, cmap="RdBu_r", norm=pp.norms.TwoSlopeNorm(0))
 """
 
 from __future__ import annotations
 
+import copy
+import itertools
 import math
-from array import array
-from typing import Sequence
+from collections.abc import Sequence
 
-from . import _pyplotrs_core as _core
-from . import scales as _scales
-from . import ticker as _ticker
-from ._util import _auto_repr
+from . import _core
+from .colormaps import Colormap
+from .scales import Log, Tick, nice_ticks
+from .ticker import plain
 
-#: The public surface of this module. Without it, `from ... import *`
-#: and every editor's completion list also offer `Sequence`, `math` and
-#: `annotations` - names that are imported here, not exported from here.
-__all__ = [
-    "BoundaryNorm",
-    "LogNorm",
-    "Normalize",
-    "TwoSlopeNorm",
-    "get",
-]
+__all__ = ["BoundaryNorm", "LogNorm", "Norm", "TwoSlopeNorm", "get"]
 
 
+class Norm:
+    """Linear between ``vmin`` and ``vmax``. Limits left as ``None`` are taken
+    from the data."""
 
-def _as_f64(values) -> "array":
-    """Coerce to a contiguous ``array("d")`` so the Rust reductions can read it
-    as a buffer. Mirrors ``figure._to_f64``; kept local to avoid a circular
-    import between this module and ``figure``."""
-    if type(values) is array and values.typecode == "d":
-        return values
-    try:
-        return array("d", values)
-    except (TypeError, ValueError):
-        return array("d", [float(v) for v in values])
-
-_Tick = tuple[float, str]
-
-
-class Normalize:
-    """Linear normalization between ``vmin`` and ``vmax`` (clamped to ``[0, 1]``).
-    ``vmin``/``vmax`` left ``None`` are filled from the data by ``autoscale``."""
-
-    def __repr__(self) -> str:
-        return _auto_repr(self)
-
-
-    #: Rust ``apply_scale`` selector, mirroring [`pyplotrs.scales.Scale.code`][pyplotrs.scales.Scale.code].
-    #: When set, bulk color mapping runs in Rust via ``_core.map_colors``;
-    #: ``None`` means this norm has no Rust equivalent and each value must go
-    #: through ``__call__`` in Python. Must name a branch ``apply_scale`` handles.
+    #: The matching transform in the Rust engine; None for a piecewise norm,
+    #: which is folded into the color table instead.
     code: str | None = "linear"
 
     def __init__(self, vmin: float | None = None, vmax: float | None = None) -> None:
         self.vmin = None if vmin is None else float(vmin)
         self.vmax = None if vmax is None else float(vmax)
 
-    def autoscale(self, values: Sequence[float]) -> "Normalize":
-        """Fill any unset ``vmin``/``vmax`` from the finite members of ``values``."""
+    def autoscale(self, values) -> Norm:
+        """A copy with any missing limit taken from ``values``."""
+        out = copy.copy(self)
+        if out.vmin is None or out.vmax is None:
+            lo, hi = _core.finite_range(values, self.code or "linear") or self._empty
+            out.vmin = lo if out.vmin is None else out.vmin
+            out.vmax = hi if out.vmax is None else out.vmax
+        out._fix_singular()
+        return out
+
+    _empty = (0.0, 1.0)
+
+    def _fix_singular(self) -> None:
+        if self.vmin == self.vmax:
+            self.vmax = self.limits[0] + 1.0
+
+    @property
+    def limits(self) -> tuple[float, float]:
         if self.vmin is None or self.vmax is None:
-            lo, hi = _core.data_range(_as_f64(values)) or (0.0, 1.0)
-            if self.vmin is None:
-                self.vmin = lo
-            if self.vmax is None:
-                self.vmax = hi
-        if self.vmin == self.vmax:  # avoid a zero-width range
-            self.vmax = self.vmin + 1.0
-        return self
+            raise ValueError("this norm has no limits yet; call autoscale(values) first")
+        return self.vmin, self.vmax
 
-    def __call__(self, value: float) -> float:
-        span = (self.vmax - self.vmin) or 1.0
-        return min(1.0, max(0.0, (value - self.vmin) / span))
+    def __call__(self, v: float) -> float:
+        lo, hi = self.limits
+        return min(1.0, max(0.0, (v - lo) / ((hi - lo) or 1.0)))
 
-    def colorbar_ticks(self, max_ticks: int = 6) -> list[_Tick]:
-        return _scales.nice_ticks(self.vmin, self.vmax, max_ticks)
+    def ticks(self, max_ticks: int = 6, minus: bool = True) -> list[Tick]:
+        return nice_ticks(*self.limits, max_ticks, minus)
+
+    def lut(self, cmap: Colormap, alpha: float = 1.0) -> tuple[bytes, str]:
+        """``(lut, code)`` for the Rust colormapper."""
+        if self.code is not None:
+            return cmap.lut(alpha), self.code
+        lo, hi = self.limits
+        a = min(255, max(0, round(alpha * 255)))
+        out = bytearray()
+        for i in range(256):
+            r, g, b, _ = cmap(self(lo + (hi - lo) * i / 255))
+            out += bytes((r, g, b, a))
+        return bytes(out), "linear"
+
+    def __repr__(self) -> str:
+        args = ", ".join(f"{k}={v!r}" for k, v in vars(self).items())
+        return f"{type(self).__name__}({args})"
 
 
-class LogNorm(Normalize):
-    """Logarithmic normalization (positive data). Colorbar ticks fall on decades."""
+class LogNorm(Norm):
+    """Logarithmic, for positive data."""
 
     code = "log"
+    _empty = (1.0, 10.0)
 
-    def autoscale(self, values: Sequence[float]) -> "LogNorm":
-        if self.vmin is None or self.vmax is None:
-            lo, hi = _core.positive_range(_as_f64(values)) or (1.0, 10.0)
-            if self.vmin is None:
-                self.vmin = lo
-            if self.vmax is None:
-                self.vmax = hi
+    def _fix_singular(self) -> None:
         if self.vmin == self.vmax:
-            self.vmax = self.vmin * 10.0
-        return self
+            self.vmax = self.limits[0] * 10.0
 
-    def __call__(self, value: float) -> float:
-        if value <= 0.0:
+    def __call__(self, v: float) -> float:
+        lo, hi = self.limits
+        if v <= 0:
             return 0.0
-        lo, hi = math.log10(self.vmin), math.log10(self.vmax)
-        span = (hi - lo) or 1.0
-        return min(1.0, max(0.0, (math.log10(value) - lo) / span))
+        return min(1.0, max(0.0, math.log10(v / lo) / (math.log10(hi / lo) or 1.0)))
 
-    def colorbar_ticks(self, max_ticks: int = 6) -> list[_Tick]:
-        return _scales.LogScale().ticks(self.vmin, self.vmax, max_ticks)
+    def ticks(self, max_ticks: int = 6, minus: bool = True) -> list[Tick]:
+        return Log().ticks(*self.limits, max_ticks, minus)
 
 
-class TwoSlopeNorm(Normalize):
-    """Diverging normalization: ``vcenter`` maps to ``0.5`` with independent
-    slopes on each side (for asymmetric data around a meaningful midpoint)."""
+class TwoSlopeNorm(Norm):
+    """Diverging: ``vcenter`` maps to the middle of the colormap and each side
+    is scaled on its own."""
 
-    code = None  # piecewise: no single Rust scale transform matches it
+    code = None
 
-    def __init__(self, vcenter: float, vmin: float | None = None,
-                 vmax: float | None = None) -> None:
+    def __init__(
+        self, vcenter: float = 0.0, vmin: float | None = None, vmax: float | None = None
+    ) -> None:
         super().__init__(vmin, vmax)
         self.vcenter = float(vcenter)
 
-    def autoscale(self, values: Sequence[float]) -> "TwoSlopeNorm":
-        super().autoscale(values)
-        # Keep the center strictly inside the range.
-        if self.vmin >= self.vcenter:
-            self.vmin = self.vcenter - 1.0
-        if self.vmax <= self.vcenter:
-            self.vmax = self.vcenter + 1.0
-        return self
+    def _fix_singular(self) -> None:
+        lo, hi = self.limits
+        c = self.vcenter
+        self.vmin, self.vmax = (lo if lo < c else c - 1.0), (hi if hi > c else c + 1.0)
 
-    def __call__(self, value: float) -> float:
-        if value < self.vcenter:
-            return max(0.0, 0.5 * (value - self.vmin) / (self.vcenter - self.vmin))
-        return min(1.0, 0.5 + 0.5 * (value - self.vcenter) / (self.vmax - self.vcenter))
+    def __call__(self, v: float) -> float:
+        lo, hi = self.limits
+        c = self.vcenter
+        if v < c:
+            return max(0.0, 0.5 * (v - lo) / (c - lo))
+        return min(1.0, 0.5 + 0.5 * (v - c) / (hi - c))
 
 
-class BoundaryNorm(Normalize):
-    """Map values into discrete bins defined by ``boundaries`` (monotone), each
-    bin getting an evenly-spaced color position (for stepped colorbars)."""
+class BoundaryNorm(Norm):
+    """Discrete bins between ``boundaries``, one color each."""
 
-    code = None  # discrete binning: no Rust scale transform matches it
+    code = None
 
     def __init__(self, boundaries: Sequence[float]) -> None:
-        bnd = [float(b) for b in boundaries]
-        super().__init__(bnd[0], bnd[-1])
-        self.boundaries = bnd
-        self.nbins = len(bnd) - 1
+        b = tuple(float(v) for v in boundaries)
+        if len(b) < 2 or any(y <= x for x, y in itertools.pairwise(b)):
+            raise ValueError("boundaries must be at least two increasing values")
+        super().__init__(b[0], b[-1])
+        self.boundaries = b
 
-    def autoscale(self, values: Sequence[float]) -> "BoundaryNorm":
-        return self  # boundaries are explicit
+    def __call__(self, v: float) -> float:
+        n = len(self.boundaries) - 1
+        i = sum(1 for x in self.boundaries[1:-1] if v >= x)
+        return (i + 0.5) / n
 
-    def __call__(self, value: float) -> float:
-        # Index of the bin containing `value`, mapped to the bin's center in [0,1].
-        idx = 0
-        for i in range(self.nbins):
-            if value >= self.boundaries[i]:
-                idx = i
-        return min(1.0, max(0.0, (idx + 0.5) / self.nbins))
-
-    def colorbar_ticks(self, max_ticks: int = 6) -> list[_Tick]:
-        return [(b, _ticker.fix_minus(f"{b:g}") if b != int(b) else _scales._fmt_plain(b))
-                for b in self.boundaries]
+    def ticks(self, max_ticks: int = 6, minus: bool = True) -> list[Tick]:
+        return [(v, plain(v, minus)) for v in self.boundaries]
 
 
-def get(norm, vmin: float | None, vmax: float | None) -> Normalize:
-    """Resolve a ``norm`` argument (a ``Normalize``, the string ``"log"``,
-    or ``None``) plus optional ``vmin``/``vmax`` into a ``Normalize``."""
-    if norm is None:
-        return Normalize(vmin, vmax)
-    if isinstance(norm, Normalize):
-        if vmin is not None and norm.vmin is None:
-            norm.vmin = float(vmin)
-        if vmax is not None and norm.vmax is None:
-            norm.vmax = float(vmax)
-        return norm
-    if isinstance(norm, str):
-        if norm == "log":
-            return LogNorm(vmin, vmax)
-        if norm == "linear":
-            return Normalize(vmin, vmax)
-        raise ValueError(f"unknown norm {norm!r}; expected 'linear', 'log', or a Normalize")
-    raise TypeError(f"expected a Normalize, 'log'/'linear', or None; got {type(norm).__name__}")
+def get(norm: Norm | str | None, vmin: float | None = None, vmax: float | None = None) -> Norm:
+    """A norm from an instance, ``"linear"``, ``"log"`` or ``None``;
+    ``vmin``/``vmax`` fill limits the norm leaves unset."""
+    if norm is None or norm == "linear":
+        return Norm(vmin, vmax)
+    if norm == "log":
+        return LogNorm(vmin, vmax)
+    if isinstance(norm, Norm):
+        out = copy.copy(norm)
+        out.vmin = out.vmin if out.vmin is not None else (None if vmin is None else float(vmin))
+        out.vmax = out.vmax if out.vmax is not None else (None if vmax is None else float(vmax))
+        return out
+    raise ValueError(f"unknown norm {norm!r}; expected 'linear', 'log' or a Norm")

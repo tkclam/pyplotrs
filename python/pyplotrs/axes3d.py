@@ -1,781 +1,789 @@
-"""``Axes3D``: 3D marks projected to 2D by an orthographic camera.
+"""3D axes: marks projected to 2D by an orthographic camera.
 
-The camera and the per-vertex projection live in the ``pyplotrs-3d`` crate.
-This module builds primitives, sorts them back-to-front, and emits ordinary 2D
-paths, so no backend ever sees anything three-dimensional.
+    fig, ax = pp.subplots(projection="3d")
+    ax.surface(X, Y, Z, cmap="viridis")
+    ax.set(xlabel="x", ylabel="y", zlabel="z", elev=25, azim=-50)
+    fig.save("surface.html")   # interactive: drag to rotate
+
+Everything is depth-sorted and drawn as ordinary 2D vector shapes, so PDF and
+SVG output stays editable.
 """
 
 from __future__ import annotations
 
+import itertools
 import math
+from array import array
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from typing import Any
 
-from . import _pyplotrs_core as _core
+from . import _core, _legend
+from . import _data as data
 from . import colormaps as _colormaps
-from . import scales as _scales
-from . import threed as _threed
-from ._const import (
-    _CUBE_FILL,
-    _GRID_3D,
-    _PANE_EDGE,
-    _PANE_FILL,
-    _TITLE_GAP,
-)
-from ._draw import (
-    _check_marker,
-    _dash_for,
-    _draw_legend_box,
-    _draw_marker,
-    _font,
-    _measure_legend,
-    _text,
-    _th,
-    _tw,
-)
-from ._util import (
-    _as_seq,
-    _auto_levels,
-    _bilinear_grid,
-    _darker,
-    _data_range,
-    _delaunay,
-    _rectangular,
-    _to_f64,
-    _with_alpha,
-)
-from .axes import _AxesBase
-from .theme import Theme
+from ._canvas import Canvas, check_linestyle, check_marker, dash
+from ._frame import TITLE_GAP, Margins
+from .artists import Artist, Key, View
+from .axes import AxesBase, Cmap, Color
+from .colors import RGBA, with_alpha
+from .scales import nice_ticks
+from .text import Label, as_label
+
+__all__ = ["Axes3D"]
+
+Vec3 = tuple[float, float, float]
+PANE_FILL: RGBA = (242, 242, 242, 255)
+PANE_EDGE: RGBA = (170, 170, 170, 255)
+GRID: RGBA = (214, 214, 214, 255)
+CUBE_FILL = 0.86  # fraction of the plot area the projected cube fills
 
 
-def _grid_xyz(X, Y, Z):
-    """Normalize surface inputs to 2D grids ``(gx, gy, gz, nrows, ncols)``.
+class Camera:
+    """Orthographic camera looking at the origin from ``(elev, azim)`` degrees
+    (matplotlib's convention). ``view`` gives screen x, y and depth (larger is
+    nearer)."""
 
-    ``Z`` is a 2D ``nrows x ncols`` grid. ``X``/``Y`` may each be 2D grids of
-    the same shape, or 1D (``X`` length ncols, ``Y`` length nrows), in which
-    case they are broadcast.
-    """
-    gz = _rectangular([[float(v) for v in row] for row in Z])
-    nr = len(gz)
-    nc = len(gz[0]) if gz else 0
+    def __init__(self, elev: float, azim: float) -> None:
+        e, a = math.radians(elev), math.radians(azim)
+        d = (math.cos(e) * math.cos(a), math.cos(e) * math.sin(a), math.sin(e))
+        right = (-d[1], d[0], 0.0)  # (0, 0, 1) x d
+        n = math.hypot(*right)
+        right = (right[0] / n, right[1] / n, 0.0) if n > 1e-12 else (1.0, 0.0, 0.0)
+        up = (
+            d[1] * right[2] - d[2] * right[1],
+            d[2] * right[0] - d[0] * right[2],
+            d[0] * right[1] - d[1] * right[0],
+        )
+        self.dir, self.right, self.up = d, right, up
 
-    def is_2d(a) -> bool:
-        return len(a) > 0 and isinstance(a[0], (list, tuple))
+    def view(self, p: Vec3) -> Vec3:
+        return (
+            sum(a * b for a, b in zip(p, self.right, strict=True)),
+            sum(a * b for a, b in zip(p, self.up, strict=True)),
+            sum(a * b for a, b in zip(p, self.dir, strict=True)),
+        )
 
-    if is_2d(X):
-        gx = [[float(v) for v in row] for row in X]
+
+@dataclass(eq=False)
+class Mark3D(Artist):
+    """A 3D mark: points in data space and how to draw them."""
+
+    kind: str = "scatter"
+    xs: Any = field(default=None, repr=False)
+    ys: Any = field(default=None, repr=False)
+    zs: Any = field(default=None, repr=False)
+    color: RGBA = (0, 0, 0, 255)
+    size: float = 5.0
+    marker: str | None = "o"
+    edgecolor: RGBA | None = None
+    linewidth: float = 1.2
+    linestyle: str = "solid"
+    shape: tuple[int, int] = (0, 0)  # grid rows, cols for surfaces/wireframes
+    cmap: _colormaps.Colormap | None = None
+    alpha: float = 1.0
+    extra: Any = field(default=None, repr=False)  # bar sizes / arrow vectors
+
+    def legend_key(self) -> Key:
+        if self.kind == "scatter":
+            return Key(
+                "marker",
+                self.color,
+                marker=self.marker,
+                markersize=self.size,
+                edgecolor=self.edgecolor,
+            )
+        if self.kind in ("surface", "bar"):
+            return Key("patch", self.color)
+        return Key("line", self.color, self.linewidth, self.linestyle)
+
+    def draw(self, canvas: Canvas, view: View) -> None:  # drawn by Axes3D
+        pass
+
+
+@dataclass
+class _Plan:
+    margins: Margins
+
+
+def _grid3(X: Any, Y: Any, Z: Any) -> tuple[Any, Any, Any, int, int]:
+    """Surface inputs as flat row-major x, y, z and the grid shape. ``X``/``Y``
+    may be 2D grids or 1D coordinates (``len(X) == cols``, ``len(Y) == rows``)."""
+    zs, nc, nr = data.grid(Z)
+    if data.is_2d(X):
+        xs, *_ = data.grid(X)
     else:
-        col = [float(v) for v in X]
-        gx = [list(col) for _ in range(nr)]
-    if is_2d(Y):
-        gy = [[float(v) for v in row] for row in Y]
+        col = data.f64(X)
+        xs = array("d", list(col) * nr)
+    if data.is_2d(Y):
+        ys, *_ = data.grid(Y)
     else:
-        rowv = [float(v) for v in Y]
-        gy = [[rowv[i]] * nc for i in range(nr)]
-    return gx, gy, gz, nr, nc
+        row = data.f64(Y)
+        ys = array("d", [row[r] for r in range(nr) for _ in range(nc)])
+    if not (len(xs) == len(ys) == len(zs) == nr * nc):
+        raise ValueError("X, Y and Z must describe the same grid")
+    return xs, ys, zs, nr, nc
 
 
-class Axes3D(_AxesBase):
-    """A 3D axes. Marks (scatter/plot/surface) are projected to 2D paths by an
-    orthographic camera and depth-sorted, then drawn through the normal IR."""
+class _Batcher:
+    """Draws depth-sorted primitives, merging runs with the same style into one
+    engine call."""
 
-    # A 3D cell is filled by the projection, so there is no reliably clear
-    # corner to search for; pin one instead.
-    _LEGEND_DEFAULT_LOC = "upper right"
-    _MARKS_ATTR = "_marks3"
+    def __init__(self, canvas: Canvas) -> None:
+        self.canvas = canvas
+        self.key: Any = None
+        self.buf: list[Any] = []
 
-    def __init__(self, theme: Theme | None = None) -> None:
-        self._init_common(theme)
-        self._marks3: list[dict] = []
-        self._xlabel: str | None = None
-        self._ylabel: str | None = None
-        self._zlabel: str | None = None
-        self._xlim: tuple[float, float] | None = None
-        self._ylim: tuple[float, float] | None = None
-        self._zlim: tuple[float, float] | None = None
-        self._elev = 30.0
-        self._azim = -60.0
+    def add(self, key: tuple, item: Any) -> None:
+        if key != self.key:
+            self.flush()
+            self.key = key
+        self.buf.append(item)
 
-    # -- public API ---------------------------------------------------------
+    def flush(self) -> None:
+        if not self.buf:
+            return
+        kind, *style = self.key
+        c, buf = self.canvas, self.buf
+        if kind == "poly":
+            edge, width = style
+            xs = [v for item in buf for v in item[0]]
+            ys = [v for item in buf for v in item[1]]
+            fills = b"".join(bytes(item[2]) for item in buf)
+            c.polygons(
+                xs, ys, [len(item[0]) for item in buf], fills=fills, stroke=edge, width=width
+            )
+        elif kind == "seg":
+            color, width, ls = style
+            x0, y0, x1, y1 = (list(col) for col in zip(*buf, strict=True))
+            c.segments(x0, y0, x1, y1, color=color, width=width, dash=dash(ls), cap="round")
+        else:
+            marker, size, fill, edge = style
+            c.markers(
+                [p[0] for p in buf],
+                [p[1] for p in buf],
+                marker=marker,
+                size=size,
+                fill=fill,
+                edge=edge,
+            )
+        self.buf = []
 
-    def scatter(self, xs, ys, zs, *, label: str | None = None, color=None,
-                markersize: float | None = None, alpha: float = 1.0,
-                marker: str = "o", edgecolor=None, size: float | None = None) -> "Axes3D":
-        """Scatter 3D points at ``(xs, ys, zs)``.
 
-        ``markersize`` is a diameter in points; ``size`` is the matplotlib-style
-        area in pt² (see ``Axes.scatter``)."""
-        _check_marker(marker)
-        self._marks3.append({
-            "kind": "scatter",
-            "xs": [float(x) for x in xs],
-            "ys": [float(y) for y in ys],
-            "zs": [float(z) for z in zs],
-            "label": label,
-            "color": self._mark_color(color, alpha),
-            "markersize": self._marker_diameter(markersize, size),
-            "marker": marker,
-            "edgecolor": None if edgecolor is None else self._theme.resolve(edgecolor),
-        })
-        return self
+def _darker(c: RGBA, k: float = 0.65) -> RGBA:
+    return (round(c[0] * k), round(c[1] * k), round(c[2] * k), c[3])
 
-    def plot(self, xs, ys, zs, *, label: str | None = None, color=None,
-             linewidth: float = 1.5, alpha: float = 1.0,
-             linestyle: str = "solid", depthsort: bool = True) -> "Axes3D":
-        """Draw a 3D polyline through ``(xs, ys, zs)``.
 
-        ``depthsort`` controls how the line takes part in the painter's-order
-        pass. With it on (the default) each **segment** is sorted separately,
-        so the line occludes itself and interleaves correctly with surfaces and
-        points it passes through - which is what makes a knotted or spiraling
-        curve read as 3D at all. That costs one stroked path per segment, and
-        on a long line the rasterizer notices.
+class Axes3D(AxesBase):
+    """A 3D axes."""
 
-        With it off the whole polyline is one path at a single depth: much
-        faster on dense lines, and what matplotlib's mplot3d always does, at
-        the cost of a line that cannot pass behind anything - including itself.
-        """
-        self._marks3.append({
-            "kind": "line",
-            "xs": [float(x) for x in xs],
-            "ys": [float(y) for y in ys],
-            "zs": [float(z) for z in zs],
-            "label": label,
-            "color": self._mark_color(color, alpha),
-            "linewidth": float(linewidth),
-            "linestyle": linestyle,
-            "depthsort": bool(depthsort),
-        })
-        return self
+    is_3d = True
 
-    def surface(self, X, Y, Z, *, cmap="viridis", alpha: float = 1.0,
-                label: str | None = None) -> "Axes3D":
-        """Draw a colormapped surface over the grid ``(X, Y, Z)``."""
-        gx, gy, gz, nr, nc = _grid_xyz(X, Y, Z)
-        zflat = [v for row in gz for v in row]
-        cm = _colormaps.get_cmap(cmap)
-        self._marks3.append({
-            "kind": "surface",
-            "gx": gx,
-            "gy": gy,
-            "gz": gz,
-            "nr": nr,
-            "nc": nc,
-            "xflat": [v for row in gx for v in row],
-            "yflat": [v for row in gy for v in row],
-            "zflat": zflat,
-            "zmin": min(zflat) if zflat else 0.0,
-            "zmax": max(zflat) if zflat else 1.0,
-            "cmap": cm,
-            "alpha": float(alpha),
-            "label": label,
-            # Legend fallback: the colormap's midpoint stands for the surface.
-            "color": _with_alpha(cm(0.5), alpha),
-        })
-        return self
+    def __init__(self, theme: Any, figure: Any = None) -> None:
+        super().__init__(theme, figure)
+        self.xlabel: Label | None = None
+        self.ylabel: Label | None = None
+        self.zlabel: Label | None = None
+        self._lims: list[tuple[float, float] | None] = [None, None, None]
+        self.elev, self.azim = 30.0, -60.0
 
-    def bar3d(self, x, y, z, dx, dy, dz, *, color=None, alpha: float = 1.0,
-              label: str | None = None) -> "Axes3D":
-        """Draw 3D bars (boxes): base corners ``(x, y, z)`` with sizes
-        ``(dx, dy, dz)`` (each a scalar or per-bar array)."""
-        xs = [float(v) for v in x]
+    def _mark(self, label: Any, zorder: float, **kw: Any) -> Mark3D:
+        for k in ("xs", "ys", "zs"):
+            kw[k] = data.f64(kw[k])
+        data.same_length(kw["kind"], x=kw["xs"], y=kw["ys"], z=kw["zs"])
+        return self._add(Mark3D(**kw), label, zorder)
+
+    def scatter(
+        self,
+        x: Any,
+        y: Any,
+        z: Any,
+        *,
+        color: Color = None,
+        size: float | None = None,
+        marker: str = "o",
+        edgecolor: Color = None,
+        alpha: float = 1.0,
+        label: Label | None = None,
+        zorder: float = 0.0,
+    ) -> Mark3D:
+        """Markers at 3D points."""
+        return self._mark(
+            label,
+            zorder,
+            kind="scatter",
+            xs=x,
+            ys=y,
+            zs=z,
+            color=self._color(color, alpha),
+            size=self.theme.marker_size if size is None else float(size),
+            marker=check_marker(marker) or "o",
+            edgecolor=None if edgecolor is None else self.theme.color(edgecolor),
+        )
+
+    def line(
+        self,
+        x: Any,
+        y: Any,
+        z: Any,
+        *,
+        color: Color = None,
+        linewidth: float | None = None,
+        linestyle: str = "solid",
+        alpha: float = 1.0,
+        label: Label | None = None,
+        zorder: float = 0.0,
+    ) -> Mark3D:
+        """A line through 3D points. Each segment is depth-sorted, so the line
+        can pass behind other marks and itself."""
+        return self._mark(
+            label,
+            zorder,
+            kind="line",
+            xs=x,
+            ys=y,
+            zs=z,
+            color=self._color(color, alpha),
+            linewidth=self.theme.line_width if linewidth is None else float(linewidth),
+            linestyle=check_linestyle(linestyle),
+        )
+
+    def surface(
+        self,
+        X: Any,
+        Y: Any,
+        Z: Any,
+        *,
+        cmap: Cmap = "viridis",
+        color: Color = None,
+        alpha: float = 1.0,
+        label: Label | None = None,
+        zorder: float = 0.0,
+    ) -> Mark3D:
+        """A surface over a grid, colored by height through ``cmap`` (or one ``color``)."""
+        xs, ys, zs, nr, nc = _grid3(X, Y, Z)
+        cm = None if color is not None else _colormaps.get(cmap)
+        col = self.theme.color(color) if color is not None else cm(0.5)  # type: ignore[misc]
+        return self._add(
+            Mark3D(
+                kind="surface",
+                xs=xs,
+                ys=ys,
+                zs=zs,
+                color=with_alpha(col, alpha),
+                shape=(nr, nc),
+                cmap=cm,
+                alpha=alpha,
+            ),
+            label,
+            zorder,
+        )
+
+    def wireframe(
+        self,
+        X: Any,
+        Y: Any,
+        Z: Any,
+        *,
+        color: Color = None,
+        linewidth: float = 0.8,
+        alpha: float = 1.0,
+        label: Label | None = None,
+        zorder: float = 0.0,
+    ) -> Mark3D:
+        """A grid drawn as lines along its rows and columns."""
+        xs, ys, zs, nr, nc = _grid3(X, Y, Z)
+        return self._add(
+            Mark3D(
+                kind="wireframe",
+                xs=xs,
+                ys=ys,
+                zs=zs,
+                color=self._color(color, alpha),
+                linewidth=float(linewidth),
+                shape=(nr, nc),
+            ),
+            label,
+            zorder,
+        )
+
+    def bar3d(
+        self,
+        x: Any,
+        y: Any,
+        z: Any,
+        dx: Any,
+        dy: Any,
+        dz: Any,
+        *,
+        color: Color = None,
+        alpha: float = 1.0,
+        label: Label | None = None,
+        zorder: float = 0.0,
+    ) -> Mark3D:
+        """Boxes with a corner at ``(x, y, z)`` and size ``(dx, dy, dz)``."""
+        xs = data.f64(x)
         n = len(xs)
-        self._marks3.append({
-            "kind": "bar3d", "xs": xs, "ys": [float(v) for v in y],
-            "zs": [float(v) for v in z], "dx": _as_seq(dx, n), "dy": _as_seq(dy, n),
-            "dz": _as_seq(dz, n), "color": self._mark_color(color, alpha), "label": label,
-        })
-        return self
+        sizes = (data.full(dx, n), data.full(dy, n), data.full(dz, n))
+        return self._mark(
+            label,
+            zorder,
+            kind="bar",
+            xs=xs,
+            ys=y,
+            zs=z,
+            color=self._color(color, alpha),
+            extra=sizes,
+        )
 
-    def plot_wireframe(self, X, Y, Z, *, color=None, linewidth: float = 0.8,
-                       alpha: float = 1.0, label: str | None = None) -> "Axes3D":
-        """Draw the grid ``(X, Y, Z)`` as a wireframe (row + column lines)."""
-        gx, gy, gz, nr, nc = _grid_xyz(X, Y, Z)
-        self._marks3.append({
-            "kind": "wireframe", "gx": gx, "gy": gy, "gz": gz, "nr": nr, "nc": nc,
-            "xflat": [v for row in gx for v in row],
-            "yflat": [v for row in gy for v in row],
-            "zflat": [v for row in gz for v in row],
-            "color": self._mark_color(color, alpha), "linewidth": float(linewidth),
-            "label": label,
-        })
-        return self
+    def quiver(
+        self,
+        x: Any,
+        y: Any,
+        z: Any,
+        u: Any,
+        v: Any,
+        w: Any,
+        *,
+        length: float = 1.0,
+        color: Color = None,
+        linewidth: float = 1.2,
+        label: Label | None = None,
+        zorder: float = 0.0,
+    ) -> Mark3D:
+        """Arrows from each point along ``(u, v, w) * length``."""
+        xs = data.f64(x)
+        n = len(xs)
+        vec = tuple(data.f64([length * s for s in data.full(c, n)]) for c in (u, v, w))
+        return self._mark(
+            label,
+            zorder,
+            kind="quiver",
+            xs=xs,
+            ys=y,
+            zs=z,
+            color=self._color(color),
+            linewidth=float(linewidth),
+            extra=vec,
+        )
 
-    def contour3d(self, X, Y, Z, *, levels=None, cmap="viridis",
-                  linewidth: float = 1.5, alpha: float = 1.0,
-                  label: str | None = None) -> "Axes3D":
-        """Draw contour lines of the grid ``(X, Y, Z)`` at their z-heights
-        (marching squares in Rust); each level colored from ``cmap``."""
-        gx, gy, gz, nr, nc = _grid_xyz(X, Y, Z)
-        flat = [v for row in gz for v in row]
-        lvls = _auto_levels(flat, levels)
-        lines = _core.contour_lines(flat, nc, nr, lvls)
-        cm = _colormaps.get_cmap(cmap)
-        lo, hi = (min(lvls), max(lvls)) if lvls else (0.0, 1.0)
-        span = (hi - lo) or 1.0
-        colors = [_with_alpha(cm((lv - lo) / span), alpha) for lv in lvls]
-        self._marks3.append({
-            "kind": "contour3d", "lines": lines, "gx": gx, "gy": gy, "levels": lvls,
-            "colors": colors, "linewidth": float(linewidth), "label": label,
-            # Legend fallback: the middle level's color stands for the line set.
-            "color": colors[len(colors) // 2] if colors else _with_alpha((0, 0, 0, 255), alpha),
-            "xflat": [v for row in gx for v in row],
-            "yflat": [v for row in gy for v in row], "zflat": flat,
-        })
-        return self
-
-    def plot_trisurf(self, x, y, z, *, triangles=None, cmap="viridis",
-                     alpha: float = 1.0, label: str | None = None) -> "Axes3D":
-        """Surface over scattered points ``(x, y, z)``: Delaunay-triangulate the
-        ``(x, y)`` plane (unless ``triangles`` index-triples are given) and shade
-        each facet by mean z."""
-        xs = [float(v) for v in x]
-        ys = [float(v) for v in y]
-        zs = [float(v) for v in z]
-        tris = triangles if triangles is not None else _delaunay(list(zip(xs, ys)))
-        cm = _colormaps.get_cmap(cmap)
-        self._marks3.append({
-            "kind": "trisurf", "xs": xs, "ys": ys, "zs": zs,
-            "tris": [tuple(t) for t in tris], "cmap": cm, "alpha": float(alpha),
-            "zmin": min(zs) if zs else 0.0, "zmax": max(zs) if zs else 1.0,
-            "xflat": xs, "yflat": ys, "zflat": zs, "label": label,
-            # Legend fallback: the colormap's midpoint stands for the surface.
-            "color": _with_alpha(cm(0.5), alpha),
-        })
-        return self
-
-    def quiver3d(self, x, y, z, u, v, w, *, length: float = 1.0, color=None,
-                 linewidth: float = 1.5, alpha: float = 1.0,
-                 label: str | None = None) -> "Axes3D":
-        """Draw 3D arrows ``(u, v, w)`` rooted at ``(x, y, z)``, scaled by
-        ``length``."""
-        self._marks3.append({
-            "kind": "quiver3d", "xs": [float(v) for v in x], "ys": [float(v) for v in y],
-            "zs": [float(v) for v in z], "us": [float(v) for v in u],
-            "vs": [float(v) for v in v], "ws": [float(v) for v in w],
-            "length": float(length), "color": self._mark_color(color, alpha),
-            "linewidth": float(linewidth), "label": label,
-        })
-        # Autoscale should include arrow tips.
-        self._marks3[-1]["xflat"] = [px + length * uu for px, uu in
-                                     zip(self._marks3[-1]["xs"], self._marks3[-1]["us"])] + self._marks3[-1]["xs"]
-        self._marks3[-1]["yflat"] = [py + length * vv for py, vv in
-                                     zip(self._marks3[-1]["ys"], self._marks3[-1]["vs"])] + self._marks3[-1]["ys"]
-        self._marks3[-1]["zflat"] = [pz + length * ww for pz, ww in
-                                     zip(self._marks3[-1]["zs"], self._marks3[-1]["ws"])] + self._marks3[-1]["zs"]
-        return self
-
-    def voxels(self, filled, *, color=None, edgecolor=None, alpha: float = 1.0,
-               label: str | None = None) -> "Axes3D":
-        """Draw a 3D boolean occupancy grid ``filled[i][j][k]`` as unit cubes."""
-        color = self._mark_color(color, alpha)
-        cells = []
-        for i, plane in enumerate(filled):
-            for j, row in enumerate(plane):
-                for k, on in enumerate(row):
-                    if on:
-                        cells.append((i, j, k))
-        self._marks3.append({
-            "kind": "voxels", "cells": cells, "color": color, "label": label,
-            "edgecolor": None if edgecolor is None else self._theme.resolve(edgecolor),
-            "xflat": [0.0] + [c[0] + 1 for c in cells],
-            "yflat": [0.0] + [c[1] + 1 for c in cells],
-            "zflat": [0.0] + [c[2] + 1 for c in cells],
-        })
-        return self
-
-    # matplotlib-style aliases.
-    scatter3d = scatter
-    plot3d = plot
-
-    def set(self, *, title=None, xlabel=None, ylabel=None, zlabel=None,
-            xlim=None, ylim=None, zlim=None, elev=None, azim=None) -> "Axes3D":
+    def set(
+        self,
+        *,
+        title: Label | None = None,
+        xlabel: Label | None = None,
+        ylabel: Label | None = None,
+        zlabel: Label | None = None,
+        xlim: tuple[float, float] | None = None,
+        ylim: tuple[float, float] | None = None,
+        zlim: tuple[float, float] | None = None,
+        elev: float | None = None,
+        azim: float | None = None,
+    ) -> Axes3D:
+        """Labels, limits and the camera angle (``elev``/``azim`` in degrees)."""
         if title is not None:
-            self._title = title
-        if xlabel is not None:
-            self._xlabel = xlabel
-        if ylabel is not None:
-            self._ylabel = ylabel
-        if zlabel is not None:
-            self._zlabel = zlabel
-        if xlim is not None:
-            self._xlim = (float(xlim[0]), float(xlim[1]))
-        if ylim is not None:
-            self._ylim = (float(ylim[0]), float(ylim[1]))
-        if zlim is not None:
-            self._zlim = (float(zlim[0]), float(zlim[1]))
+            self.title = as_label(title)
+        for attr, value in (("xlabel", xlabel), ("ylabel", ylabel), ("zlabel", zlabel)):
+            if value is not None:
+                setattr(self, attr, as_label(value))
+        for i, lim in enumerate((xlim, ylim, zlim)):
+            if lim is not None:
+                self._lims[i] = (float(lim[0]), float(lim[1]))
         if elev is not None:
-            self._elev = float(elev)
+            self.elev = float(elev)
         if azim is not None:
-            self._azim = float(azim)
+            self.azim = float(azim)
         return self
 
-    # -- reading an axes back (mirrors Axes; see the note there) -------------
+    def limits(self) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
+        """The ``(x, y, z)`` ranges shown."""
+        spans: list[tuple[float, float] | None] = [None, None, None]
+        for m in self._artists:
+            assert isinstance(m, Mark3D)
+            cols = [m.xs, m.ys, m.zs]
+            if m.extra is not None:
+                cols = [
+                    data.f64([a + b for a, b in zip(c, e, strict=True)])
+                    for c, e in zip(cols, m.extra, strict=True)
+                ] + cols
+            for i in range(3):
+                for c in cols[i::3]:
+                    spans[i] = data.union(spans[i], _core.finite_range(c))
+        out = []
+        for i in range(3):
+            if self._lims[i] is not None:
+                out.append(self._lims[i])
+                continue
+            lo, hi = spans[i] or (0.0, 1.0)
+            if lo == hi:
+                lo, hi = lo - 0.5, hi + 0.5
+            pad = (hi - lo) * 0.05
+            out.append((lo - pad, hi + pad))
+        return tuple(out)  # type: ignore[return-value]
 
     def get_xlim(self) -> tuple[float, float]:
-        """Effective x limits: explicit if set, else the data cube's extent."""
-        return self._limits()[0]
+        return self.limits()[0]
 
     def get_ylim(self) -> tuple[float, float]:
-        return self._limits()[1]
+        return self.limits()[1]
 
     def get_zlim(self) -> tuple[float, float]:
-        return self._limits()[2]
+        return self.limits()[2]
 
-    def get_xlabel(self) -> str | None:
-        return self._xlabel
+    # -- rendering --------------------------------------------------------------
 
-    def get_ylabel(self) -> str | None:
-        return self._ylabel
+    def _measure(self, canvas: Canvas) -> _Plan:
+        m = Margins()
+        if self.title:
+            m.top = (
+                canvas.measure(self.title, self.theme.title_size, self.theme.title_weight).height
+                + TITLE_GAP
+            )
+        return _Plan(m)
 
-    def get_zlabel(self) -> str | None:
-        return self._zlabel
+    def _ticks(self, lo: float, hi: float) -> list[tuple[float, str]]:
+        span = (hi - lo) or 1.0
+        return [
+            ((v - lo) / span - 0.5, s)
+            for v, s in nice_ticks(lo, hi, 5, self.theme.unicode_minus)
+            if -1e-9 <= (v - lo) / span <= 1 + 1e-9
+        ]
 
-    def get_view(self) -> tuple[float, float]:
-        """The camera as ``(elev, azim)`` in degrees."""
-        return (self._elev, self._azim)
+    def _draw(self, canvas: Canvas, plan: _Plan, rect: tuple[float, float, float, float]) -> None:
+        th = canvas.theme
+        x, y, w, h = rect
+        cam = Camera(self.elev, self.azim)
+        (x0, x1), (y0, y1), (z0, z1) = self.limits()
+        bx0, bx1, by0, by1 = _core.cube_bounds(self.elev, self.azim)
+        scale = min(w / ((bx1 - bx0) or 1), h / ((by1 - by0) or 1)) * CUBE_FILL
+        ccx, ccy, scx, scy = x + w / 2, y + h / 2, (bx0 + bx1) / 2, (by0 + by1) / 2
+        frame = (
+            x0,
+            (x1 - x0) or 1.0,
+            y0,
+            (y1 - y0) or 1.0,
+            z0,
+            (z1 - z0) or 1.0,
+            ccx,
+            ccy,
+            scx,
+            scy,
+            scale,
+        )
 
-    # -- Figure protocol ----------------------------------------------------
+        def unit(p: Vec3) -> tuple[float, float, float]:
+            sx, sy, d = cam.view(p)
+            return ccx + (sx - scx) * scale, ccy - (sy - scy) * scale, d
 
-    def _ranges(self):
-        # 3D axes don't participate in 2D shared-range unification.
-        return ((0.0, 1.0), (0.0, 1.0))
+        def project(xs: Any, ys: Any, zs: Any) -> list[tuple[float, float, float]]:
+            px, py, pd = _core.project3d(xs, ys, zs, self.elev, self.azim, frame)
+            return list(zip(px, py, pd, strict=True))
 
-    def _bands(self, scene, xr, yr):
-        title_h = 0.0
-        if self._title:
-            a, d = _th(scene, self._title, self._theme.title_size)
-            title_h = a + d + _TITLE_GAP
-        return (title_h, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), [], []
+        def back(axis: int) -> float:
+            lo, hi = [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
+            lo[axis], hi[axis] = -0.5, 0.5
+            return -0.5 if cam.view(tuple(lo))[2] < cam.view(tuple(hi))[2] else 0.5  # type: ignore[arg-type]
 
-    def _limits(self):
-        xs: list[float] = []
-        ys: list[float] = []
-        zs: list[float] = []
-        for m in self._marks3:
-            k = m["kind"]
-            if k in ("scatter", "line"):
-                xs += m["xs"]
-                ys += m["ys"]
-                zs += m["zs"]
-            elif k == "bar3d":
-                xs += m["xs"] + [a + b for a, b in zip(m["xs"], m["dx"])]
-                ys += m["ys"] + [a + b for a, b in zip(m["ys"], m["dy"])]
-                zs += m["zs"] + [a + b for a, b in zip(m["zs"], m["dz"])]
-            elif k == "voxels":
-                for i, j, kk in m["cells"]:
-                    xs += [i, i + 1]
-                    ys += [j, j + 1]
-                    zs += [kk, kk + 1]
-            elif "xflat" in m:
-                xs += m["xflat"]
-                ys += m["yflat"]
-                zs += m["zflat"]
-        if not xs:
-            xs = ys = zs = [0.0, 1.0]
-        xr = self._xlim or _data_range(xs)
-        yr = self._ylim or _data_range(ys)
-        zr = self._zlim or _data_range(zs)
-        return xr, yr, zr
+        xb, yb, zb = back(0), back(1), back(2)
+        xt, yt, zt = self._ticks(x0, x1), self._ticks(y0, y1), self._ticks(z0, z1)
 
-    def _draw(self, scene, layout, xr, yr, xticks, yticks) -> None:
-        t = self._theme
-        _TICK_LABEL_SIZE = t.tick_label_size
-        _AXIS_LABEL_SIZE = t.axis_label_size
-        _TITLE_SIZE = t.title_size
-        _BLACK = t.text_color
-        plot = layout.plot
-        cam = _threed.Camera3D(self._elev, self._azim)
-        (xmin, xmax), (ymin, ymax), (zmin, zmax) = self._limits()
-        xspan = (xmax - xmin) or 1.0
-        yspan = (ymax - ymin) or 1.0
-        zspan = (zmax - zmin) or 1.0
+        def pane(corners: list[Vec3], lines: list[tuple[Vec3, Vec3]]) -> None:
+            pts = [unit(p) for p in corners]
+            canvas.path(
+                [p[0] for p in pts],
+                [p[1] for p in pts],
+                fill=PANE_FILL,
+                close=True,
+                stroke=PANE_EDGE,
+                width=0.8,
+            )
+            if lines:
+                ends = [(unit(a), unit(b)) for a, b in lines]
+                canvas.segments(
+                    [a[0] for a, _ in ends],
+                    [a[1] for a, _ in ends],
+                    [b[0] for _, b in ends],
+                    [b[1] for _, b in ends],
+                    color=GRID,
+                    width=0.6,
+                )
 
-        def norm(x, y, z):
-            return ((x - xmin) / xspan - 0.5, (y - ymin) / yspan - 0.5, (z - zmin) / zspan - 0.5)
+        pane(
+            [(-0.5, -0.5, zb), (0.5, -0.5, zb), (0.5, 0.5, zb), (-0.5, 0.5, zb)],
+            [((t, -0.5, zb), (t, 0.5, zb)) for t, _ in xt]
+            + [((-0.5, t, zb), (0.5, t, zb)) for t, _ in yt],
+        )
+        pane(
+            [(xb, -0.5, -0.5), (xb, 0.5, -0.5), (xb, 0.5, 0.5), (xb, -0.5, 0.5)],
+            [((xb, t, -0.5), (xb, t, 0.5)) for t, _ in yt]
+            + [((xb, -0.5, t), (xb, 0.5, t)) for t, _ in zt],
+        )
+        pane(
+            [(-0.5, yb, -0.5), (0.5, yb, -0.5), (0.5, yb, 0.5), (-0.5, yb, 0.5)],
+            [((t, yb, -0.5), (t, yb, 0.5)) for t, _ in xt]
+            + [((-0.5, yb, t), (0.5, yb, t)) for t, _ in zt],
+        )
 
-        # Fit the projected unit cube into the plot rect, preserving aspect.
-        # The bbox comes from Rust so the camera basis has exactly one
-        # definition; `_threed` keeps the Python mirror only for the chrome.
-        min_sx, max_sx, min_sy, max_sy = _core.cube_screen_bbox(self._elev, self._azim)
-        bw = (max_sx - min_sx) or 1.0
-        bh = (max_sy - min_sy) or 1.0
-        scale = min(plot.w / bw, plot.h / bh) * _CUBE_FILL
-        ccx = plot.x + plot.w / 2.0
-        ccy = plot.y + plot.h / 2.0
-        scx = (min_sx + max_sx) / 2.0
-        scy = (min_sy + max_sy) / 2.0
+        prims: list[tuple[float, tuple, Any]] = []
+        for m in sorted(self._artists, key=lambda a: a.zorder):
+            assert isinstance(m, Mark3D)
+            if m.kind == "scatter":
+                key = ("pt", m.marker, m.size, m.color, m.edgecolor)
+                prims += [(p[2], key, p) for p in project(m.xs, m.ys, m.zs)]
+            elif m.kind == "line":
+                key = ("seg", m.color, m.linewidth, m.linestyle)
+                pts = project(m.xs, m.ys, m.zs)
+                prims += [
+                    ((a[2] + b[2]) / 2, key, (a[0], a[1], b[0], b[1]))
+                    for a, b in itertools.pairwise(pts)
+                    if all(math.isfinite(v) for v in (*a, *b))
+                ]
+            elif m.kind in ("surface", "wireframe"):
+                nr, nc = m.shape
+                pts = project(m.xs, m.ys, m.zs)
+                if m.kind == "wireframe":
+                    key = ("seg", m.color, m.linewidth, "solid")
+                    for r in range(nr):
+                        for c in range(nc):
+                            a = pts[r * nc + c]
+                            for b in ([pts[r * nc + c + 1]] if c + 1 < nc else []) + (
+                                [pts[(r + 1) * nc + c]] if r + 1 < nr else []
+                            ):
+                                prims.append(((a[2] + b[2]) / 2, key, (a[0], a[1], b[0], b[1])))
+                    continue
+                zs = m.zs
+                zlo, zhi = _core.finite_range(zs) or (0.0, 1.0)
+                key = ("poly", None, 0.0)
+                for r in range(nr - 1):
+                    for c in range(nc - 1):
+                        idx = (r * nc + c, r * nc + c + 1, (r + 1) * nc + c + 1, (r + 1) * nc + c)
+                        q = [pts[i] for i in idx]
+                        if not all(math.isfinite(v) for p in q for v in p):
+                            continue
+                        if m.cmap is not None:
+                            zc = sum(zs[i] for i in idx) / 4
+                            col = with_alpha(m.cmap((zc - zlo) / ((zhi - zlo) or 1.0)), m.alpha)
+                        else:
+                            col = m.color
+                        prims.append(
+                            (
+                                sum(p[2] for p in q) / 4,
+                                key,
+                                ([p[0] for p in q], [p[1] for p in q], col),
+                            )
+                        )
+            elif m.kind == "bar":
+                dxs, dys, dzs = m.extra
+                edge = _darker(m.color)
+                key = ("poly", edge, 0.6)
+                for i in range(len(m.xs)):
+                    a, b = (
+                        (m.xs[i], m.ys[i], m.zs[i]),
+                        (m.xs[i] + dxs[i], m.ys[i] + dys[i], m.zs[i] + dzs[i]),
+                    )
+                    cx = [a[0], b[0], b[0], a[0], a[0], b[0], b[0], a[0]]
+                    cy = [a[1], a[1], b[1], b[1], a[1], a[1], b[1], b[1]]
+                    cz = [a[2]] * 4 + [b[2]] * 4
+                    cp = project(cx, cy, cz)
+                    for face in (
+                        (0, 1, 2, 3),
+                        (4, 5, 6, 7),
+                        (0, 1, 5, 4),
+                        (2, 3, 7, 6),
+                        (1, 2, 6, 5),
+                        (0, 3, 7, 4),
+                    ):
+                        q = [cp[f] for f in face]
+                        prims.append(
+                            (
+                                sum(p[2] for p in q) / 4,
+                                key,
+                                ([p[0] for p in q], [p[1] for p in q], m.color),
+                            )
+                        )
+            elif m.kind == "quiver":
+                us, vs, ws = m.extra
+                base = project(m.xs, m.ys, m.zs)
+                tips = project(
+                    data.f64([a + b for a, b in zip(m.xs, us, strict=True)]),
+                    data.f64([a + b for a, b in zip(m.ys, vs, strict=True)]),
+                    data.f64([a + b for a, b in zip(m.zs, ws, strict=True)]),
+                )
+                seg, pt = ("seg", m.color, m.linewidth, "solid"), ("pt", "o", 3.0, m.color, None)
+                for a, b in zip(base, tips, strict=True):
+                    prims.append(((a[2] + b[2]) / 2, seg, (a[0], a[1], b[0], b[1])))
+                    prims.append((b[2], pt, b))
+        prims.sort(key=lambda p: p[0])
+        batch = _Batcher(canvas)
+        for _, key, item in prims:
+            batch.add(key, item)
+        batch.flush()
 
-        def to_dev(sx, sy):
-            return (ccx + (sx - scx) * scale, ccy - (sy - scy) * scale)
+        center = unit((0.0, 0.0, 0.0))
 
-        def projn(p):
-            s = cam.view(p)
-            dx, dy = to_dev(s[0], s[1])
-            return (dx, dy, s[2])
+        def place(
+            anchor: Vec3, text: Label, size: float, outward: float, weight: str = "normal"
+        ) -> None:
+            px, py, _ = unit(anchor)
+            vx, vy = px - center[0], py - center[1]
+            n = math.hypot(vx, vy) or 1.0
+            canvas.text(
+                px + vx / n * outward,
+                py + vy / n * outward,
+                text,
+                size,
+                weight=weight,
+                ha="center",
+                va="center",
+            )
 
-        def proj(x, y, z):
-            return projn(norm(x, y, z))
-
-        # Batch projection: every vertex of a mark in one Rust pass, returning
-        # device x/y plus eye-space depth. `proj` above stays for the axis
-        # chrome, which is a few dozen points and not worth a round trip; the
-        # marks are where the per-vertex Python cost actually lived.
-        def proj_many(xs_, ys_, zs_):
-            """`[(dx, dy, depth), ...]` for parallel data-space sequences."""
-            dxs, dys, dzs = _core.project3d(
-                _to_f64(xs_), _to_f64(ys_), _to_f64(zs_),
-                self._elev, self._azim,
-                xmin, xspan, ymin, yspan, zmin, zspan,
-                ccx, ccy, scx, scy, scale)
-            return list(zip(dxs, dys, dzs))
-
-        def proj_grid(gx, gy, gz, nr, nc):
-            """`proj_many` over a row-major grid, returned as rows."""
-            flat = proj_many([v for row in gx for v in row],
-                             [v for row in gy for v in row],
-                             [v for row in gz for v in row])
-            return [flat[r * nc:(r + 1) * nc] for r in range(nr)]
-
-        center_dev = to_dev(0.0, 0.0)
-
-        def depth_n(p):
-            return cam.view(p)[2]
-
-        # Back walls = the farther plane of each axis-aligned pair (smaller depth).
-        z_back = -0.5 if depth_n((0.0, 0.0, -0.5)) < depth_n((0.0, 0.0, 0.5)) else 0.5
-        x_back = -0.5 if depth_n((-0.5, 0.0, 0.0)) < depth_n((0.5, 0.0, 0.0)) else 0.5
-        y_back = -0.5 if depth_n((0.0, -0.5, 0.0)) < depth_n((0.0, 0.5, 0.0)) else 0.5
-
-        def axis_ticks(vmin, vmax):
-            span = (vmax - vmin) or 1.0
-            out = []
-            for val, lab in _scales.nice_ticks(vmin, vmax, 5):
-                frac = (val - vmin) / span
-                if -1e-9 <= frac <= 1.0 + 1e-9:
-                    out.append((frac - 0.5, lab))
-            return out
-
-        xt = axis_ticks(xmin, xmax)
-        yt = axis_ticks(ymin, ymax)
-        zt = axis_ticks(zmin, zmax)
-
-        # 1. Back panes + gridlines.
-        def quad(p0, p1, p2, p3, fill, stroke=None):
-            pts = [projn(p0)[:2], projn(p1)[:2], projn(p2)[:2], projn(p3)[:2]]
-            scene.add_path(pts, fill_color=fill, close=True, stroke_color=stroke,
-                           stroke_width=0.8 if stroke else 1.0)
-
-        def gridline(p0, p1):
-            scene.add_path([projn(p0)[:2], projn(p1)[:2]], stroke_color=_GRID_3D, stroke_width=0.6)
-
-        quad((-0.5, -0.5, z_back), (0.5, -0.5, z_back), (0.5, 0.5, z_back), (-0.5, 0.5, z_back),
-             _PANE_FILL, _PANE_EDGE)
-        for nx, _ in xt:
-            gridline((nx, -0.5, z_back), (nx, 0.5, z_back))
-        for ny, _ in yt:
-            gridline((-0.5, ny, z_back), (0.5, ny, z_back))
-
-        quad((x_back, -0.5, -0.5), (x_back, 0.5, -0.5), (x_back, 0.5, 0.5), (x_back, -0.5, 0.5),
-             _PANE_FILL, _PANE_EDGE)
-        for ny, _ in yt:
-            gridline((x_back, ny, -0.5), (x_back, ny, 0.5))
-        for nz, _ in zt:
-            gridline((x_back, -0.5, nz), (x_back, 0.5, nz))
-
-        quad((-0.5, y_back, -0.5), (0.5, y_back, -0.5), (0.5, y_back, 0.5), (-0.5, y_back, 0.5),
-             _PANE_FILL, _PANE_EDGE)
-        for nx, _ in xt:
-            gridline((nx, y_back, -0.5), (nx, y_back, 0.5))
-        for nz, _ in zt:
-            gridline((-0.5, y_back, nz), (0.5, y_back, nz))
-
-        # 2. Data marks: project every primitive to (depth, draw_fn) and paint
-        #    them in one global back-to-front order so surfaces, lines, bars and
-        #    points that interpenetrate occlude each other correctly (a single
-        #    depth sort across all marks, not per-mark).
-        # ``(depth, draw, chain)`` per primitive. ``chain`` is reserved for the
-        # unsorted-polyline path below and is ``None`` for depth-sorted marks.
-        prims: list[tuple] = []
-
-        def add_poly(pts3, fill, stroke=None, sw=1.0):
-            if len(pts3) < 3:
-                return
-            depth = sum(p[2] for p in pts3) / len(pts3)
-            dev = [(p[0], p[1]) for p in pts3]
-            prims.append((depth, lambda: scene.add_path(
-                dev, fill_color=fill, close=True, stroke_color=stroke,
-                stroke_width=sw if stroke else 1.0), None))
-
-        def add_seg(a3, b3, color, w, dash=None):
-            prims.append(((a3[2] + b3[2]) / 2.0, lambda: scene.add_path(
-                [(a3[0], a3[1]), (b3[0], b3[1])], stroke_color=color,
-                stroke_width=w, cap="round", join="round", dash=dash), None))
-
-        def add_point(p3, d, marker, fc, ec):
-            prims.append((p3[2], lambda: _draw_marker(
-                scene, p3[0], p3[1], d, marker, facecolor=fc, edgecolor=ec), None))
-
-        def box_faces(x0, y0, z0, x1, y1, z1, fill, edge):
-            c = [(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0),
-                 (x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)]
-            cp = [proj(*v) for v in c]
-            for a, b, cc, dd in ((0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4),
-                                 (2, 3, 7, 6), (1, 2, 6, 5), (0, 3, 7, 4)):
-                add_poly([cp[a], cp[b], cp[cc], cp[dd]], fill, edge, 0.6)
-
-        for m in self._marks3:
-            k = m["kind"]
-            if k == "surface":
-                gx, gy, gz = m["gx"], m["gy"], m["gz"]
-                zmin, zmax, cm = m["zmin"], m["zmax"], m["cmap"]
-                a = m["alpha"]
-                zspd = (zmax - zmin) or 1.0
-                grid = proj_grid(gx, gy, gz, m["nr"], m["nc"])
-                for r in range(m["nr"] - 1):
-                    row, nxt = grid[r], grid[r + 1]
-                    gzr, gzn = gz[r], gz[r + 1]
-                    for cc in range(m["nc"] - 1):
-                        zc = (gzr[cc] + gzr[cc + 1] + gzn[cc + 1] + gzn[cc]) / 4.0
-                        fc = cm((zc - zmin) / zspd)
-                        add_poly([row[cc], row[cc + 1], nxt[cc + 1], nxt[cc]],
-                                 fc if a >= 1.0 else _with_alpha(fc, a), None, 1.0)
-            elif k == "trisurf":
-                cm, zmin, zmax = m["cmap"], m["zmin"], m["zmax"]
-                a = m["alpha"]
-                zspd = (zmax - zmin) or 1.0
-                pv = proj_many(m["xs"], m["ys"], m["zs"])
-                zs_ = m["zs"]
-                for a1, b, cc in m["tris"]:
-                    zc = (zs_[a1] + zs_[b] + zs_[cc]) / 3.0
-                    fc = cm((zc - zmin) / zspd)
-                    add_poly([pv[a1], pv[b], pv[cc]], fc if a >= 1.0 else _with_alpha(fc, a),
-                             t.separator_color, 0.4)
-            elif k == "line":
-                pr = proj_many(m["xs"], m["ys"], m["zs"])
-                dash = _dash_for(m["linestyle"])
-                if m.get("depthsort", True):
-                    for i in range(len(pr) - 1):
-                        add_seg(pr[i], pr[i + 1], m["color"], m["linewidth"], dash)
-                elif len(pr) >= 2:
-                    # One path at the line's mean depth: the whole polyline
-                    # sorts as a single primitive.
-                    dev = [(p[0], p[1]) for p in pr]
-                    mean_d = sum(p[2] for p in pr) / len(pr)
-                    prims.append((mean_d, lambda dev=dev, m=m, dash=dash: scene.add_path(
-                        dev, stroke_color=m["color"], stroke_width=m["linewidth"],
-                        cap="round", join="round", dash=dash), None))
-            elif k == "wireframe":
-                gx, gy, gz = m["gx"], m["gy"], m["gz"]
-                grid = proj_grid(gx, gy, gz, m["nr"], m["nc"])
-                for r in range(m["nr"]):
-                    for c in range(m["nc"] - 1):
-                        add_seg(grid[r][c], grid[r][c + 1], m["color"], m["linewidth"])
-                for c in range(m["nc"]):
-                    for r in range(m["nr"] - 1):
-                        add_seg(grid[r][c], grid[r + 1][c], m["color"], m["linewidth"])
-            elif k == "contour3d":
-                gx, gy = m["gx"], m["gy"]
-                # The kernel hands back whole contour lines; the painter's-
-                # algorithm sort works on segments, so walk each line pairwise
-                # (a closed line wrapping from its last point back to its first).
-                for li, closed, pts in m["lines"]:
-                    lv = m["levels"][li]
-                    col = m["colors"][li] if li < len(m["colors"]) else m["colors"][-1]
-                    proj_pts = [proj(_bilinear_grid(gx, py, px),
-                                     _bilinear_grid(gy, py, px), lv) for px, py in pts]
-                    if closed and proj_pts:
-                        proj_pts.append(proj_pts[0])
-                    for a, b in zip(proj_pts, proj_pts[1:]):
-                        add_seg(a, b, col, m["linewidth"])
-            elif k == "bar3d":
-                for i in range(len(m["xs"])):
-                    box_faces(m["xs"][i], m["ys"][i], m["zs"][i],
-                              m["xs"][i] + m["dx"][i], m["ys"][i] + m["dy"][i],
-                              m["zs"][i] + m["dz"][i], m["color"], _darker(m["color"]))
-            elif k == "voxels":
-                for i, j, kk in m["cells"]:
-                    box_faces(float(i), float(j), float(kk), i + 1.0, j + 1.0, kk + 1.0,
-                              m["color"], m["edgecolor"] or _darker(m["color"]))
-            elif k == "quiver3d":
-                L = m["length"]
-                for i in range(len(m["xs"])):
-                    base = proj(m["xs"][i], m["ys"][i], m["zs"][i])
-                    tip = proj(m["xs"][i] + L * m["us"][i], m["ys"][i] + L * m["vs"][i],
-                               m["zs"][i] + L * m["ws"][i])
-                    add_seg(base, tip, m["color"], m["linewidth"])
-                    add_point(tip, 3.0, "o", m["color"], None)
-            elif k == "scatter":
-                d = m["markersize"]
-                for p3 in proj_many(m["xs"], m["ys"], m["zs"]):
-                    add_point(p3, d, m["marker"], m["color"], m["edgecolor"])
-
-        prims.sort(key=lambda p: p[0])  # back (small depth) to front
-        for _depth, draw, _chain in prims:
-            draw()
-
-        # 3. Tick labels + axis labels (on top, offset radially outward).
-        #
-        # `font` defaults to the body face for tick labels; the three axis
-        # labels pass the theme's `axis_label_weight`. That used to be resolved
-        # into a `label_font` local that nothing ever read, so a theme setting
-        # `axis_label_weight="bold"` styled a 2D figure's labels and silently
-        # left a 3D figure's upright - the same leak Phase 6c closed for 2D.
-        def place(anchor, text, size, outward, font: str = "body"):
-            dx, dy, _ = projn(anchor)
-            vx, vy = dx - center_dev[0], dy - center_dev[1]
-            vlen = math.hypot(vx, vy) or 1.0
-            dx += vx / vlen * outward
-            dy += vy / vlen * outward
-            tw = _tw(scene, text, size, font)
-            a, dd, _ = scene.font_vmetrics(size)
-            _text(scene, dx - tw / 2.0, dy + (a - dd) / 2.0, text, size, _BLACK, font)
-
-        # x/y tick labels along the bottom-front edges; z along the leftmost edge.
-        x_edge_y = max((-0.5, 0.5), key=lambda yy: projn((0.0, yy, z_back))[1])
-        y_edge_x = max((-0.5, 0.5), key=lambda xx: projn((xx, 0.0, z_back))[1])
-        z_edge = min(((-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)),
-                     key=lambda c: projn((c[0], c[1], 0.0))[0])
-
-        for nx, lab in xt:
-            place((nx, x_edge_y, z_back), lab, _TICK_LABEL_SIZE, 9.0)
-        for ny, lab in yt:
-            place((y_edge_x, ny, z_back), lab, _TICK_LABEL_SIZE, 9.0)
-        for nz, lab in zt:
-            place((z_edge[0], z_edge[1], nz), lab, _TICK_LABEL_SIZE, 9.0)
-
-        label_font = _font(t.axis_label_weight)
-        if self._xlabel:
-            place((0.0, x_edge_y, z_back), self._xlabel, _AXIS_LABEL_SIZE, 26.0, label_font)
-        if self._ylabel:
-            place((y_edge_x, 0.0, z_back), self._ylabel, _AXIS_LABEL_SIZE, 26.0, label_font)
-        if self._zlabel:
-            place((z_edge[0], z_edge[1], 0.0), self._zlabel, _AXIS_LABEL_SIZE, 30.0, label_font)
-
-        # Title in its reserved band.
-        title_font = _font(t.title_weight)
-        if self._title:
-            a, _d = _th(scene, self._title, _TITLE_SIZE, title_font)
-            tw = _tw(scene, self._title, _TITLE_SIZE, title_font)
-            _text(scene, plot.x + (plot.w - tw) / 2.0, layout.title.y + a, self._title,
-                  _TITLE_SIZE, _BLACK, title_font)
-
-        # Auto-legend for labeled line/scatter marks, inset in the plot rect.
+        x_edge = max((-0.5, 0.5), key=lambda v: unit((0.0, v, zb))[1])
+        y_edge = max((-0.5, 0.5), key=lambda v: unit((v, 0.0, zb))[1])
+        z_edge = min(
+            ((-0.5, -0.5), (0.5, -0.5), (0.5, 0.5), (-0.5, 0.5)),
+            key=lambda c: unit((c[0], c[1], 0.0))[0],
+        )
+        ts, ls, lw = th.tick_label_size, th.axis_label_size, th.axis_label_weight
+        for t, s in xt:
+            place((t, x_edge, zb), s, ts, 9.0)
+        for t, s in yt:
+            place((y_edge, t, zb), s, ts, 9.0)
+        for t, s in zt:
+            place((z_edge[0], z_edge[1], t), s, ts, 9.0)
+        if self.xlabel:
+            place((0.0, x_edge, zb), self.xlabel, ls, 26.0, lw)
+        if self.ylabel:
+            place((y_edge, 0.0, zb), self.ylabel, ls, 26.0, lw)
+        if self.zlabel:
+            place((z_edge[0], z_edge[1], 0.0), self.zlabel, ls, 30.0, lw)
+        if self.title:
+            e = canvas.measure(self.title, th.title_size, th.title_weight)
+            canvas.text(
+                x + w / 2,
+                y - TITLE_GAP - e.depth,
+                self.title,
+                th.title_size,
+                weight=th.title_weight,
+                ha="center",
+            )
         if self._legend is not None:
-            entries = self._legend_entries()
-            if entries:
-                box_w, box_h, mt = _measure_legend(scene, entries, self._theme, self._legend)
-                inset = 6.0
-                px, py, pw, ph = plot.x, plot.y, plot.w, plot.h
-                corners = {
-                    "upper right": (px + pw - inset - box_w, py + inset),
-                    "upper left": (px + inset, py + inset),
-                    "lower right": (px + pw - inset - box_w, py + ph - inset - box_h),
-                    "lower left": (px + inset, py + ph - inset - box_h),
-                }
-                bx, by = corners.get(self._legend["loc"], corners["upper right"])
-                _draw_legend_box(scene, entries, bx, by, mt)
+            items = _legend.entries(self._artists)
+            if items:
+                box = _legend.measure(canvas, items, self._legend)
+                loc = "upper right" if self._legend.loc == "best" else self._legend.loc
+                _legend.draw(
+                    canvas,
+                    box,
+                    *_legend.place(
+                        box, loc, View(_core.Transform(), x, y, w, h, (0, 1), (0, 1)), []
+                    ),
+                )
 
-    def _draw_surface(self, scene, m: dict, proj) -> None:
-        gx, gy, gz = m["gx"], m["gy"], m["gz"]
-        nr, nc = m["nr"], m["nc"]
-        cm = m["cmap"]
-        zmin, zspan = m["zmin"], (m["zmax"] - m["zmin"]) or 1.0
-        faces = []
-        for i in range(nr - 1):
-            for j in range(nc - 1):
-                p00 = proj(gx[i][j], gy[i][j], gz[i][j])
-                p01 = proj(gx[i][j + 1], gy[i][j + 1], gz[i][j + 1])
-                p11 = proj(gx[i + 1][j + 1], gy[i + 1][j + 1], gz[i + 1][j + 1])
-                p10 = proj(gx[i + 1][j], gy[i + 1][j], gz[i + 1][j])
-                depth = (p00[2] + p01[2] + p11[2] + p10[2]) / 4.0
-                zc = (gz[i][j] + gz[i][j + 1] + gz[i + 1][j + 1] + gz[i + 1][j]) / 4.0
-                color = cm((zc - zmin) / zspan)
-                faces.append((depth, [p00[:2], p01[:2], p11[:2], p10[:2]], color))
-        faces.sort(key=lambda f: f[0])  # back to front
-        for _, pts, color in faces:
-            scene.add_path(pts, fill_color=color, close=True, stroke_color=color, stroke_width=0.4)
+    # -- interactive export -------------------------------------------------------
 
-    def _interactive_payload(self) -> dict:
-        """Serialize this 3D axes into a JSON-able dict for the in-browser
-        renderer (``_html3d``). Coordinates are pre-normalized into the
-        ``[-0.5, 0.5]^3`` cube (same as ``_draw``'s ``norm``) so the camera
-        is all the JS has to apply; surface face colors are pre-sampled from the
-        colormap (depth/order are recomputed per frame). Ticks and theme colors
-        come along so the page reproduces the static look."""
-        (xmin, xmax), (ymin, ymax), (zmin, zmax) = self._limits()
-        xspan, yspan, zspan = (xmax - xmin) or 1.0, (ymax - ymin) or 1.0, (zmax - zmin) or 1.0
+    def _payload(self) -> dict[str, Any]:
+        """This axes as JSON for the browser viewer, in unit-cube coordinates."""
+        (x0, x1), (y0, y1), (z0, z1) = self.limits()
+        sx, sy, sz = (x1 - x0) or 1.0, (y1 - y0) or 1.0, (z1 - z0) or 1.0
 
-        def nrm(x, y, z):
-            return [(x - xmin) / xspan - 0.5, (y - ymin) / yspan - 0.5, (z - zmin) / zspan - 0.5]
+        def unit(
+            xs: Sequence[float], ys: Sequence[float], zs: Sequence[float]
+        ) -> list[list[float]]:
+            return [
+                [(a - x0) / sx - 0.5, (b - y0) / sy - 0.5, (c - z0) / sz - 0.5]
+                for a, b, c in zip(xs, ys, zs, strict=True)
+            ]
 
-        def ticks(vmin, vmax):
-            span = (vmax - vmin) or 1.0
-            out = []
-            for val, lab in _scales.nice_ticks(vmin, vmax, 5):
-                frac = (val - vmin) / span
-                if -1e-9 <= frac <= 1.0 + 1e-9:
-                    out.append([frac - 0.5, lab])
-            return out
-
-        marks: list[dict] = []
-        for m in self._marks3:
-            if m["kind"] == "scatter":
-                marks.append({
-                    "kind": "scatter",
-                    "pts": [nrm(x, y, z) for x, y, z in zip(m["xs"], m["ys"], m["zs"])],
-                    "color": list(m["color"]),
-                    "edgecolor": list(m["edgecolor"]) if m["edgecolor"] else None,
-                    "d": m["markersize"],
-                    "marker": m["marker"],
-                })
-            elif m["kind"] == "line":
-                marks.append({
-                    "kind": "line",
-                    "pts": [nrm(x, y, z) for x, y, z in zip(m["xs"], m["ys"], m["zs"])],
-                    "color": list(m["color"]),
-                    "linewidth": m["linewidth"],
-                    "dash": _dash_for(m["linestyle"]),
-                })
-            elif m["kind"] == "surface":
-                gx, gy, gz, nr, nc = m["gx"], m["gy"], m["gz"], m["nr"], m["nc"]
-                cm = m["cmap"]
-                zmn, zsp = m["zmin"], (m["zmax"] - m["zmin"]) or 1.0
-                verts = [nrm(gx[i][j], gy[i][j], gz[i][j]) for i in range(nr) for j in range(nc)]
-                facecolors = []
-                for i in range(nr - 1):
-                    for j in range(nc - 1):
-                        zc = (gz[i][j] + gz[i][j + 1] + gz[i + 1][j + 1] + gz[i + 1][j]) / 4.0
-                        r, g, b, _a = cm((zc - zmn) / zsp)
-                        facecolors.append([r, g, b])
-                marks.append({"kind": "surface", "nr": nr, "nc": nc,
-                              "verts": verts, "facecolors": facecolors})
-
+        marks: list[dict[str, Any]] = []
+        for m in self._artists:
+            assert isinstance(m, Mark3D)
+            if m.kind == "scatter":
+                marks.append(
+                    {
+                        "kind": "scatter",
+                        "pts": unit(m.xs, m.ys, m.zs),
+                        "color": list(m.color),
+                        "edgecolor": list(m.edgecolor) if m.edgecolor else None,
+                        "d": m.size,
+                        "marker": m.marker,
+                    }
+                )
+            elif m.kind in ("line", "wireframe"):
+                nr, nc = m.shape if m.kind == "wireframe" else (1, len(m.xs))
+                pts = unit(m.xs, m.ys, m.zs)
+                rows = [pts[r * nc : (r + 1) * nc] for r in range(nr)]
+                if m.kind == "wireframe":
+                    rows += [[pts[r * nc + c] for r in range(nr)] for c in range(nc)]
+                for row in rows:
+                    marks.append(
+                        {
+                            "kind": "line",
+                            "pts": row,
+                            "color": list(m.color),
+                            "linewidth": m.linewidth,
+                            "dash": dash(m.linestyle),
+                        }
+                    )
+            elif m.kind == "surface":
+                nr, nc = m.shape
+                zlo, zhi = _core.finite_range(m.zs) or (0.0, 1.0)
+                colors = []
+                for r in range(nr - 1):
+                    for c in range(nc - 1):
+                        zc = (
+                            m.zs[r * nc + c]
+                            + m.zs[r * nc + c + 1]
+                            + m.zs[(r + 1) * nc + c]
+                            + m.zs[(r + 1) * nc + c + 1]
+                        ) / 4
+                        col = m.cmap((zc - zlo) / ((zhi - zlo) or 1.0)) if m.cmap else m.color
+                        colors.append(list(col[:3]))
+                marks.append(
+                    {
+                        "kind": "surface",
+                        "nr": nr,
+                        "nc": nc,
+                        "verts": unit(m.xs, m.ys, m.zs),
+                        "facecolors": colors,
+                    }
+                )
+        th = self.theme
         legend = None
         if self._legend is not None:
-            entries = self._legend_entries()
-            if entries:
-                legend = {
-                    "loc": self._legend.get("loc", "upper right"),
-                    "entries": [{
-                        "kind": e["kind"], "label": e["label"], "color": list(e["color"]),
-                        "marker": e.get("marker"),
-                        "dash": _dash_for(e.get("linestyle", "solid")),
-                    } for e in entries],
-                }
-
-        t = self._theme
+            items = _legend.entries(self._artists)
+            legend = {
+                "loc": "upper right" if self._legend.loc == "best" else self._legend.loc,
+                "entries": [
+                    {
+                        "kind": "scatter" if k.kind == "marker" else "line",
+                        "label": str(lbl),
+                        "color": list(k.color),
+                        "marker": k.marker,
+                        "dash": dash(k.linestyle) if k.linestyle not in ("none",) else None,
+                    }
+                    for lbl, k in items
+                ],
+            }
         return {
-            "title": self._title, "xlabel": self._xlabel,
-            "ylabel": self._ylabel, "zlabel": self._zlabel,
-            "elev": self._elev, "azim": self._azim,
-            "xticks": ticks(xmin, xmax), "yticks": ticks(ymin, ymax), "zticks": ticks(zmin, zmax),
-            "marks": marks, "legend": legend,
+            "title": str(self.title) if self.title else None,
+            "xlabel": str(self.xlabel) if self.xlabel else None,
+            "ylabel": str(self.ylabel) if self.ylabel else None,
+            "zlabel": str(self.zlabel) if self.zlabel else None,
+            "elev": self.elev,
+            "azim": self.azim,
+            "xticks": [[t, s] for t, s in self._ticks(x0, x1)],
+            "yticks": [[t, s] for t, s in self._ticks(y0, y1)],
+            "zticks": [[t, s] for t, s in self._ticks(z0, z1)],
+            "marks": marks,
+            "legend": legend,
             "theme": {
-                "grid": list(_GRID_3D), "pane_fill": list(_PANE_FILL), "pane_edge": list(_PANE_EDGE),
-                "text": list(t.text_color), "tick_size": t.tick_label_size,
-                "axis_size": t.axis_label_size, "title_size": t.title_size, "cube_fill": _CUBE_FILL,
-                # The canvas clears to this every frame. It used to be a
-                # hardcoded white, which left a dark theme's off-white labels
-                # on a white cell in the interactive viewer alone.
-                "bg": list(t.figure_facecolor or (255, 255, 255, 255)),
+                "grid": list(GRID),
+                "pane_fill": list(PANE_FILL),
+                "pane_edge": list(PANE_EDGE),
+                "text": list(th.text_color),
+                "tick_size": th.tick_label_size,
+                "axis_size": th.axis_label_size,
+                "title_size": th.title_size,
+                "cube_fill": CUBE_FILL,
+                "bg": list(th.figure_facecolor or (255, 255, 255, 255)),
             },
         }

@@ -1,9 +1,5 @@
 name: Docs
 
-# Build the MkDocs site and deploy it to GitHub Pages on every push to main.
-# Building the API reference needs the compiled extension importable, so
-# `pip install` builds the Rust core first.
-
 on:
   push:
     branches: [main]
@@ -12,7 +8,6 @@ on:
 permissions:
   contents: read
 
-# Allow only one concurrent deployment.
 concurrency:
   group: pages
   cancel-in-progress: true
@@ -20,32 +15,14 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
+      - uses: astral-sh/setup-uv@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-
-      - name: Build the extension and install the docs dependencies
-        # `pip install` rather than `maturin develop`: setup-python provides no
-        # virtualenv, and maturin refuses to run without one, so this step
-        # exited 1 and the site had never been built here. (CI.yml carried the
-        # same bug.)
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install ".[docs]"
-
-      - name: Build the site
-        run: mkdocs build --strict
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v4
+      - run: uv run --group docs python tools/build_gallery.py
+      - run: uv run --group docs mkdocs build --strict
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: site
 
@@ -53,13 +30,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      # Only the deploying job needs these; the build job above is read-only.
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - id: deployment
+        uses: actions/deploy-pages@v5

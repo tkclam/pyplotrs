@@ -1,37 +1,32 @@
-"""Layout tools: a mosaic of spanning panels, a twin y-axis, and an inset."""
-import math
+"""Uneven layouts: mosaics, twin axes and insets."""
+
+import os
+from pathlib import Path
+
+import numpy as np
 
 import pyplotrs as pp
 
-fig, axd = pp.subplot_mosaic(
-    """
-    AB
-    AC
-    """,
-    figsize=(560, 320),
-)
+out = Path(os.environ.get("PYPLOTRS_EXAMPLES_OUT", Path(__file__).parent / "output"))
+out.mkdir(exist_ok=True)
+rng = np.random.default_rng(4)
 
-xs = [i * 0.1 for i in range(200)]
+fig, axd = pp.subplot_mosaic("AAB;CDB", figsize=(400, 260))
+t = np.linspace(0, 24, 300)
+axd["A"].line(t, 20 + 5 * np.sin(t / 24 * 2 * np.pi), label="temperature")
+humidity = axd["A"].twinx()
+humidity.line(t, 60 + 10 * np.cos(t / 24 * 2 * np.pi), color="C1", label="humidity")
+axd["A"].set(title="Twin y axes", ylabel="°C")
+humidity.set(ylabel="%")
+axd["A"].legend("lower left")
 
-# A spans both rows: a decaying signal with a second series in other units.
-signal = [math.exp(-x / 6) * math.sin(2 * x) for x in xs]
-axd["A"].line(xs, signal, label="signal (V)")
-axd["A"].set(title="spanning panel", xlabel="t (s)", ylabel="volts")
-
-power = axd["A"].twinx()
-power.line(xs, [s * s for s in signal], color="C1", label="power (W)")
-power.set(ylabel="watts")
-
-# An inset zooms the first oscillation of the same trace.
-zoom = axd["A"].inset_axes((0.55, 0.62, 0.4, 0.33))
-zoom.line(xs[:40], signal[:40], linewidth=1.0)
-zoom.set(xlim=(0, 4))
-
-axd["B"].scatter([math.sin(x) for x in xs], [math.cos(3 * x) for x in xs], markersize=2)
-axd["B"].set(title="B")
-
-axd["C"].hist([math.sin(x) * 2 for x in xs], bins=14, color="C3")
-axd["C"].set(title="C")
-
-fig.set(suptitle="subplot_mosaic + twinx + inset_axes")
-fig.save("layout.png")
+axd["B"].hexbin(rng.normal(size=3000), rng.normal(size=3000), gridsize=15, cmap="cividis")
+axd["B"].set(title="hexbin", aspect="equal")
+axd["C"].stackplot(t, np.abs(np.sin(t / 4)), np.abs(np.cos(t / 5)), labels=["a", "b"])
+axd["C"].set(title="stackplot")
+main = axd["D"]
+main.line(t, np.sin(t))
+inset = main.inset_axes((0.55, 0.55, 0.4, 0.4))
+inset.line(t[:40], np.sin(t[:40]), color="C3")
+main.set(title="inset")
+fig.save(out / "layout.png")

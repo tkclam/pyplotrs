@@ -1,18 +1,28 @@
-"""Built-in themes: one figure per preset, shown together.
+"""The built-in themes, and deriving your own."""
 
-A theme is passed to ``subplots`` and flows to its axes (there is no global
-'current theme'). Here we render the same line in each preset.
-"""
-import math
+import os
+from pathlib import Path
+
+import numpy as np
 
 import pyplotrs as pp
 
-xs = [i * 0.2 for i in range(40)]
-ys = [math.sin(x) for x in xs]
-for name in ["default", "grayscale", "dark"]:
-    fig, ax = pp.subplots(figsize=(300, 200), theme=name)
-    ax.line(xs, ys, label="sin")
-    ax.line(xs, [y * 0.6 for y in ys], label="0.6·sin", linestyle="dashed")
-    ax.set(title=f"theme = {name}", xlabel="t", ylabel="y")
-    ax.legend()
-    fig.save(f"theme_{name}.png")
+out = Path(os.environ.get("PYPLOTRS_EXAMPLES_OUT", Path(__file__).parent / "output"))
+out.mkdir(exist_ok=True)
+
+x = np.linspace(0, 10, 200)
+custom = pp.themes.default.replace(
+    grid=True, spines=("left", "bottom", "top", "right"), tick_direction="in", title_weight="bold"
+)
+for name, theme in [
+    ("default", "default"),
+    ("dark", "dark"),
+    ("grayscale", "grayscale"),
+    ("custom", custom),
+]:
+    fig, ax = pp.subplots(theme=theme)
+    for k in range(4):
+        ax.line(x, np.sin(x + k / 2), label=f"phase {k}")
+    ax.set(title=f"{name} theme", xlabel="x", ylabel="y")
+    ax.legend("lower left", ncols=2)
+    fig.save(out / f"theme_{name}.png")
