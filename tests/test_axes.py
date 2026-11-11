@@ -6,6 +6,7 @@ import math
 import pytest
 
 import pyplotrs as pp
+from tests.conftest import decode_png, pixel
 
 
 def test_autoscale_adds_margin():
@@ -13,6 +14,20 @@ def test_autoscale_adds_margin():
     ax.line([0, 10], [0, 1])
     lo, hi = ax.get_xlim()
     assert lo == pytest.approx(-0.5) and hi == pytest.approx(10.5)
+
+
+def test_bars_take_one_color_each():
+    fig, ax = pp.subplots()
+    bars = ax.bar(["a", "b"], [1, 1], color=["red", (0, 0, 255)])
+    assert bars.color == (255, 0, 0, 255)  # the legend shows the first
+    rows = decode_png(fig.to_bytes("png", dpi=72))[2]
+    tf, y = ax._last_view.tf, ax._last_view.tf.y(0.5)
+    assert pixel(rows, round(tf.x(0)), round(y))[:3] == (255, 0, 0)
+    assert pixel(rows, round(tf.x(1)), round(y))[:3] == (0, 0, 255)
+    ax.barh([0, 1], [1, 2], color=("C0", "C1"))
+    ax.bar([0], [1], color=(0.2, 0.4, 0.6))  # one RGB color, not three
+    with pytest.raises(ValueError, match="2 colors for 3 bars"):
+        ax.bar([0, 1, 2], [1, 1, 1], color=["r", "b"])
 
 
 def test_bars_rest_on_zero():

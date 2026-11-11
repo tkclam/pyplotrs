@@ -11,6 +11,7 @@
 - `ax.bracket(x0, x1, text)` marks a comparison between groups; a p-value
   becomes stars, and brackets stack above the data automatically.
 - `ax.set(xbreak=(lo, hi))` and `ybreak` draw a broken axis.
+- `bar` and `barh` take a list of colors, one per bar.
 
 ## 0.2.0
 

@@ -87,6 +87,18 @@ class AxesBase:
             c = self.theme.color(color)
         return with_alpha(c, alpha)
 
+    def _fills(self, name: str, color: Any, n: int, alpha: float) -> tuple[RGBA, bytes | None]:
+        """One color for all ``n`` items, or a list of colors, one per item.
+
+        Returns the main color (for the legend) and the per-item RGBA bytes.
+        """
+        if not isinstance(color, (list, tuple)) or all(isinstance(v, Real) for v in color):
+            return self._color(color, alpha), None
+        if len(color) != n:
+            raise ValueError(f"{name}() got {len(color)} colors for {n} bars")
+        rgba = [self._color(c, alpha) for c in color]
+        return rgba[0], b"".join(bytes(c) for c in rgba)
+
     def _add(self, artist: Any, label: Any = None, zorder: float = 0.0) -> Any:
         artist.label = None if label is None else as_label(label)
         artist.zorder = float(zorder)
@@ -468,29 +480,34 @@ class Axes(AxesBase):
         *,
         width: float = 0.6,
         bottom: Any = 0.0,
-        color: Color = None,
+        color: Color | Sequence[ColorLike] = None,
         edgecolor: Color = None,
         hatch: str | None = None,
         alpha: float = 1.0,
         label: Label | None = None,
         zorder: float = 0.0,
     ) -> Rects:
-        """Vertical bars. ``x`` may be category names. ``width`` is in data units."""
+        """Vertical bars. ``x`` may be category names. ``width`` is in data units.
+
+        ``color`` is one color, or a list with one color per bar.
+        """
         xs = self._coords(x, "x")
         n = len(xs)
         h = data.full(height, n)
         b = data.full(bottom, n)
         hw = width / 2
+        fill, fills = self._fills("bar", color, n, alpha)
         return self._add(
             Rects(
                 data.f64([v - hw for v in xs]),
                 b,
                 data.f64([v + hw for v in xs]),
                 data.f64([p + q for p, q in zip(b, h, strict=True)]),
-                self._color(color, alpha),
+                fill,
                 None if edgecolor is None else self.theme.color(edgecolor),
                 0.75,
                 hatch,
+                fills,
                 sticky_y=sorted(set(b)) if _scalar_or_array(bottom) else [],
             ),
             label,
@@ -504,29 +521,32 @@ class Axes(AxesBase):
         *,
         height: float = 0.6,
         left: Any = 0.0,
-        color: Color = None,
+        color: Color | Sequence[ColorLike] = None,
         edgecolor: Color = None,
         hatch: str | None = None,
         alpha: float = 1.0,
         label: Label | None = None,
         zorder: float = 0.0,
     ) -> Rects:
-        """Horizontal bars. ``y`` may be category names."""
+        """Horizontal bars. ``y`` may be category names. ``color`` is one color,
+        or a list with one color per bar."""
         ys = self._coords(y, "y")
         n = len(ys)
         w = data.full(width, n)
         lft = data.full(left, n)
         hh = height / 2
+        fill, fills = self._fills("barh", color, n, alpha)
         return self._add(
             Rects(
                 lft,
                 data.f64([v - hh for v in ys]),
                 data.f64([p + q for p, q in zip(lft, w, strict=True)]),
                 data.f64([v + hh for v in ys]),
-                self._color(color, alpha),
+                fill,
                 None if edgecolor is None else self.theme.color(edgecolor),
                 0.75,
                 hatch,
+                fills,
                 sticky_x=sorted(set(lft)) if _scalar_or_array(left) else [],
             ),
             label,
